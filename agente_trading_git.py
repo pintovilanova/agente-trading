@@ -88,9 +88,9 @@ def analisar_com_ia(dados_mercado):
     for tentativa in range(tentativas):
         try:
             resposta = client.models.generate_content(
-                model='gemini-3.6-flash',
-                contents=prompt_completo
-            )
+        model='gemini-2.5-flash',  # Mudar de 3.6-flash para um modelo com maior estabilidade de infraestrutura
+        contents=prompt_completo
+    )
             return resposta.text
         except Exception as e:
             print(f"Tentativa {tentativa + 1} falhou devido a tráfego na API: {e}")
