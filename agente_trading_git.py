@@ -77,6 +77,7 @@ def analisar_com_ia(dados_mercado):
        - Take-Profit = Preço de Entrada + (Risco * 1.2).
        - Break-Even = Ponto intermédio exato entre Entrada e Take-Profit.
        - Quantidade (Qtd) = Apresenta o valor exato extraído dos dados originais.
+    5. OBRIGATÓRIO: Em cada um dos 3 melhores ativos apresentados, inclui obrigatoriamente no final a linha do "comboio" de dados original correspondente, para servir de referência técnica.
     
     Sê direto, apresenta listas claras e extrai os valores exatos gerados. Não assumas fundamentais da empresa.
     """
