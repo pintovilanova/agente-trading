@@ -87,8 +87,8 @@ def analisar_com_ia(dados_mercado):
     tentativas = 3
     for tentativa in range(tentativas):
         try:
-            resposta = client.models.generate_content(
-        model='gemini-2.5-flash',  # Mudar de 3.6-flash para um modelo com maior estabilidade de infraestrutura
+           resposta = client.models.generate_content(
+        model='gemini-3.6-flash',  # O modelo oficial atualizado
         contents=prompt_completo
     )
             return resposta.text
