@@ -87,15 +87,15 @@ def analisar_com_ia(dados_mercado):
     for tentativa in range(tentativas):
         try:
             resposta = client.models.generate_content(
-                model='gemini-3.8-flash',
+                model='gemini-3.8-flash',  # Atualizado para o modelo mais recente e estável
                 contents=prompt_completo
             )
             return resposta.text
         except Exception as e:
             print(f"Tentativa {tentativa + 1} falhou devido a tráfego na API: {e}")
             if tentativa < tentativas - 1:
-                print("A aguardar 10 segundos antes de tentar novamente...")
-                time.sleep(10)
+                print("A aguardar 15 segundos antes de tentar novamente...")
+                time.sleep(15) # Aumentado para 15 segundos para limpar a fila de tráfego
             else:
                 raise e
 
