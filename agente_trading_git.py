@@ -60,6 +60,8 @@ def extrair_dados_do_email():
 # ==========================================
 # 3. O CÉREBRO: INVOCAR A IA COM O PROMPT
 # ==========================================
+import time # Certifica-te que importas o time no topo se necessário
+
 def analisar_com_ia(dados_mercado):
     print("A enviar lista para análise tática do Gemini...")
     
@@ -81,12 +83,22 @@ def analisar_com_ia(dados_mercado):
     
     prompt_completo = f"{prompt_sistema}\n\nAqui estão os ativos enviados pelo Excel:\n{dados_mercado}"
     
-    resposta = client.models.generate_content(
-        model='gemini-3.6-flash',
-        contents=prompt_completo
-    )
-    
-    return resposta.text
+    # Tentativas automáticas em caso de erro 503 da Google
+    tentativas = 3
+    for tentativa in range(tentativas):
+        try:
+            resposta = client.models.generate_content(
+                model='gemini-3.6-flash',
+                contents=prompt_completo
+            )
+            return resposta.text
+        except Exception as e:
+            print(f"Tentativa {tentativa + 1} falhou devido a tráfego na API: {e}")
+            if tentativa < tentativas - 1:
+                print("A aguardar 10 segundos antes de tentar novamente...")
+                time.sleep(10)
+            else:
+                raise e
 
 # ==========================================
 # 4. ENVIAR O RELATÓRIO DE VOLTA POR EMAIL
