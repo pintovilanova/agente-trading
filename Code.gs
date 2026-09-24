@@ -1762,6 +1762,7 @@ function verificarEEnviarParaAgente() {
   } else {
     console.log("Erro: Não há linhas preenchidas na coluna S para enviar.");
   }
+  dispararAgenteGitHubViaAPI();
 }
 function ligarProcessarTudo() {
   var sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName("Configs"); // Nome da aba visível na imagem
@@ -1799,7 +1800,7 @@ function instalarPipelineCompleto() {
     "processarLoteItemsShort", 
     "verificarEEnviarParaAgente", 
     "resetConfigProcessarLote",
-    "prepararExecucaoExata" // <- Adicionado o preparador do Intraday
+    "prepararExecucaoExata"
   ];
   
   var triggers = ScriptApp.getProjectTriggers();
@@ -1828,15 +1829,17 @@ function instalarPipelineCompleto() {
     .timeBased().everyDays(1).atHour(1).nearMinute(8).inTimezone(tz).create();
     
   // =========================================================================
-  // CORREÇÃO AQUI: O processador de Lotes corre a cada 15 minutos continuamente!
-  // (Só processa ativos das 01:05 às 06:00 porque a aba Configs bloqueia o resto do dia)
+  // PROCESSADOR CONTÍNUO: Corre a cada 15 minutos até bater nas 06:00
   // =========================================================================
   ScriptApp.newTrigger("processarLoteItemsShort")
     .timeBased().everyMinutes(15).create();
     
-  // 05:30 - Verificar e enviar o email consolidado para o agente de IA
+  // =========================================================================
+  // GATILHO DA INTELIGÊNCIA ARTIFICIAL E GITHUB ACTIONS
+  // TÁTICA ANTI-TRÁFEGO: Alterado das 05h30 para as 05h45 (minuto quebrado)
+  // =========================================================================
   ScriptApp.newTrigger("verificarEEnviarParaAgente")
-    .timeBased().everyDays(1).atHour(5).nearMinute(30).inTimezone(tz).create();
+    .timeBased().everyDays(1).atHour(5).nearMinute(45).inTimezone(tz).create();
     
   // 06:00 - Fazer o reset final das flags de configuração para fechar o ciclo da manhã
   // ISTO ATUA COMO "KILL SWITCH" PARA O TRIGGER DE 15 EM 15 MINUTOS
@@ -1848,25 +1851,46 @@ function instalarPipelineCompleto() {
   ScriptApp.newTrigger("prepararExecucaoExata")
     .timeBased().everyDays(1).atHour(8).nearMinute(0).inTimezone(tz).create();
     
-  Logger.log("Pipeline completo (Noturno, Matinal e Intraday) instalado com sucesso!");
+  Logger.log("Pipeline completo atualizado e instalado com sucesso! A fugir à hora de ponta.");
 }
-function ligarGatilhoCheckbox() {
-  var nomeFuncao = "aoEditarCheckbox";
+function guardarTokenGitHub() {
+  PropertiesService.getScriptProperties().setProperty("GITHUB_PAT", "AQUI O GIT TOKEN");
+}
+function dispararAgenteGitHubViaAPI() {
+  var owner = "pintovilanova";       // Substitui pelo teu nome de utilizador no GitHub
+  var repo = "agente-trading";              // O nome exato do teu repositório
   
-  // 1. Limpa o gatilho antigo se ele existir, para evitar que corra duas vezes
-  var triggers = ScriptApp.getProjectTriggers();
-  for (var i = 0; i < triggers.length; i++) {
-    if (triggers[i].getHandlerFunction() === nomeFuncao) {
-      ScriptApp.deleteTrigger(triggers[i]);
-    }
+  // Lê o token guardado no passo anterior
+  var token = PropertiesService.getScriptProperties().getProperty("GITHUB_PAT");
+  
+  if (!token) {
+    Logger.log("Erro: Token do GitHub não encontrado nas propriedades.");
+    return;
   }
   
-  // 2. Cria o novo gatilho oficial "Ao Editar"
-  var sheet = SpreadsheetApp.getActive();
-  ScriptApp.newTrigger(nomeFuncao)
-    .forSpreadsheet(sheet)
-    .onEdit()
-    .create();
-    
-  Logger.log("Gatilho manual da Checkbox reativado com sucesso!");
+  var url = "https://api.github.com/repos/" + owner + "/" + repo + "/actions/workflows/agente.yml/dispatches";
+  
+  var payload = {
+    "ref": "main" // Confirma se a tua branch principal se chama "main" ou "master"
+  };
+  
+  var options = {
+    "method": "post",
+    "headers": {
+      "Authorization": "Bearer " + token,
+      "Accept": "vnd.github+json",
+      "X-GitHub-Api-Version": "2022-11-28"
+    },
+    "payload": JSON.stringify(payload),
+    "muteHttpExceptions": true
+  };
+  
+  var response = UrlFetchApp.fetch(url, options);
+  var respostaCodigo = response.getResponseCode();
+  
+  if (respostaCodigo === 204) {
+    Logger.log("Sucesso! O GitHub Actions foi acionado com sucesso via API.");
+  } else {
+    Logger.log("Erro ao acionar o GitHub (" + respostaCodigo + "): " + response.getContentText());
+  }
 }
