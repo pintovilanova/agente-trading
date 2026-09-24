@@ -3,7 +3,7 @@ name: Agente Tático de Trading
 on:
   workflow_dispatch:  # Permite chamadas manuais e via API REST
   schedule:
-    - cron: '45 4 * * *' # Podes manter como plano de fundo, se quiseres
+    - cron: '45 5 * * *' # Podes manter como plano de fundo, se quiseres
 
 jobs:
   executar-agente:
