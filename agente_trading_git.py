@@ -96,7 +96,7 @@ def analisar_com_ia(dados_mercado):
     for tentativa in range(tentativas):
         try:
             resposta = client.models.generate_content(
-                model='gemini-1.5-flash', # Sugestão: Ajustado para o nome oficial atual, mas podes manter o teu se for intencional
+                model='gemini-3.6-flash', # Sugestão: Ajustado para o nome oficial atual, mas podes manter o teu se for intencional
                 contents=prompt_completo
             )
             return resposta.text
