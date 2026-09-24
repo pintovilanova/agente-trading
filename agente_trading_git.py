@@ -87,20 +87,14 @@ def analisar_com_ia(dados_mercado):
     
     prompt_completo = f"{prompt_sistema}\n\nAqui estão os ativos enviados pelo Excel:\n{dados_mercado}"
     
-    # Sistema de Retry, Proteção de Tráfego e Fallback de Modelo
-    tentativas = 5
-    espera_base = 15
-    modelo_alvo = 'gemini-3.6-flash'
+    # Sistema de Retry e Proteção
+    tentativas = 4
+    espera_base = 20
 
     for tentativa in range(tentativas):
         try:
-            # A partir da 4ª tentativa, muda de servidor/modelo para tentar contornar o bloqueio
-            if tentativa == 3:
-                print("Tráfego persistente no Flash. A mudar para gemini-3.6-pro (Plano B)...")
-                modelo_alvo = 'gemini-3.6-pro'
-
             resposta = client.models.generate_content(
-                model=modelo_alvo,
+                model='gemini-3.6-flash',
                 contents=prompt_completo
             )
             return resposta.text
@@ -110,10 +104,10 @@ def analisar_com_ia(dados_mercado):
             print(f"Tentativa {tentativa + 1} falhou: {erro_str}")
             
             if tentativa < tentativas - 1:
-                # Se for erro 503 (Servidores cheios) ou 429 (Too many requests)
+                # Se for erro 503 (Servidores cheios) ou 429 (Too many requests/Quota Esgotada)
                 if "503" in erro_str or "UNAVAILABLE" in erro_str or "429" in erro_str:
                     tempo_espera = espera_base * (2 ** tentativa)
-                    print(f"Tráfego elevado. A aguardar {tempo_espera} segundos antes de tentar novamente...")
+                    print(f"Bloqueio de API. A aguardar {tempo_espera} segundos antes de tentar novamente...")
                     time.sleep(tempo_espera)
                 else:
                     print("Erro estrutural. A abortar imediatamente.")
