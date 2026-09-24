@@ -87,14 +87,20 @@ def analisar_com_ia(dados_mercado):
     
     prompt_completo = f"{prompt_sistema}\n\nAqui estão os ativos enviados pelo Excel:\n{dados_mercado}"
     
-    # NOVAS CONFIGURAÇÕES DE PROTEÇÃO
-    tentativas = 5       # Aumentamos para 5 tentativas
-    espera_base = 15     # Segundos base
+    # Sistema de Retry, Proteção de Tráfego e Fallback de Modelo
+    tentativas = 5
+    espera_base = 15
+    modelo_alvo = 'gemini-3.6-flash'
 
     for tentativa in range(tentativas):
         try:
+            # A partir da 4ª tentativa, muda de servidor/modelo para tentar contornar o bloqueio
+            if tentativa == 3:
+                print("Tráfego persistente no Flash. A mudar para gemini-3.6-pro (Plano B)...")
+                modelo_alvo = 'gemini-3.6-pro'
+
             resposta = client.models.generate_content(
-                model='gemini-3.6-flash',  # Mantém o teu modelo
+                model=modelo_alvo,
                 contents=prompt_completo
             )
             return resposta.text
@@ -106,16 +112,13 @@ def analisar_com_ia(dados_mercado):
             if tentativa < tentativas - 1:
                 # Se for erro 503 (Servidores cheios) ou 429 (Too many requests)
                 if "503" in erro_str or "UNAVAILABLE" in erro_str or "429" in erro_str:
-                    # Backoff Exponencial: 15s -> 30s -> 60s -> 120s
                     tempo_espera = espera_base * (2 ** tentativa)
-                    print(f"Servidores da Google sobrecarregados. A aguardar {tempo_espera} segundos antes de tentar novamente...")
+                    print(f"Tráfego elevado. A aguardar {tempo_espera} segundos antes de tentar novamente...")
                     time.sleep(tempo_espera)
                 else:
-                    # Se for um erro crítico (ex: API key inválida), não vale a pena esperar
-                    print("Erro não relacionado com tráfego. A abortar imediatamente.")
+                    print("Erro estrutural. A abortar imediatamente.")
                     raise e
             else:
-                print("Todas as tentativas falharam. Os servidores não recuperaram a tempo.")
                 raise e
 
 # ==========================================
