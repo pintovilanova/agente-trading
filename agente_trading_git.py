@@ -88,9 +88,9 @@ def analisar_com_ia(dados_mercado):
     
     prompt_completo = f"{prompt_sistema}\n\nAqui estão os ativos enviados pelo Excel:\n{dados_mercado}"
     
-    # Sistema de Retry e Proteção
-    tentativas = 4
-    espera_base = 20
+    # Sistema de Retry Extremo (Blindagem contra Picos de Tráfego 503)
+    tentativas = 6  # Aumentado para 6 tentativas
+    espera_base = 15
 
     for tentativa in range(tentativas):
         try:
@@ -105,15 +105,16 @@ def analisar_com_ia(dados_mercado):
             print(f"Tentativa {tentativa + 1} falhou: {erro_str}")
             
             if tentativa < tentativas - 1:
-                # Se for erro 503 (Servidores cheios) ou 429 (Too many requests/Quota Esgotada)
                 if "503" in erro_str or "UNAVAILABLE" in erro_str or "429" in erro_str:
+                    # O tempo de espera vai escalar: 15s -> 30s -> 60s -> 120s -> 240s
                     tempo_espera = espera_base * (2 ** tentativa)
-                    print(f"Bloqueio de API. A aguardar {tempo_espera} segundos antes de tentar novamente...")
+                    print(f"Bloqueio de API ou Servidores Cheios. A aguardar {tempo_espera} segundos antes de tentar novamente...")
                     time.sleep(tempo_espera)
                 else:
                     print("Erro estrutural. A abortar imediatamente.")
                     raise e
             else:
+                print("Todas as tentativas esgotadas. Falha crítica de tráfego.")
                 raise e
 
 # ==========================================
