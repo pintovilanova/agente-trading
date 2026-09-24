@@ -1827,15 +1827,19 @@ function instalarPipelineCompleto() {
   ScriptApp.newTrigger("ativarEnviarRelatorioIA")
     .timeBased().everyDays(1).atHour(1).nearMinute(8).inTimezone(tz).create();
     
-  // 01:15 - Iniciar o processamento em lote dos stocks
+  // =========================================================================
+  // CORREÇÃO AQUI: O processador de Lotes corre a cada 15 minutos continuamente!
+  // (Só processa ativos das 01:05 às 06:00 porque a aba Configs bloqueia o resto do dia)
+  // =========================================================================
   ScriptApp.newTrigger("processarLoteItemsShort")
-    .timeBased().everyDays(1).atHour(1).nearMinute(15).inTimezone(tz).create();
+    .timeBased().everyMinutes(15).create();
     
-  // 05:30 - Verificar e enviar o email consolidado para o GitHub Actions
+  // 05:30 - Verificar e enviar o email consolidado para o agente de IA
   ScriptApp.newTrigger("verificarEEnviarParaAgente")
     .timeBased().everyDays(1).atHour(5).nearMinute(30).inTimezone(tz).create();
     
   // 06:00 - Fazer o reset final das flags de configuração para fechar o ciclo da manhã
+  // ISTO ATUA COMO "KILL SWITCH" PARA O TRIGGER DE 15 EM 15 MINUTOS
   ScriptApp.newTrigger("resetConfigProcessarLote")
     .timeBased().everyDays(1).atHour(6).nearMinute(0).inTimezone(tz).create();
     
@@ -1845,4 +1849,24 @@ function instalarPipelineCompleto() {
     .timeBased().everyDays(1).atHour(8).nearMinute(0).inTimezone(tz).create();
     
   Logger.log("Pipeline completo (Noturno, Matinal e Intraday) instalado com sucesso!");
+}
+function ligarGatilhoCheckbox() {
+  var nomeFuncao = "aoEditarCheckbox";
+  
+  // 1. Limpa o gatilho antigo se ele existir, para evitar que corra duas vezes
+  var triggers = ScriptApp.getProjectTriggers();
+  for (var i = 0; i < triggers.length; i++) {
+    if (triggers[i].getHandlerFunction() === nomeFuncao) {
+      ScriptApp.deleteTrigger(triggers[i]);
+    }
+  }
+  
+  // 2. Cria o novo gatilho oficial "Ao Editar"
+  var sheet = SpreadsheetApp.getActive();
+  ScriptApp.newTrigger(nomeFuncao)
+    .forSpreadsheet(sheet)
+    .onEdit()
+    .create();
+    
+  Logger.log("Gatilho manual da Checkbox reativado com sucesso!");
 }
