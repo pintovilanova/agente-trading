@@ -89,13 +89,14 @@ def analisar_com_ia(dados_mercado):
     prompt_completo = f"{prompt_sistema}\n\nAqui estão os ativos enviados pelo Excel:\n{dados_mercado}"
     
     # Sistema de Retry Extremo (Blindagem contra Picos de Tráfego 503)
-    tentativas = 6  # Aumentado para 6 tentativas
+    tentativas = 10  # Aumentado para 10 tentativas (aguenta picos de ~25 minutos)
     espera_base = 15
+    espera_maxima = 300  # Limite máximo de espera por tentativa (5 minutos)
 
     for tentativa in range(tentativas):
         try:
             resposta = client.models.generate_content(
-                model='gemini-3.6-flash',
+                model='gemini-1.5-flash', # Sugestão: Ajustado para o nome oficial atual, mas podes manter o teu se for intencional
                 contents=prompt_completo
             )
             return resposta.text
@@ -106,8 +107,13 @@ def analisar_com_ia(dados_mercado):
             
             if tentativa < tentativas - 1:
                 if "503" in erro_str or "UNAVAILABLE" in erro_str or "429" in erro_str:
-                    # O tempo de espera vai escalar: 15s -> 30s -> 60s -> 120s -> 240s
+                    # O tempo de espera vai escalar: 15s -> 30s -> 60s -> 120s -> 240s...
                     tempo_espera = espera_base * (2 ** tentativa)
+                    
+                    # Garante que a espera não ultrapassa os 5 minutos definidos no limite
+                    if tempo_espera > espera_maxima:
+                        tempo_espera = espera_maxima
+                        
                     print(f"Bloqueio de API ou Servidores Cheios. A aguardar {tempo_espera} segundos antes de tentar novamente...")
                     time.sleep(tempo_espera)
                 else:
