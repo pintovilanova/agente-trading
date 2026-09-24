@@ -71,12 +71,14 @@ def analisar_com_ia(dados_mercado):
     Missão:
     1. Lê a lista de ativos gerada pelo Excel.
     2. Destaca os 3 melhores (priorizando Força Consolidada, Alerta Iminente, ADX > 25, RVOL > 1 e RSI > 50).
-    3. Alerta para os que devem ser evitados (RSI fraco ou Momentum muito negativo).
-    4. Para os 3 melhores, extrai a dimensão da posição e calcula os alvos exatos considerando:
-       - Risco = Preço Atual - Stop Loss.
-       - Take-Profit = Preço de Entrada + (Risco * 1.2).
-       - Break-Even = Ponto intermédio exato entre Entrada e Take-Profit.
-       - Quantidade (Qtd) = Apresenta o valor exato extraído dos dados originais.
+    3. Alerta e exclui imediatamente das recomendações qualquer ativo com setup armado que apresente Momentum inferior a 0 ou RSI fraco.
+    4. Para os 3 melhores, NÃO faças cálculos matemáticos. É estritamente proibido recalcular alvos. Extrai e lista os seguintes valores EXATOS fornecidos na string de dados:
+       - Entrada
+       - Stop
+       - Take-Profit
+       - Break-Even
+       - Trailing
+       - Quantidade (Qtd)
     5. OBRIGATÓRIO: Em cada um dos 3 melhores ativos apresentados, inclui obrigatoriamente no final a linha do "comboio" de dados original correspondente, para servir de referência técnica.
     
     Sê direto, apresenta listas claras e extrai os valores exatos gerados. Não assumas fundamentais da empresa.
