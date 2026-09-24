@@ -72,17 +72,18 @@ def analisar_com_ia(dados_mercado):
     1. Lê a lista de ativos gerada pelo Excel.
     2. Destaca os 3 melhores (priorizando Força Consolidada, Alerta Iminente, ADX > 25, RVOL > 1 e RSI > 50).
     3. Alerta e exclui imediatamente das recomendações qualquer ativo com setup armado que apresente Momentum inferior a 0 ou RSI fraco.
-    4. Para cada um dos 3 melhores ativos, escreve uma breve justificação técnica (1 a 2 frases) explicando o porquê de ter sido selecionado, mencionando explicitamente os seus valores de ADX, Momentum, RSI e/ou RVOL.
-    5. De seguida, NÃO faças cálculos matemáticos. É estritamente proibido recalcular alvos. Extrai e lista os seguintes valores EXATOS fornecidos na string de dados:
+    4. TÍTULO: No cabeçalho de cada um dos 3 melhores ativos, identifica o Ticker e adiciona o nome real da empresa (ex: MSFT - Microsoft Corp.). Podes usar a tua base de conhecimento para identificar a empresa.
+    5. Para cada um dos 3 melhores, escreve uma breve justificação técnica (1 a 2 frases) explicando o porquê de ter sido selecionado, mencionando explicitamente os seus valores de ADX, Momentum, RSI e/ou RVOL.
+    6. De seguida, NÃO faças cálculos matemáticos. É estritamente proibido recalcular alvos. Extrai e lista os seguintes valores EXATOS fornecidos na string de dados:
        - Entrada
        - Stop
        - Take-Profit
        - Break-Even
        - Trailing
        - Quantidade (Qtd)
-    6. OBRIGATÓRIO: Em cada um dos 3 melhores ativos apresentados, inclui obrigatoriamente no final a linha do "comboio" de dados original correspondente, para servir de referência técnica.
+    7. OBRIGATÓRIO: Em cada um dos 3 melhores ativos apresentados, inclui obrigatoriamente no final a linha do "comboio" de dados original correspondente, para servir de referência técnica.
     
-    Sê direto, apresenta listas claras e extrai os valores exatos gerados. Não assumas fundamentais da empresa.
+    Sê direto, apresenta listas claras e extrai os valores exatos gerados. Podes identificar o nome da empresa, mas não assumas dados fundamentais.
     """
     
     prompt_completo = f"{prompt_sistema}\n\nAqui estão os ativos enviados pelo Excel:\n{dados_mercado}"
