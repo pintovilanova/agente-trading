@@ -17,7 +17,7 @@ for ticker in tickers:
         if isinstance(df.columns, pd.MultiIndex):
             df.columns = df.columns.droplevel(1)
 
-        # 3. O Cérebro Matemático (pandas-ta)
+        
         # 3. O Cérebro Matemático (pandas-ta)
         df.ta.rsi(length=14, append=True)
         df.ta.adx(length=14, append=True)
@@ -39,7 +39,7 @@ for ticker in tickers:
             "ADX": round(ultimo_dia['ADX_14'], 2),
             "ATR": round(ultimo_dia['ATRr_14'], 2),
             "SMA200": round(ultimo_dia['SMA_200'], 2),
-            "Momentum": round(ultimo_dia['MOM_10'], 2), # Atualizado aqui
+            "Momentum": round(ultimo_dia['MOM_14'], 2), # Atualizado para 14
             "RVOL": round(ultimo_dia['RVOL'], 2)
         }
         resultados.append(dados_ativos)
