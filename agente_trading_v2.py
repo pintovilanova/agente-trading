@@ -266,27 +266,32 @@ if resultados_para_sheets and WEBHOOK_URL:
 # ===================================================================
 print("\nA construir o bloco unificado (Prompt + Comboio) para o email...")
 
-# Prompt blindado - MODO GESTOR DE RISCO IMPLACÁVEL
-prompt_sistema_embutido = """MODO DIÁRIO ATIVO - GESTOR DE RISCO IMPLACÁVEL: Avalia os seguintes ativos da minha watchlist.
-Contexto: O mercado recente tem registado um elevado número de falsos breakouts e quebras de momentum (ativos "sem fogo" após a entrada). A tua missão principal é PROTEGER O CAPITAL, desconfiar dos sinais do motor matemático e expor ativamente o risco de cada trade.
+# Prompt blindado - MODO PREDADOR E GESTOR DE RISCO IMPLACÁVEL
+prompt_sistema_embutido = """MODO DIÁRIO ATIVO - PREDADOR DE BREAKOUTS: Avalia os seguintes ativos da minha watchlist.
+Contexto: O mercado recente está armadilhado com falsos breakouts. A tua missão é PROTEGER O CAPITAL, desconfiar do motor matemático e expor ativamente o risco de cada trade, priorizando apenas os arranques com força institucional real.
 
-Regras Operacionais Estritas de Seleção e Avaliação:
+Regras Operacionais Estritas de Triagem e Ataque:
 
-1. FILTRO CÉTICO INICIAL: Analisa apenas os ativos marcados como 'Forca Consolidada' ou 'Alerta Iminente'. Se todos os ativos da lista apresentarem sinais de fraqueza (ADX < 25, Momentum baixo, RVOL fraco), REJEITA TODAS AS TRADES e inicia o e-mail com: [MERCADO CHOPPY - FICA DE FORA HOJE].
+1. FILTRO CÉTICO INICIAL: Analisa apenas ativos com 'Forca Consolidada' ou 'Alerta Iminente'. Se o panorama geral for fraco (maioria com ADX < 25 e RVOL baixo), REJEITA TUDO e inicia o e-mail com: [MERCADO CHOPPY - FICA DE FORA HOJE].
 
-2. OS 3 MELHORES (SE EXISTIREM): Seleciona um máximo de 3 ativos que realmente justifiquem o risco. TÍTULO: [Ticker] - [Nome da Empresa].
+2. OS 3 MELHORES ALVOS: Se existirem oportunidades reais, foca-te num máximo de 3. TÍTULO: [Ticker] - [Nome da Empresa].
 
-3. ANÁLISE DE VULNERABILIDADE (CRÍTICO):
-   Para cada ativo escolhido, analisa obrigatoriamente e expõe as fraquezas cruzando estes dados:
-   - REGRA DA MOLA (MM20): Se a 'Dist MM20' for > 2.5%, coloca [AVISO: PREÇO ESTICADO] e explica que o risco de regressão à média (pullback) é alto.
-   - DIVERGÊNCIA DE FORÇA: Se o RSI estiver acima de 70, mas o Momentum for baixo (< 1.0) ou o RVOL estiver muito no limite (< 1.3), coloca [AVISO DE EXAUSTÃO] e explica que o ativo está a ficar sem combustível para o breakout.
-   - RECOMENDAÇÃO TÁTICA: Com base nestes dados, sugere explicitamente se devo usar a "Lotação Completa" ou "Cortar a Posição a Metade" para reduzir a exposição.
+3. ANÁLISE DE VULNERABILIDADE E POTENCIAL (CRÍTICO):
+   Para cada alvo, cruza os dados e aplica as seguintes bandeiras táticas:
+   - REGRA DA MOLA (MM20): Se 'Dist MM20' > 2.5%, alerta [AVISO: PREÇO ESTICADO - Risco de Pullback].
+   - COMPRESSÃO (ATR vs RVOL): Se o RVOL for > 1.5 e o Momentum for sólido, marca como [POTENCIAL DE COMPRESSÃO] (alta prioridade).
+   - EXAUSTÃO: Se o RSI for > 70 mas o Momentum for baixo (< 1.0) ou RVOL < 1.3, alerta [AVISO DE EXAUSTÃO - Sem Combustível].
+   - RECOMENDAÇÃO DE LOTE: Com base no exposto, dita se a entrada deve ser de "Lote Completo" ou "Lote Reduzido a 50%".
 
-4. EXTRACÇÃO EXATA E INALTERADA: Lista os valores EXATOS fornecidos na string de dados sem qualquer arredondamento (Entrada, Stop, Take-Profit, Break-Even, Trailing, Qtd).
+4. TÁTICA DE EXECUÇÃO:
+   - GAPS DE ABERTURA: Lembra sempre o trader com a frase "Se a ação abrir em Gap > 1% acima da entrada prevista, ABORTA A MISSÃO, não persigas o preço."
+   - GESTÃO DE LUCRO: Se o ADX for > 35, instrui: "[TENDÊNCIA EXTREMA] Ignora o TP, gere pelo Trailing Stop". Se ADX < 30, instrui: "[TENDÊNCIA MODERADA] Respeita o Take-Profit fixo."
 
-5. REFERÊNCIA OBRIGATÓRIA: Cola a linha original do 'comboio' de dados correspondente abaixo de cada ativo.
+5. EXTRACÇÃO EXATA (INTOCÁVEL): Lista os valores EXATOS fornecidos (Entrada, Stop, Take-Profit, Break-Even, Trailing, Qtd). NUNCA recalcules ou modifiques estes números.
 
-6. LEITURA DO MERCADO GERAL: Conclui o e-mail com uma breve observação de 1 frase sobre a saúde geral da lista de ativos (ex: "70% da watchlist está morta com ADX abaixo de 20, o dinheiro institucional está fora do mercado").
+6. REFERÊNCIA: Cola a linha original do 'comboio' de dados correspondente abaixo de cada ativo.
+
+7. SAÚDE DO MERCADO: Termina o email com o estado clínico do mercado ("Ex: 80% das ações a 'Observar', dinheiro institucional a lateralizar").
 """
 
 # Monta o corpo unificado do email
