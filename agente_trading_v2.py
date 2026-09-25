@@ -11,23 +11,23 @@ import sys
 WEBHOOK_URL = os.environ.get('WEBHOOK_URL')
 
 # ===================================================================
-# 0.1. BUSCAR A WATCHLIST DINAMICAMENTE DO GOOGLE SHEETS (Coluna E)
+# 0.1. BUSCAR A WATCHLIST E NOMES DINAMICAMENTE (Colunas E e F)
 # ===================================================================
-print("A carregar a Watchlist a partir do Google Sheets (Analise Compra - Coluna E)...")
+print("A carregar a Watchlist a partir do Google Sheets (Analise Compra)...")
 try:
     resposta_tickers = requests.get(WEBHOOK_URL)
     if resposta_tickers.status_code == 200:
-        tickers = resposta_tickers.json()
-        if isinstance(tickers, list) and len(tickers) > 0:
-            print(f"[SUCESSO] {len(tickers)} tickers carregados da folha de cálculo: {tickers[:5]}... (e outros)")
+        ativos_data = resposta_tickers.json()
+        if isinstance(ativos_data, list) and len(ativos_data) > 0:
+            print(f"[SUCESSO] {len(ativos_data)} ativos carregados (com nomes).")
         else:
-            print("[ERRO] A lista de tickers veio vazia ou num formato inválido.")
+            print("[ERRO] A lista de ativos veio vazia.")
             sys.exit(1)
     else:
-        print(f"[ERRO] Falha ao descarregar watchlist. Servidor respondeu: {resposta_tickers.status_code}")
+        print(f"[ERRO] Falha ao descarregar watchlist: {resposta_tickers.status_code}")
         sys.exit(1)
 except Exception as e:
-    print(f"[ERRO CRÍTICO] Não foi possível ler os tickers da folha: {e}")
+    print(f"[ERRO CRÍTICO] Falha de comunicação com Sheets: {e}")
     sys.exit(1)
 
 # ===================================================================
@@ -57,7 +57,7 @@ try:
         print(f"[BLOQUEIO] SPY em Baixa: Preço ({preco_spy:.2f}) abaixo da SMA200 ({sma200_spy:.2f}). Execução abortada.")
         sys.exit(0)
         
-    print("[OK] SPY Saudável. A iniciar extração de ativos...\n")
+    print("[OK] SPY Saudável. A iniciar extração...\n")
 except Exception as e:
     print(f"Erro na validação do SPY: {e}")
 
@@ -66,14 +66,16 @@ risco_maximo_dolares = 25.00
 multiplicador_trailing_ts = 1.5
 racio_tp_base = 1.2
 
-resultados = []
 resultados_para_sheets = []
 comboio_ia = []
 
 # ===================================================================
-# 3. MOTOR MATEMÁTICO V2 E GUILHOTINA (Para todos os Tickers dinâmicos)
+# 3. MOTOR MATEMÁTICO V2 (Para todos os Ativos)
 # ===================================================================
-for ticker in tickers:
+for ativo_info in ativos_data:
+    ticker = ativo_info.get("ticker")
+    nome_empresa = ativo_info.get("nome", "N/A")
+    
     try:
         df = yf.download(ticker, period="2y", interval="1d", progress=False)
         if df.empty:
@@ -121,7 +123,6 @@ for ticker in tickers:
         preco_caiu_hoje = preco < preco_anterior
         volume_despejo = rvol > 1.20
 
-        # --- A LEI DA GUILHOTINA ---
         if (preco_caiu_hoje and volume_despejo) or (momentum < -3.00):
             recomendacao = "Observar"
         elif var_perc > 0 and adx < 20:
@@ -137,32 +138,27 @@ for ticker in tickers:
             preco_entrada = preco - (atr * 0.2)
             multiplicador_atr = 1.2
 
-        # --- GESTÃO DE RISCO ---
         if recomendacao != "Observar" and preco_entrada != "N/A":
             preco_stop_calc = preco_entrada - (atr * multiplicador_atr)
             preco_stop = round(preco_stop_calc, 2)
-            
             risco_por_acao = preco_entrada - preco_stop_calc
             
             if risco_por_acao > 0:
                 risco_alocado = risco_maximo_dolares
                 if rvol >= 3.00: risco_alocado += (risco_maximo_dolares * 0.5)
                 if adx >= 35.00: risco_alocado += (risco_maximo_dolares * 0.5)
-                    
                 tp_calc = preco_entrada + (risco_por_acao * racio_tp_base)
                 preco_tp = round(tp_calc, 2)
-                
                 qtd_acoes = round(risco_alocado / risco_por_acao, 2)
-                
                 dist_tp = preco_tp - preco_entrada
                 preco_be = round(preco_entrada + (dist_tp / 2), 2)
                 
             trailing_calculado = preco - (atr * multiplicador_trailing_ts)
             trailing_final = round(max(trailing_calculado, preco_stop_calc), 2)
 
-        # Linha para a folha de cálculo ("Análise Compra V2")
+        # Linha Sheets (ADICIONÁMOS O NOME DA EMPRESA NA COLUNA B)
         linha_sheets = [
-            ticker, 
+            ticker, nome_empresa, # <--- Nome inserido aqui
             round(preco, 2), round(rsi, 2), round(adx, 2), round(atr, 2), 
             round(rvol, 2), round(dist_mm20, 2), round(momentum, 2), 
             recomendacao, 
@@ -171,34 +167,42 @@ for ticker in tickers:
         ]
         resultados_para_sheets.append(linha_sheets)
 
-        # Comboio de oportunidades para a IA
-        if recomendacao in ["Forca Consolidada", "Alerta Iminente"]:
-            comboio_ia.append({
-                "ticker": ticker, "estado": recomendacao, "preco": round(preco, 2),
-                "entrada": preco_entrada, "stop": preco_stop, "alvo": preco_tp
-            })
+        # Comboio IA (ADICIONÁMOS O NOME AQUI TAMBÉM)
+        comboio_ia.append({
+            "ticker": ticker,
+            "nome": nome_empresa,
+            "estado": recomendacao,
+            "preco": round(preco, 2),
+            "rsi": round(rsi, 2),
+            "adx": round(adx, 2),
+            "rvol": round(rvol, 2),
+            "entrada": round(preco_entrada, 2) if isinstance(preco_entrada, float) else preco_entrada,
+            "stop": preco_stop,
+            "alvo": preco_tp,
+            "quantidade": qtd_acoes
+        })
         
-        print(f"[OK] {ticker} analisado. Estado: {recomendacao}")
+        print(f"[OK] {ticker} ({nome_empresa}) analisado. Estado: {recomendacao}")
 
     except Exception as e:
         print(f"[ERRO] Falha ao processar {ticker}: {e}")
 
 # ===================================================================
-# 4. ENVIO DE RESULTADOS PARA O GOOGLE SHEETS (POST)
+# 4. ENVIO PARA O SHEETS
 # ===================================================================
 if resultados_para_sheets and WEBHOOK_URL:
     print("\nA enviar matriz completa para o Google Sheets (Análise Compra V2)...")
     try:
         resposta = requests.post(WEBHOOK_URL, json=resultados_para_sheets)
         if resposta.status_code == 200:
-            print("[SUCESSO] Radar de ativos atualizado na folha!")
+            print("[SUCESSO] Radar atualizado na folha!")
         else:
-            print(f"[ERRO] O servidor respondeu com o código: {resposta.status_code}")
+            print(f"[ERRO] Status HTTP: {resposta.status_code}")
     except Exception as e:
-        print(f"[ERRO CRÍTICO] Falha no envio HTTP: {e}")
+        print(f"[ERRO CRÍTICO] Falha HTTP: {e}")
 
-# Exibição do "Comboio" inteligente estruturado para a IA
 print(f"\n--- COMBOIO INTELIGENTE PARA A IA ---")
-print(f"Total de oportunidades ativas detetadas: {len(comboio_ia)}")
-for item in comboio_ia:
+print(f"Total de ativos enviados para a IA: {len(comboio_ia)}")
+for item in comboio_ia[:3]:
     print(item)
+print("... (dados completos gerados no payload)")
