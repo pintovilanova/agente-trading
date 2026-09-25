@@ -5,6 +5,7 @@ import email
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 from google import genai
+import time
 
 # ==========================================
 # 1. CONFIGURAÇÕES (Lidas do GitHub Secrets)
@@ -18,14 +19,26 @@ IMAP_SERVER = "imap.gmail.com"
 SMTP_SERVER = "smtp.gmail.com"
 SMTP_PORT = 587
 
-# Configurar o cliente da IA (Gemini 3.6-flash)
+# Configurar o cliente da IA
 client = genai.Client(api_key=GEMINI_API_KEY)
 
 # ==========================================
-# 2. LER O ÚLTIMO EMAIL DO EXCEL
+# 2. EXTRAÇÃO INTELIGENTE (Local + Fallback IMAP)
 # ==========================================
 def extrair_dados_do_email():
-    print("A ligar à caixa de correio para ler os dados...")
+    # Abordagem Híbrida: Tenta ler primeiro do ficheiro gerado pelo Passo 1 (Ideal para GitHub Actions)
+    if os.path.exists("comboio_temp.txt"):
+        print("A carregar os dados localmente a partir de 'comboio_temp.txt'...")
+        try:
+            with open("comboio_temp.txt", "r", encoding="utf-8") as f:
+                conteudo = f.read()
+                print("[SUCESSO] Dados locais carregados com sucesso.")
+                return conteudo
+        except Exception as e:
+            print(f"Erro ao ler o ficheiro local: {e}. A tentar via IMAP...")
+
+    # Fallback: Se o ficheiro não existir (ex: execução manual no PC), liga-se ao IMAP
+    print("A ligar à caixa de correio via IMAP para ler os dados...")
     try:
         mail = imaplib.IMAP4_SSL(IMAP_SERVER)
         mail.login(EMAIL_USER, EMAIL_PASS)
@@ -36,7 +49,7 @@ def extrair_dados_do_email():
         
         email_ids = messages[0].split()
         if not email_ids:
-            print("Nenhum email do Excel encontrado hoje com esse assunto.")
+            print("Nenhum email encontrado com esse assunto.")
             return None
             
         ultimo_id = email_ids[-1]
@@ -54,34 +67,32 @@ def extrair_dados_do_email():
                     return msg_formatada.get_payload(decode=True).decode()
                     
     except Exception as e:
-        print(f"Erro ao ler o email: {e}")
+        print(f"Erro ao ler o email via IMAP: {e}")
         return None
 
 # ==========================================
 # 3. O CÉREBRO: INVOCAR A IA COM O PROMPT
 # ==========================================
-import time
-
 def analisar_com_ia(dados_mercado):
     print("A enviar lista para análise tática do Gemini...")
     
     prompt_sistema = """
     És um assistente de trading sistemático e mecânico. O utilizador procura preservar capital e usa um rácio de risco de 1.2x.
     
-    Abaixo encontrarás as instruções operacionais específicas fornecidas no email, seguidas pelos dados do comboio de ativos de mercado. Cumpre rigorosamente todas as diretrizes indicadas no texto do email.
+    Abaixo encontrarás as instruções operacionais específicas fornecidas, seguidas pelos dados do comboio de ativos de mercado. Cumpre rigorosamente todas as diretrizes indicadas.
     """
     
-    prompt_completo = f"{prompt_sistema}\n\nAqui estão os ativos enviados pelo Excel:\n{dados_mercado}"
+    prompt_completo = f"{prompt_sistema}\n\nAqui estão os ativos analíticos:\n{dados_mercado}"
     
-    # Sistema de Retry Extremo (Blindagem contra Picos de Tráfego 503)
-    tentativas = 10  # Aumentado para 10 tentativas (aguenta picos de ~25 minutos)
+    # Sistema de Retry (Blindagem contra Picos de Tráfego 503)
+    tentativas = 10
     espera_base = 15
-    espera_maxima = 300  # Limite máximo de espera por tentativa (5 minutos)
+    espera_maxima = 300
 
     for tentativa in range(tentativas):
         try:
             resposta = client.models.generate_content(
-                model='gemini-3.6-flash', # Sugestão: Ajustado para o nome oficial atual, mas podes manter o teu se for intencional
+                model='gemini-2.5-flash', # Podes ajustar para o modelo que preferires
                 contents=prompt_completo
             )
             return resposta.text
@@ -92,20 +103,17 @@ def analisar_com_ia(dados_mercado):
             
             if tentativa < tentativas - 1:
                 if "503" in erro_str or "UNAVAILABLE" in erro_str or "429" in erro_str:
-                    # O tempo de espera vai escalar: 15s -> 30s -> 60s -> 120s -> 240s...
                     tempo_espera = espera_base * (2 ** tentativa)
-                    
-                    # Garante que a espera não ultrapassa os 5 minutos definidos no limite
                     if tempo_espera > espera_maxima:
                         tempo_espera = espera_maxima
                         
-                    print(f"Bloqueio de API ou Servidores Cheios. A aguardar {tempo_espera} segundos antes de tentar novamente...")
+                    print(f"Bloqueio de API. A aguardar {tempo_espera} segundos...")
                     time.sleep(tempo_espera)
                 else:
                     print("Erro estrutural. A abortar imediatamente.")
                     raise e
             else:
-                print("Todas as tentativas esgotadas. Falha crítica de tráfego.")
+                print("Todas as tentativas esgotadas. Falha crítica.")
                 raise e
 
 # ==========================================
@@ -116,7 +124,7 @@ def enviar_email_resposta(relatorio_texto):
     try:
         msg = MIMEMultipart()
         msg['From'] = EMAIL_USER
-        msg['To'] = EMAIL_USER # Envia para ti próprio
+        msg['To'] = EMAIL_USER
         msg['Subject'] = "Relatório Tático Diário - Concluído"
         
         msg.attach(MIMEText(relatorio_texto, 'plain', 'utf-8'))
@@ -134,16 +142,14 @@ def enviar_email_resposta(relatorio_texto):
 # 5. EXECUÇÃO DO AGENTE
 # ==========================================
 if __name__ == "__main__":
-    conteudo_email = extrair_dados_do_email()
+    conteudo_dados = extrair_dados_do_email()
     
-    if conteudo_email:
-        analise_final = analisar_com_ia(conteudo_email)
+    if conteudo_dados:
+        analise_final = analisar_com_ia(conteudo_dados)
         
-        # Imprime no terminal (caso corra localmente)
         print("\n" + "="*50)
         print("RELATÓRIO TÁTICO DIÁRIO")
         print("="*50)
         print(analise_final)
         
-        # Envia também por email
         enviar_email_resposta(analise_final)
