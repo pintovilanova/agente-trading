@@ -11,9 +11,29 @@ import sys
 WEBHOOK_URL = os.environ.get('WEBHOOK_URL')
 
 # ===================================================================
+# 0.1. BUSCAR A WATCHLIST DINAMICAMENTE DO GOOGLE SHEETS (Coluna E)
+# ===================================================================
+print("A carregar a Watchlist a partir do Google Sheets (Analise Compra - Coluna E)...")
+try:
+    resposta_tickers = requests.get(WEBHOOK_URL)
+    if resposta_tickers.status_code == 200:
+        tickers = resposta_tickers.json()
+        if isinstance(tickers, list) and len(tickers) > 0:
+            print(f"[SUCESSO] {len(tickers)} tickers carregados da folha de cálculo: {tickers[:5]}... (e outros)")
+        else:
+            print("[ERRO] A lista de tickers veio vazia ou num formato inválido.")
+            sys.exit(1)
+    else:
+        print(f"[ERRO] Falha ao descarregar watchlist. Servidor respondeu: {resposta_tickers.status_code}")
+        sys.exit(1)
+except Exception as e:
+    print(f"[ERRO CRÍTICO] Não foi possível ler os tickers da folha: {e}")
+    sys.exit(1)
+
+# ===================================================================
 # 1. VETO MACRO (SPY FLASH CRASH & BEAR MARKET)
 # ===================================================================
-print("A verificar Veto Macro (SPY)...")
+print("\nA verificar Veto Macro (SPY)...")
 try:
     df_spy = yf.download("SPY", period="2y", interval="1d", progress=False)
     if isinstance(df_spy.columns, pd.MultiIndex):
@@ -41,29 +61,28 @@ try:
 except Exception as e:
     print(f"Erro na validação do SPY: {e}")
 
-# ===================================================================
-# 2. CONFIGURAÇÕES BASE E LISTA DE TICKERS
-# ===================================================================
-tickers = ["MSFT", "AAPL", "NVDA", "TSLA", "PFE"]
-
+# Configurações de Risco
 risco_maximo_dolares = 25.00
 multiplicador_trailing_ts = 1.5
 racio_tp_base = 1.2
 
 resultados = []
 resultados_para_sheets = []
+comboio_ia = []
 
 # ===================================================================
-# 3. MOTOR MATEMÁTICO V2 E GUILHOTINA
+# 3. MOTOR MATEMÁTICO V2 E GUILHOTINA (Para todos os Tickers dinâmicos)
 # ===================================================================
 for ticker in tickers:
     try:
-        # Extração (2 anos para aquecimento perfeito do RSI e ATR)
         df = yf.download(ticker, period="2y", interval="1d", progress=False)
+        if df.empty:
+            print(f"[AVISO] Sem dados para {ticker}.")
+            continue
+            
         if isinstance(df.columns, pd.MultiIndex):
             df.columns = df.columns.droplevel(1)
 
-        # Cálculo de Indicadores (pandas-ta)
         df.ta.rsi(length=14, append=True)
         df.ta.adx(length=14, append=True)
         df.ta.atr(length=14, append=True)
@@ -71,11 +90,9 @@ for ticker in tickers:
         df.ta.sma(length=20, append=True)
         df.ta.mom(length=14, append=True)
 
-        # Cálculo do RVOL (Média de 20 dias)
         media_volume_20 = df['Volume'].rolling(window=20).mean()
         df['RVOL'] = df['Volume'] / media_volume_20
 
-        # Extração das velas de hoje e de ontem
         ultimo_dia = df.iloc[-1]
         dia_anterior = df.iloc[-2]
 
@@ -86,14 +103,12 @@ for ticker in tickers:
         sma20 = ultimo_dia['SMA_20']
         dist_mm20 = ((preco - sma20) / sma20) * 100
 
-        # Variáveis Técnicas
         rvol = ultimo_dia['RVOL']
         adx = ultimo_dia['ADX_14']
         rsi = ultimo_dia['RSI_14']
         atr = ultimo_dia['ATRr_14']
         momentum = ultimo_dia['MOM_14']
 
-        # Variáveis de Execução (Reset)
         recomendacao = "Observar"
         preco_entrada = "N/A"
         preco_stop = "N/A"
@@ -103,35 +118,26 @@ for ticker in tickers:
         trailing_final = "N/A"
         multiplicador_atr = 1.0
 
-        # Filtros Booleanos
         preco_caiu_hoje = preco < preco_anterior
         volume_despejo = rvol > 1.20
 
-        # --- A LEI DA GUILHOTINA (BUSINESS LOGIC) ---
-        
-        # 1 & 2. VETO DE DESPEJO & VETO DE INÉRCIA
+        # --- A LEI DA GUILHOTINA ---
         if (preco_caiu_hoje and volume_despejo) or (momentum < -3.00):
             recomendacao = "Observar"
-            
-        # 3. PULLBACK BASAL
         elif var_perc > 0 and adx < 20:
             recomendacao = "Aguardar Recuo"
             preco_entrada = preco - (atr * 0.4)
             multiplicador_atr = 1.0
-            
-        # 4. FORÇA CONSOLIDADA
         elif var_perc > 0 and adx >= 25 and rvol >= 1.00 and (50.00 <= rsi <= 70.00) and (-1.00 <= dist_mm20 <= 2.50):
             recomendacao = "Forca Consolidada"
             preco_entrada = preco - (atr * 0.2)
             multiplicador_atr = 1.2
-            
-        # 5. ALERTA IMINENTE
         elif adx >= 20 and rvol >= 0.85 and (48.00 <= rsi <= 75.00) and (-2.00 <= dist_mm20 <= 3.50):
             recomendacao = "Alerta Iminente"
             preco_entrada = preco - (atr * 0.2)
             multiplicador_atr = 1.2
 
-        # --- GESTÃO DE RISCO (POSITION SIZING) ---
+        # --- GESTÃO DE RISCO ---
         if recomendacao != "Observar" and preco_entrada != "N/A":
             preco_stop_calc = preco_entrada - (atr * multiplicador_atr)
             preco_stop = round(preco_stop_calc, 2)
@@ -154,29 +160,9 @@ for ticker in tickers:
             trailing_calculado = preco - (atr * multiplicador_trailing_ts)
             trailing_final = round(max(trailing_calculado, preco_stop_calc), 2)
 
-        # Dicionário para o terminal
-        dados_ativos = {
-            "Ticker": ticker,
-            "Preço": round(preco, 2),
-            "RSI": round(rsi, 2),
-            "ADX": round(adx, 2),
-            "ATR": round(atr, 2),
-            "RVOL": round(rvol, 2),
-            "Dist MM20(%)": round(dist_mm20, 2),
-            "MOM(14)": round(momentum, 2),
-            "Estado": recomendacao,
-            "Entrada": round(preco_entrada, 2) if isinstance(preco_entrada, float) else preco_entrada,
-            "Stop": preco_stop,
-            "Alvo": preco_tp,
-            "B-Even": preco_be,
-            "Qtd": qtd_acoes,
-            "Trailing": trailing_final
-        }
-        resultados.append(dados_ativos)
-
-        # Linha formatada para enviar para o Google Sheets (Coluna A = Ticker, Colunas B até O = Indicadores)
+        # Linha para a folha de cálculo ("Análise Compra V2")
         linha_sheets = [
-            ticker,  # <--- Coluna A
+            ticker, 
             round(preco, 2), round(rsi, 2), round(adx, 2), round(atr, 2), 
             round(rvol, 2), round(dist_mm20, 2), round(momentum, 2), 
             recomendacao, 
@@ -184,29 +170,35 @@ for ticker in tickers:
             preco_stop, preco_tp, preco_be, qtd_acoes, trailing_final
         ]
         resultados_para_sheets.append(linha_sheets)
+
+        # Comboio de oportunidades para a IA
+        if recomendacao in ["Forca Consolidada", "Alerta Iminente"]:
+            comboio_ia.append({
+                "ticker": ticker, "estado": recomendacao, "preco": round(preco, 2),
+                "entrada": preco_entrada, "stop": preco_stop, "alvo": preco_tp
+            })
         
         print(f"[OK] {ticker} analisado. Estado: {recomendacao}")
 
     except Exception as e:
         print(f"[ERRO] Falha ao processar {ticker}: {e}")
-        resultados_para_sheets.append(["ERRO"] * 15)
 
 # ===================================================================
-# 4. EXIBIÇÃO DA MATRIZ NO TERMINAL E ENVIO PARA O SHEETS
+# 4. ENVIO DE RESULTADOS PARA O GOOGLE SHEETS (POST)
 # ===================================================================
-print("\n--- MATRIZ TÁTICA V2 ---")
-df_final = pd.DataFrame(resultados)
-print(df_final.to_string(index=False))
-
 if resultados_para_sheets and WEBHOOK_URL:
-    print("\nA enviar resultados para o Google Sheets de forma segura...")
+    print("\nA enviar matriz completa para o Google Sheets (Análise Compra V2)...")
     try:
         resposta = requests.post(WEBHOOK_URL, json=resultados_para_sheets)
         if resposta.status_code == 200:
-            print("[SUCESSO] Dados enviados e gravados na aba 'Análise Compra V2'!")
+            print("[SUCESSO] Radar de ativos atualizado na folha!")
         else:
             print(f"[ERRO] O servidor respondeu com o código: {resposta.status_code}")
     except Exception as e:
         print(f"[ERRO CRÍTICO] Falha no envio HTTP: {e}")
-else:
-    print("\n[AVISO] WEBHOOK_URL não configurado nas Secrets do GitHub.")
+
+# Exibição do "Comboio" inteligente estruturado para a IA
+print(f"\n--- COMBOIO INTELIGENTE PARA A IA ---")
+print(f"Total de oportunidades ativas detetadas: {len(comboio_ia)}")
+for item in comboio_ia:
+    print(item)
