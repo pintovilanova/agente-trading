@@ -1,20 +1,20 @@
 name: Teste Motor V2
 
 on:
-  workflow_dispatch: # Este é o comando mágico que cria o botão "Run workflow" para testes manuais
+  workflow_dispatch:
 
 jobs:
   run-v2:
     runs-on: ubuntu-latest
     
     steps:
-      - name: Checkout do código (Ler ficheiros)
+      - name: Checkout do código
         uses: actions/checkout@v4
         
-      - name: Configurar o Python 3.10
+      - name: Configurar o Python 3.12
         uses: actions/setup-python@v5
         with:
-          python-version: '3.10'
+          python-version: '3.12'
           
       - name: Instalar as Bibliotecas Financeiras
         run: |
