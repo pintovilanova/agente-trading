@@ -4,16 +4,87 @@ import pandas as pd
 import requests
 import os
 import sys
+import time
+import smtplib
+from email.mime.text import MIMEText
+from email.mime.multipart import MIMEMultipart
+from google import genai
 
 # ===================================================================
-# 0. CONFIGURAÇÃO DO WEBHOOK (VIA GITHUB SECRET)
+# 0. CONFIGURAÇÕES E CREDENCIAIS (Lidas do GitHub Secrets)
 # ===================================================================
 WEBHOOK_URL = os.environ.get('WEBHOOK_URL')
+GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY")
+EMAIL_USER = os.environ.get("EMAIL_USER")
+EMAIL_PASS = os.environ.get("EMAIL_PASS")
+
+SMTP_SERVER = "smtp.gmail.com"
+SMTP_PORT = 587
+
+# Configurar o cliente da IA
+client = genai.Client(api_key=GEMINI_API_KEY)
 
 # ===================================================================
-# 0.1. BUSCAR A WATCHLIST E NOMES DINAMICAMENTE (Colunas E e F)
+# 1. FUNÇÕES DE IA E EMAIL
 # ===================================================================
-print("A carregar a Watchlist a partir do Google Sheets (Analise Compra)...")
+def analisar_com_ia(prompt_completo):
+    print("A enviar lista para análise tática do Gemini...")
+    
+    tentativas = 10
+    espera_base = 15
+    espera_maxima = 300
+
+    for tentativa in range(tentativas):
+        try:
+            resposta = client.models.generate_content(
+                model='gemini-3.6-flash',
+                contents=prompt_completo
+            )
+            return resposta.text
+            
+        except Exception as e:
+            erro_str = str(e)
+            print(f"Tentativa {tentativa + 1} falhou: {erro_str}")
+            
+            if tentativa < tentativas - 1:
+                if "503" in erro_str or "UNAVAILABLE" in erro_str or "429" in erro_str:
+                    tempo_espera = espera_base * (2 ** tentativa)
+                    if tempo_espera > espera_maxima:
+                        tempo_espera = espera_maxima
+                        
+                    print(f"Bloqueio de API ou Servidores Cheios. A aguardar {tempo_espera} segundos...")
+                    time.sleep(tempo_espera)
+                else:
+                    print("Erro estrutural na IA. A abortar tentativa.")
+                    raise e
+            else:
+                print("Todas as tentativas esgotadas. Falha crítica de tráfego.")
+                raise e
+
+def enviar_email_resposta(relatorio_texto, assunto="Relatório Tático Diário - Concluído"):
+    print(f"A enviar email: '{assunto}'...")
+    try:
+        msg = MIMEMultipart()
+        msg['From'] = EMAIL_USER
+        msg['To'] = EMAIL_USER
+        msg['Subject'] = assunto
+        
+        msg.attach(MIMEText(relatorio_texto, 'plain', 'utf-8'))
+        
+        server = smtplib.SMTP(SMTP_SERVER, SMTP_PORT)
+        server.starttls()
+        server.login(EMAIL_USER, EMAIL_PASS)
+        server.sendmail(EMAIL_USER, EMAIL_USER, msg.as_string())
+        server.quit()
+        print(f"[SUCESSO] Email '{assunto}' enviado com sucesso!")
+    except Exception as e:
+        print(f"[ERRO] Falha ao enviar o email: {e}")
+
+
+# ===================================================================
+# 2. BUSCAR A WATCHLIST DINAMICAMENTE (Google Sheets)
+# ===================================================================
+print("A carregar a Watchlist a partir do Google Sheets...")
 try:
     resposta_tickers = requests.get(WEBHOOK_URL)
     if resposta_tickers.status_code == 200:
@@ -31,7 +102,7 @@ except Exception as e:
     sys.exit(1)
 
 # ===================================================================
-# 1. VETO MACRO (SPY FLASH CRASH & BEAR MARKET)
+# 3. VETO MACRO (SPY FLASH CRASH & BEAR MARKET)
 # ===================================================================
 print("\nA verificar Veto Macro (SPY)...")
 try:
@@ -70,7 +141,7 @@ resultados_para_sheets = []
 comboio_ia = []
 
 # ===================================================================
-# 3. MOTOR MATEMÁTICO V2 (Para todos os Ativos)
+# 4. MOTOR MATEMÁTICO V2 (Para todos os Ativos)
 # ===================================================================
 for ativo_info in ativos_data:
     ticker = ativo_info.get("ticker")
@@ -156,9 +227,9 @@ for ativo_info in ativos_data:
             trailing_calculado = preco - (atr * multiplicador_trailing_ts)
             trailing_final = round(max(trailing_calculado, preco_stop_calc), 2)
 
-        # Linha Sheets (ADICIONÁMOS O NOME DA EMPRESA NA COLUNA B)
+        # Matriz Completa para o Google Sheets (Aba V2)
         linha_sheets = [
-            ticker, nome_empresa, # <--- Nome inserido aqui
+            ticker, nome_empresa, 
             round(preco, 2), round(rsi, 2), round(adx, 2), round(atr, 2), 
             round(rvol, 2), round(dist_mm20, 2), round(momentum, 2), 
             recomendacao, 
@@ -167,7 +238,7 @@ for ativo_info in ativos_data:
         ]
         resultados_para_sheets.append(linha_sheets)
 
-        # Comboio IA (ADICIONÁMOS O NOME AQUI TAMBÉM)
+        # Guardar para o Comboio da IA
         comboio_ia.append({
             "ticker": ticker,
             "nome": nome_empresa,
@@ -176,19 +247,24 @@ for ativo_info in ativos_data:
             "rsi": round(rsi, 2),
             "adx": round(adx, 2),
             "rvol": round(rvol, 2),
+            "atr": round(atr, 2),
+            "momentum": round(momentum, 2),
+            "dist_mm20": round(dist_mm20, 2),
             "entrada": round(preco_entrada, 2) if isinstance(preco_entrada, float) else preco_entrada,
             "stop": preco_stop,
             "alvo": preco_tp,
-            "quantidade": qtd_acoes
+            "be": preco_be,
+            "quantidade": qtd_acoes,
+            "trailing": trailing_final
         })
         
-        print(f"[OK] {ticker} ({nome_empresa}) analisado. Estado: {recomendacao}")
+        print(f"[OK] {ticker} analisado. Estado: {recomendacao}")
 
     except Exception as e:
         print(f"[ERRO] Falha ao processar {ticker}: {e}")
 
 # ===================================================================
-# 4. ENVIO PARA O SHEETS
+# 5. ENVIO PARA O GOOGLE SHEETS
 # ===================================================================
 if resultados_para_sheets and WEBHOOK_URL:
     print("\nA enviar matriz completa para o Google Sheets (Análise Compra V2)...")
@@ -201,8 +277,47 @@ if resultados_para_sheets and WEBHOOK_URL:
     except Exception as e:
         print(f"[ERRO CRÍTICO] Falha HTTP: {e}")
 
-print(f"\n--- COMBOIO INTELIGENTE PARA A IA ---")
-print(f"Total de ativos enviados para a IA: {len(comboio_ia)}")
-for item in comboio_ia[:3]:
-    print(item)
-print("... (dados completos gerados no payload)")
+# ===================================================================
+# 6. GERAR BLOCO DE TEXTO E ENVIAR EMAIL DE BACKUP
+# ===================================================================
+print("\nA construir o bloco de dados para a IA...")
+
+prompt_sistema = """Modo Diário Ativo: Avalia os seguintes ativos da minha watchlist 'Força Consolidada'. Destaca os 3 melhores (com base no ADX > 25, RVOL > 1 e RSI > 50) e alerta para os que devo evitar (Momentum muito negativo ou RSI fraco). Na tua recomendação tática para os 3 melhores, é estritamente proibido arredondar ou usar linguagem aproximada. Extrai e lista os valores EXATOS fornecidos na string de dados para: Entrada, Stop, Take-Profit, Break-Even, Trailing e Qtd. Inclui obrigatoriamente em cada um dos 3 melhores ativos apresentados a linha do 'comboio' de dados original correspondente para servir de referência técnica. Mantém a análise focada na minha estratégia de Math.max e trailing stop."""
+
+bloco_texto_ia = f"{prompt_sistema}\n\n--------------------------------------------------\n"
+bloco_texto_ia += "DADOS DOS ATIVOS (COMBOIO):\n\n"
+
+for item in comboio_ia:
+    dist_mm20_str = f"{item.get('dist_mm20', 'N/A')}%" if item.get('dist_mm20') != "N/A" else "N/A"
+    
+    linha = (
+        f"{item['ticker']},Nome: {item['nome']},Preço: {item['preco']},"
+        f"Dist MM20: {dist_mm20_str},Momentum: {item.get('momentum', 'N/A')},"
+        f"RSI: {item['rsi']},ADX: {item['adx']},ATR: {item.get('atr', 'N/A')},"
+        f"RVOL: {item['rvol']},Estado: {item['estado']},Entrada: {item['entrada']},"
+        f"Stop: {item['stop']},Take-Profit: {item['alvo']},Break-Even: {item.get('be', 'N/A')},"
+        f"Qtd: {item['quantidade']},Trailing: {item.get('trailing', 'N/A')},"
+        f"Data: {pd.Timestamp.now().strftime('%d/%m/%Y %H:%M:%S')}"
+    )
+    bloco_texto_ia += linha + "\n"
+
+# Envia o email de segurança primeiro!
+enviar_email_resposta(bloco_texto_ia, assunto="tradingRelatorioIA")
+
+# ===================================================================
+# 7. INVOCAR A IA (GEMINI)
+# ===================================================================
+print("\nA iniciar processo da Inteligência Artificial (Gemini)...")
+try:
+    analise_final = analisar_com_ia(bloco_texto_ia)
+    
+    print("\n" + "="*50)
+    print("RELATÓRIO TÁTICO DIÁRIO (GEMINI)")
+    print("="*50)
+    print(analise_final)
+    
+    # Envia o relatório final
+    enviar_email_resposta(analise_final, assunto="Relatório Tático Diário - Concluído")
+except Exception as e:
+    print(f"\n[AVISO] A IA falhou ou os servidores estão em baixo. Erro: {e}")
+    print("A cópia limpa já está no teu email para executares manualmente.")
