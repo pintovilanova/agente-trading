@@ -30,9 +30,6 @@ jobs:
           EMAIL_PASS: ${{ secrets.EMAIL_PASS }}
         run: python agente_trading_v2.py
 
-      - name: Pausa curta (Garantir receção do email)
-        run: sleep 10
-
       - name: Passo 2 - Executar o Agente Python
         env:
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
