@@ -18,14 +18,14 @@ The system operates on a hybrid orchestration model, where **Google Apps Script*
 ---
 
 ### Phase 1: Mathematical Engine & Data Extraction (GitHub Actions - Step 1)
-*   **07:00 AM - Cloud Awakening:** The unified `.github/workflows/pipeline.yml` workflow is triggered.
-*   **07:01 AM - Watchlist Ingestion & Veto:** The `agente_trading_v2.py` script pulls the daily watchlist from Google Sheets via Webhook. It immediately checks the SPY Macro Filter (SMA200 and crash thresholds) to authorize or veto the daily run.
-*   **07:02 AM - Calculation & Ephemeral Storage:** The script calculates ATR, Distance to SMA20, Momentum, RVOL, RSI, and ADX. It processes the mathematical targets (Stop Loss, Take-Profit, Trailing) and writes the resulting data "train" into a local ephemeral file (`comboio_temp.txt`) on the GitHub runner. A backup copy is emailed to the user for historical auditing.
+*   **04:30 AM - Cloud Awakening:** The unified `.github/workflows/pipeline.yml` workflow is triggered.
+*   **04:31 AM - Watchlist Ingestion & Veto:** The `agente_trading_v2.py` script pulls the daily watchlist from Google Sheets via Webhook. It immediately checks the SPY Macro Filter (SMA200 and crash thresholds) to authorize or veto the daily run.
+*   **04:32 AM - Calculation & Ephemeral Storage:** The script calculates ATR, Distance to SMA20, Momentum, RVOL, RSI, and ADX. It processes the mathematical targets (Stop Loss, Take-Profit, Trailing) and writes the resulting data "train" into a local ephemeral file (`comboio_temp.txt`) on the GitHub runner. A backup copy is emailed to the user for historical auditing.
 
 ### Phase 2: Artificial Intelligence & Execution (GitHub Actions - Step 2)
-*   **07:03 AM - Zero-Latency Handoff:** The `agente_trading_git.py` script starts on the exact same virtual machine. It instantly reads `comboio_temp.txt`, entirely bypassing external IMAP server connections and potential network blocks. (IMAP remains strictly as a local-PC fallback).
-*   **07:04 AM - Gemini Processing:** The AI processes the data string following blind parametric rules (zero fundamental bias). 
-*   **07:05 AM - Report Delivery:** The system dispatches the final, formatted tactical report to the user's email, highlighting the top 3 setups with their exact mathematical targets.
+*   **04:35 AM - Zero-Latency Handoff:** The `agente_trading_git.py` script starts on the exact same virtual machine. It instantly reads `comboio_temp.txt`, entirely bypassing external IMAP server connections and potential network blocks. (IMAP remains strictly as a local-PC fallback).
+*   **04:36 AM - Gemini Processing:** The AI processes the data string following blind parametric rules (zero fundamental bias). 
+*   **04:38 AM - Report Delivery:** The system dispatches the final, formatted tactical report to the user's email, highlighting the top 3 setups with their exact mathematical targets.
 
 ### Phase 3: Intraday Monitoring (Surgical Trigger)
 *   **03:30 PM - Open Market Evaluation:** Scheduled Apps Script triggers perform a quick ping to check for high volume breakouts and update the `Diário de Bordo` tab with the Intraday status.
@@ -79,7 +79,7 @@ sequenceDiagram
     participant Phase2 as AI Agent<br/>(agente_trading_git.py)
     participant AI as Gemini API
 
-    GH->>Phase1: Trigger Unified Workflow (Pass 1)
+    GH->>Phase1: Trigger Unified Workflow @ 04:30 AM (Pass 1)
     Phase1->>Sheets: Fetch Watchlist via Webhook
     Phase1->>Phase1: Calculate Indicators & Targets
     Phase1->>GH: Write comboio_temp.txt (Ephemeral File)
