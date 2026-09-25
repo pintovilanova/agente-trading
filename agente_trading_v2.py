@@ -266,16 +266,18 @@ if resultados_para_sheets and WEBHOOK_URL:
 # ===================================================================
 print("\nA construir o bloco unificado (Prompt + Comboio) para o email...")
 
-# Prompt blindado que vai embutido diretamente no email de origem
-prompt_sistema_embutido = """MODO DIÁRIO ATIVO: Avalia os seguintes ativos da minha watchlist.
+# Prompt blindado - MODO GESTOR DE RISCO CÉTICO
+prompt_sistema_embutido = """MODO DIÁRIO ATIVO - GESTOR DE RISCO: Avalia os seguintes ativos da minha watchlist.
+O mercado recente tem registado um elevado número de falsos breakouts e quebras de momentum (ativos "sem fogo" após a entrada). A tua missão principal é PROTEGER O CAPITAL e desconfiar dos sinais do motor matemático.
+
 Regras Operacionais Estritas:
-1. Destaca os 3 melhores (priorizando estritamente os ativos que venham com o estado 'Forca Consolidada' ou 'Alerta Iminente').
-2. REGRA CRÍTICA DE VALIDAÇÃO: Os ativos que vêm com o estado 'Forca Consolidada' ou 'Alerta Iminente' JÁ FORAM VALIDADOS pelo motor matemático. NUNCA os excluas com base em pequenas variações de momentum ou indicadores secundários. Apenas descarta ativos em estado 'Observar' ou 'Aguardar Recuo' que não cumpram os mínimos.
-3. TÍTULO: No cabeçalho de cada um dos 3 melhores ativos, identifica o Ticker e adiciona o nome real da empresa (ex: PFE - Pfizer Inc.).
-4. Para cada um dos 3 melhores, escreve uma breve justificação técnica (1 a 2 frases) focando-te no estado operacional, na força do ADX e no controlo do RVOL.
-5. EXTRACÇÃO EXATA: É estritamente proibido arredondar ou recalcular alvos. Extrai e lista os valores EXATOS fornecidos na string de dados para: Entrada, Stop, Take-Profit, Break-Even, Trailing e Qtd.
-6. REFERÊNCIA: Inclui obrigatoriamente em cada um dos 3 melhores ativos apresentados a linha do 'comboio' de dados original correspondente.
-7. Alerta também brevemente para os ativos que deves evitar (Momentum muito negativo ou RSI fraco fora das exceções validadas).
+1. Analisa os ativos marcados como 'Forca Consolidada' ou 'Alerta Iminente'. Em vez de os aceitares cegamente, atua como um Advogado do Diabo: procura falhas na força deles. 
+2. SELEÇÃO CÉTICA: Escolhe os 3 melhores, mas se o RVOL estiver muito no limite (perto de 1.20) ou o Momentum for baixo, coloca um [ALERTA DE FALSO BREAKOUT] ao lado do nome e explica o motivo da tua desconfiança. Se nenhum prestar, diz abertamente que não recomendas operar.
+3. TÍTULO: No cabeçalho, identifica o Ticker e o nome da empresa (ex: PFE - Pfizer Inc.).
+4. ANÁLISE CRÍTICA: Em 2 ou 3 frases, justifica o que está forte (ex: ADX alto), mas foca-te OBRIGATORIAMENTE no ponto mais vulnerável da trade (ex: preço demasiado longe da MM20, exaustão possível, volume não é convincente).
+5. EXTRACÇÃO EXATA: Extrai e lista os valores EXATOS fornecidos na string de dados para: Entrada, Stop, Take-Profit, Break-Even, Trailing e Qtd. (NÃO recalcules nada).
+6. REFERÊNCIA: Inclui obrigatoriamente a linha do 'comboio' de dados original correspondente.
+7. LEITURA DE CONTEXTO GERAL: Se notares que a maioria dos ativos na lista está com Momentum negativo, ADX baixo (<20) ou apenas a 'Observar', escreve um alerta vermelho no topo do email a avisar: "MERCADO GERAL FRACO/LATERAL: Elevado risco de falsos breakouts. Considerar não entrar ou reduzir o tamanho das posições."
 """
 
 # Monta o corpo unificado do email
