@@ -16,42 +16,6 @@ The system operates on a hybrid orchestration model, where **Google Apps Script*
 | **Security** | GitHub Secrets | Encrypted storage for API keys, email credentials, and institutional access tokens. |
 
 ---
-
-## 2. Execution Pipeline (Chronological Flow)
-
-The system's lifecycle is designed to bypass API rate limits and ensure that US market closing data is fully consolidated prior to analysis. The flow is divided into two main phases: **Nightly Processing** and **Morning Analysis**.
-
-```mermaid
-sequenceDiagram
-    autonumber
-    participant Sheets as Google Sheets
-    participant GAS as Google Apps Script
-    participant GH as GitHub Actions
-    participant Py as Python Script<br/>(agente_trading_git.py)
-    participant AI as Gemini AI<br/>(gemini-3.6-flash)
-
-    Sheets->>GAS: Generate Data "Train" (Technical Indicators)
-    GAS->>GH: POST API (workflow_dispatch)
-    GH-->>GAS: 204 No Content (Trigger Activated)
-    
-    Note over GH: Starts Runner (ubuntu-latest)
-    GH->>Py: Executes agente_trading_git.py
-    
-    Py->>Py: Applies strict filters & prepares Prompt
-    Py->>AI: Sends data for tactical analysis
-    
-    alt Normal Execution
-        AI-->>Py: Returns top 3 asset selection
-    else Traffic Spike (Error 503 / 429)
-        AI--xPy: Response Failure
-        Note over Py,AI: Tenacity triggers (Exponential Backoff)<br/>Waits 15s, 30s, 60s... up to 300s (Max 10 attempts)
-        Py->>AI: Retries analysis
-        AI-->>Py: Returns top 3 asset selection
-    end
-    
-    Py->>Py: Formats Daily Tactical Report
-    Py->>GH: Final Output (Logs & Email Dispatch)
-
 ### Phase 1: Data Cleansing & Extraction (Apps Script)
 *   **01:00 AM - State Reset:** The system clears all control checkboxes in the `Analise Compra` sheet to prevent duplicate processing.
 *   **01:05 to 01:08 AM - Flag Activation:** Global configuration variables (`processarLoteItems_Short`, `processarTudo`, `enviarRelatorioIA`) are activated in the `Configs` tab.
@@ -102,3 +66,39 @@ The architecture is designed to be fault-tolerant across three critical vectors:
 1.  **Data API Rate Limits:** The Apps Script incorporates a dynamic delay (`Utilities.sleep(15000)`) between batches of 20 assets and supports automatic rotation of multiple Twelve Data keys. If a key hits its daily quota, the loop silently jumps to the next one.
 2.  **AI Traffic Spikes (503 Unavailable Error):** The `agente_trading_git.py` script contains a `try/except` block wrapped in a `for` loop, powered by a Tenacity-style exponential backoff algorithm. If the API servers reject the request due to high demand, the system logs the failure and retries up to 10 times, escalating wait periods up to a maximum of 300 seconds (5 minutes) per attempt.
 3.  **Cloud Scheduling Protection (Cron Jobs):** To prevent private repositories from pausing automated schedules due to inactivity (the 60-day rule), the commit cycle and manual/automated executions guarantee daily continuity. The infrastructure relies on the robust UTC time zone (`0 7 * * *`), perfectly aligned with the target morning delivery window.
+
+## 5. Execution Pipeline (Chronological Flow)
+
+The system's lifecycle is designed to bypass API rate limits and ensure that US market closing data is fully consolidated prior to analysis. The flow is divided into two main phases: **Nightly Processing** and **Morning Analysis**.
+
+```mermaid
+sequenceDiagram
+    autonumber
+    participant Sheets as Google Sheets
+    participant GAS as Google Apps Script
+    participant GH as GitHub Actions
+    participant Py as Python Script<br/>(agente_trading_git.py)
+    participant AI as Gemini AI<br/>(gemini-3.6-flash)
+
+    Sheets->>GAS: Generate Data "Train" (Technical Indicators)
+    GAS->>GH: POST API (workflow_dispatch)
+    GH-->>GAS: 204 No Content (Trigger Activated)
+    
+    Note over GH: Starts Runner (ubuntu-latest)
+    GH->>Py: Executes agente_trading_git.py
+    
+    Py->>Py: Applies strict filters & prepares Prompt
+    Py->>AI: Sends data for tactical analysis
+    
+    alt Normal Execution
+        AI-->>Py: Returns top 3 asset selection
+    else Traffic Spike (Error 503 / 429)
+        AI--xPy: Response Failure
+        Note over Py,AI: Tenacity triggers (Exponential Backoff)<br/>Waits 15s, 30s, 60s... up to 300s (Max 10 attempts)
+        Py->>AI: Retries analysis
+        AI-->>Py: Returns top 3 asset selection
+    end
+    
+    Py->>Py: Formats Daily Tactical Report
+    Py->>GH: Final Output (Logs & Email Dispatch)
+
