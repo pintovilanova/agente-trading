@@ -4,65 +4,25 @@ import pandas as pd
 import requests
 import os
 import sys
-import time
 import smtplib
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
-from google import genai
 
 # ===================================================================
 # 0. CONFIGURAÇÕES E CREDENCIAIS (Lidas do GitHub Secrets)
 # ===================================================================
 WEBHOOK_URL = os.environ.get('WEBHOOK_URL')
-GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY")
 EMAIL_USER = os.environ.get("EMAIL_USER")
 EMAIL_PASS = os.environ.get("EMAIL_PASS")
 
 SMTP_SERVER = "smtp.gmail.com"
 SMTP_PORT = 587
 
-# Configurar o cliente da IA
-client = genai.Client(api_key=GEMINI_API_KEY)
-
 # ===================================================================
-# 1. FUNÇÕES DE IA E EMAIL
+# 1. FUNÇÃO DE ENVIO DE EMAIL (Para alimentar o teu Agente IA)
 # ===================================================================
-def analisar_com_ia(prompt_completo):
-    print("A enviar lista para análise tática do Gemini...")
-    
-    tentativas = 10
-    espera_base = 15
-    espera_maxima = 300
-
-    for tentativa in range(tentativas):
-        try:
-            resposta = client.models.generate_content(
-                model='gemini-3.6-flash',
-                contents=prompt_completo
-            )
-            return resposta.text
-            
-        except Exception as e:
-            erro_str = str(e)
-            print(f"Tentativa {tentativa + 1} falhou: {erro_str}")
-            
-            if tentativa < tentativas - 1:
-                if "503" in erro_str or "UNAVAILABLE" in erro_str or "429" in erro_str:
-                    tempo_espera = espera_base * (2 ** tentativa)
-                    if tempo_espera > espera_maxima:
-                        tempo_espera = espera_maxima
-                        
-                    print(f"Bloqueio de API ou Servidores Cheios. A aguardar {tempo_espera} segundos...")
-                    time.sleep(tempo_espera)
-                else:
-                    print("Erro estrutural na IA. A abortar tentativa.")
-                    raise e
-            else:
-                print("Todas as tentativas esgotadas. Falha crítica de tráfego.")
-                raise e
-
-def enviar_email_resposta(relatorio_texto, assunto="Relatório Tático Diário - Concluído"):
-    print(f"A enviar email: '{assunto}'...")
+def enviar_email_para_agente_ia(relatorio_texto, assunto="tradingRelatorioIA"):
+    print(f"\nA enviar email para o Agente IA (Assunto: '{assunto}')...")
     try:
         msg = MIMEMultipart()
         msg['From'] = EMAIL_USER
@@ -76,10 +36,9 @@ def enviar_email_resposta(relatorio_texto, assunto="Relatório Tático Diário -
         server.login(EMAIL_USER, EMAIL_PASS)
         server.sendmail(EMAIL_USER, EMAIL_USER, msg.as_string())
         server.quit()
-        print(f"[SUCESSO] Email '{assunto}' enviado com sucesso!")
+        print(f"[SUCESSO] Email enviado! O teu Agente IA já pode ler a caixa de entrada.")
     except Exception as e:
-        print(f"[ERRO] Falha ao enviar o email: {e}")
-
+        print(f"[ERRO] Falha ao enviar o email para o Agente IA: {e}")
 
 # ===================================================================
 # 2. BUSCAR A WATCHLIST DINAMICAMENTE (Google Sheets)
@@ -278,7 +237,7 @@ if resultados_para_sheets and WEBHOOK_URL:
         print(f"[ERRO CRÍTICO] Falha HTTP: {e}")
 
 # ===================================================================
-# 6. GERAR BLOCO DE TEXTO E ENVIAR EMAIL DE BACKUP
+# 6. GERAR BLOCO DE TEXTO E ENVIAR PARA O TEU AGENTE IA
 # ===================================================================
 print("\nA construir o bloco de dados para a IA...")
 
@@ -301,23 +260,5 @@ for item in comboio_ia:
     )
     bloco_texto_ia += linha + "\n"
 
-# Envia o email de segurança primeiro!
-enviar_email_resposta(bloco_texto_ia, assunto="tradingRelatorioIA")
-
-# ===================================================================
-# 7. INVOCAR A IA (GEMINI)
-# ===================================================================
-print("\nA iniciar processo da Inteligência Artificial (Gemini)...")
-try:
-    analise_final = analisar_com_ia(bloco_texto_ia)
-    
-    print("\n" + "="*50)
-    print("RELATÓRIO TÁTICO DIÁRIO (GEMINI)")
-    print("="*50)
-    print(analise_final)
-    
-    # Envia o relatório final
-    enviar_email_resposta(analise_final, assunto="Relatório Tático Diário - Concluído")
-except Exception as e:
-    print(f"\n[AVISO] A IA falhou ou os servidores estão em baixo. Erro: {e}")
-    print("A cópia limpa já está no teu email para executares manualmente.")
+# Envia o email que o teu outro script de IA vai apanhar!
+enviar_email_para_agente_ia(bloco_texto_ia, assunto="tradingRelatorioIA")
