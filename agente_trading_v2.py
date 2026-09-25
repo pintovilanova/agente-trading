@@ -37,7 +37,7 @@ except Exception as e:
 # ===================================================================
 # 2. CONFIGURAÇÕES BASE E LISTA DE TICKERS
 # ===================================================================
-tickers = ["MSFT", "AAPL", "NVDA", "TSLA"]
+tickers = ["MSFT", "AAPL", "NVDA", "TSLA","PFE"]
 
 risco_maximo_dolares = 25.00
 multiplicador_trailing_ts = 1.5
