@@ -24,4 +24,6 @@ jobs:
       - name: Ligar o Motor V2
         env:
           WEBHOOK_URL: ${{ secrets.WEBHOOK_URL }}
+          EMAIL_USER: ${{ secrets.EMAIL_USER }}
+          EMAIL_PASS: ${{ secrets.EMAIL_PASS }}
         run: python agente_trading_v2.py
