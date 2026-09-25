@@ -147,12 +147,16 @@ for ativo_info in ativos_data:
         preco_tp = "N/A"
         preco_be = "N/A"
         qtd_acoes = "N/A"
-        trailing_final = "N/A"
         multiplicador_atr = 1.0
+
+        # CÁLCULO BASE DO TRAILING APLICADO A TODOS OS ATIVOS (Correção face ao V1)
+        trailing_base = preco - (atr * multiplicador_trailing_ts)
+        trailing_final = round(trailing_base, 2)
 
         preco_caiu_hoje = preco < preco_anterior
         volume_despejo = rvol > 1.20
 
+        # GUILHOTINA MATEMÁTICA
         if (preco_caiu_hoje and volume_despejo) or (momentum < -3.00):
             recomendacao = "Observar"
         elif var_perc > 0 and adx < 20:
@@ -168,6 +172,7 @@ for ativo_info in ativos_data:
             preco_entrada = preco - (atr * 0.2)
             multiplicador_atr = 1.2
 
+        # GESTÃO DE RISCO PARA ATIVOS ACIONADOS
         if recomendacao != "Observar" and preco_entrada != "N/A":
             preco_stop_calc = preco_entrada - (atr * multiplicador_atr)
             preco_stop = round(preco_stop_calc, 2)
@@ -183,13 +188,13 @@ for ativo_info in ativos_data:
                 dist_tp = preco_tp - preco_entrada
                 preco_be = round(preco_entrada + (dist_tp / 2), 2)
                 
-            trailing_calculado = preco - (atr * multiplicador_trailing_ts)
-            trailing_final = round(max(trailing_calculado, preco_stop_calc), 2)
+            # Se for uma recomendação ativa, o trailing nunca pode ser pior que o Stop inicial
+            trailing_final = round(max(trailing_base, preco_stop_calc), 2)
 
         # Captura a data e hora do momento da análise
         data_atual = pd.Timestamp.now().strftime('%d/%m/%Y %H:%M:%S')
-        
-        # Matriz Completa para o Google Sheets (Aba V2)
+
+        # Matriz Completa para o Google Sheets (Aba V2) - 17 Colunas
         linha_sheets = [
             ticker, nome_empresa, 
             round(preco, 2), round(rsi, 2), round(adx, 2), round(atr, 2), 
@@ -197,7 +202,7 @@ for ativo_info in ativos_data:
             recomendacao, 
             round(preco_entrada, 2) if isinstance(preco_entrada, float) else preco_entrada, 
             preco_stop, preco_tp, preco_be, qtd_acoes, trailing_final,
-            data_atual # <--- O novo campo inserido no final da coluna
+            data_atual
         ]
         resultados_para_sheets.append(linha_sheets)
 
