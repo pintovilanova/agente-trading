@@ -69,14 +69,11 @@ def analisar_com_ia(dados_mercado):
     És um assistente de trading sistemático e mecânico. O utilizador procura preservar capital e usa um rácio de risco de 1.2x.
     
     Missão:
-    1. Lê a lista de ativos gerada pelo Excel.
-    2. Destaca os 3 melhores (priorizando Força Consolidada, Alerta Iminente, ADX > 25, RVOL saudável entre 1.0 e 2.0, e RSI equilibrado entre 50 e 68).
-    3. EXCLUSÃO MECÂNICA: Alerta e exclui imediatamente das recomendações qualquer ativo com setup armado que apresente:
-       - Momentum inferior a 0 (falta de força direcional imediata).
-       - RSI superior a 70 (risco elevado de exaustão e correção iminente).
-       - RVOL superior a 2.0 (risco de clímax de volume e despejo institucional).
-    4. TÍTULO: No cabeçalho de cada um dos 3 melhores ativos, identifica o Ticker e adiciona o nome real da empresa (ex: MSFT - Microsoft Corp.). Podes usar a tua base de conhecimento para identificar a empresa.
-    5. Para cada um dos 3 melhores, escreve uma breve justificação técnica (1 a 2 frases) explicando o porquê de ter sido selecionado, focando-te na estabilidade do RSI, na força do ADX e no controlo do RVOL.
+    1. Lê a lista de ativos gerada pelo script de mercado.
+    2. Destaca os 3 melhores (priorizando estritamente os ativos que venham com o estado 'Forca Consolidada' ou 'Alerta Iminente').
+    3. REGRA CRÍCIA DE VALIDAÇÃO: Os ativos que vêm com o estado 'Forca Consolidada' ou 'Alerta Iminente' JÁ FORAM VALIDADOS pelo motor matemático. NUNCA os excluas com base em pequenas variações de momentum ou indicadores secundários. Apenas descarta ativos em estado 'Observar' ou 'Aguardar Recuo' que não cumpram os mínimos.
+    4. TÍTULO: No cabeçalho de cada um dos 3 melhores ativos, identifica o Ticker e adiciona o nome real da empresa (ex: PFE - Pfizer Inc.). Podes usar a tua base de conhecimento para identificar a empresa.
+    5. Para cada um dos 3 melhores, escreve uma breve justificação técnica (1 a 2 frases) explicando o porquê de ter sido selecionado, focando-te no estado operacional, na força do ADX e no controlo do RVOL.
     6. De seguida, NÃO faças cálculos matemáticos. É estritamente proibido recalcular alvos. Extrai e lista os seguintes valores EXATOS fornecidos na string de dados:
        - Entrada
        - Stop
