@@ -18,12 +18,13 @@ for ticker in tickers:
             df.columns = df.columns.droplevel(1)
 
         # 3. O Cérebro Matemático (pandas-ta)
+        # 3. O Cérebro Matemático (pandas-ta)
         df.ta.rsi(length=14, append=True)
         df.ta.adx(length=14, append=True)
         df.ta.atr(length=14, append=True)
         df.ta.sma(length=200, append=True)
-        # CORREÇÃO: Usar MOM (Diferença em Dólares) em vez de ROC (Percentagem)
-        df.ta.mom(length=10, append=True) 
+        # Ajustado para 14 dias, exatamente como no teu Apps Script!
+        df.ta.mom(length=14, append=True)
 
         media_volume_20 = df['Volume'].rolling(window=20).mean()
         df['RVOL'] = df['Volume'] / media_volume_20
