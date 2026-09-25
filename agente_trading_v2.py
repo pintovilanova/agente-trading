@@ -186,6 +186,9 @@ for ativo_info in ativos_data:
             trailing_calculado = preco - (atr * multiplicador_trailing_ts)
             trailing_final = round(max(trailing_calculado, preco_stop_calc), 2)
 
+        # Captura a data e hora do momento da análise
+        data_atual = pd.Timestamp.now().strftime('%d/%m/%Y %H:%M:%S')
+        
         # Matriz Completa para o Google Sheets (Aba V2)
         linha_sheets = [
             ticker, nome_empresa, 
@@ -193,7 +196,8 @@ for ativo_info in ativos_data:
             round(rvol, 2), round(dist_mm20, 2), round(momentum, 2), 
             recomendacao, 
             round(preco_entrada, 2) if isinstance(preco_entrada, float) else preco_entrada, 
-            preco_stop, preco_tp, preco_be, qtd_acoes, trailing_final
+            preco_stop, preco_tp, preco_be, qtd_acoes, trailing_final,
+            data_atual # <--- O novo campo inserido no final da coluna
         ]
         resultados_para_sheets.append(linha_sheets)
 
