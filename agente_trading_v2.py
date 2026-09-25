@@ -158,21 +158,34 @@ for ativo_info in ativos_data:
         preco_caiu_hoje = preco < preco_anterior
         volume_despejo = rvol > 1.20
 
-        # GUILHOTINA MATEMÁTICA
-        if (preco_caiu_hoje and volume_despejo) or (momentum < -3.00):
+        # ===================================================================
+        # GUILHOTINA MATEMÁTICA - OTIMIZADA PARA SUBIDAS EMINENTES
+        # ===================================================================
+        
+        # 1. REJEIÇÃO IMEDIATA: Preço em queda com volume, ou MOMENTUM NEGATIVO ou ZERO
+        if (preco_caiu_hoje and volume_despejo) or (momentum <= 0.5):
             recomendacao = "Observar"
-        elif var_perc > 0 and adx < 20:
+            
+        # 2. CONSOLIDAÇÃO FRACA: Tem variação positiva, mas a tendência geral é fraca (ADX < 25)
+        elif var_perc > 0 and adx < 25:
             recomendacao = "Aguardar Recuo"
-            preco_entrada = preco - (atr * 0.4)
+            preco_entrada = preco - (atr * 0.4) 
             multiplicador_atr = 1.0
-        elif var_perc > 0 and adx >= 25 and rvol >= 1.00 and (50.00 <= rsi <= 70.00) and (-1.00 <= dist_mm20 <= 2.50):
+            
+        # 3. FORÇA CONSOLIDADA: ADX forte (> 30), Volume Elevado (> 1.20), Momentum robusto (> 1.5)
+        elif var_perc > 0 and adx >= 30 and rvol >= 1.20 and (55.00 <= rsi <= 72.00) and (0.00 <= dist_mm20 <= 3.50) and momentum > 1.50:
             recomendacao = "Forca Consolidada"
-            preco_entrada = preco - (atr * 0.2)
-            multiplicador_atr = 1.2
-        elif adx >= 20 and rvol >= 0.85 and (48.00 <= rsi <= 75.00) and (-2.00 <= dist_mm20 <= 3.50):
+            preco_entrada = preco - (atr * 0.1) 
+            multiplicador_atr = 1.3 
+            
+        # 4. ALERTA IMINENTE: Volume começa a entrar (>= 1.00), ADX em tendência (>= 25) e Momentum positivo (> 0.50)
+        elif adx >= 25 and rvol >= 1.00 and (50.00 <= rsi <= 75.00) and (-1.00 <= dist_mm20 <= 4.00) and momentum > 0.50:
             recomendacao = "Alerta Iminente"
             preco_entrada = preco - (atr * 0.2)
             multiplicador_atr = 1.2
+            
+        else:
+            recomendacao = "Observar"
 
         # GESTÃO DE RISCO PARA ATIVOS ACIONADOS
         if recomendacao != "Observar" and preco_entrada != "N/A":
@@ -261,7 +274,7 @@ Regras Operacionais Estritas:
 3. TÍTULO: No cabeçalho de cada um dos 3 melhores ativos, identifica o Ticker e adiciona o nome real da empresa (ex: PFE - Pfizer Inc.).
 4. Para cada um dos 3 melhores, escreve uma breve justificação técnica (1 a 2 frases) focando-te no estado operacional, na força do ADX e no controlo do RVOL.
 5. EXTRACÇÃO EXATA: É estritamente proibido arredondar ou recalcular alvos. Extrai e lista os valores EXATOS fornecidos na string de dados para: Entrada, Stop, Take-Profit, Break-Even, Trailing e Qtd.
-6. REFERÊNCIA: Inclui obrigatoriamente em cada um dos 3 mejores ativos apresentados a linha do 'comboio' de dados original correspondente.
+6. REFERÊNCIA: Inclui obrigatoriamente em cada um dos 3 melhores ativos apresentados a linha do 'comboio' de dados original correspondente.
 7. Alerta também brevemente para os ativos que deves evitar (Momentum muito negativo ou RSI fraco fora das exceções validadas).
 """
 
