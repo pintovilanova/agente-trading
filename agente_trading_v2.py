@@ -1,7 +1,14 @@
 import yfinance as yf
 import pandas_ta as ta
 import pandas as pd
+import requests
 import sys
+
+# ===================================================================
+# 0. CONFIGURAÇÃO DO WEBHOOK DO GOOGLE SHEETS
+# ===================================================================
+# Substitui o texto entre aspas pelo URL da Aplicação Web que copiaste do Apps Script
+WEBHOOK_URL = "https://script.google.com/macros/s/AKfycbz5pFfb4fd7LqUPO8mgE1h8I_Qsf-c__eXESuZuh-d7jIxKCmX7-EDQb8qBvyEyVDCfdw/exec"
 
 # ===================================================================
 # 1. VETO MACRO (SPY FLASH CRASH & BEAR MARKET)
@@ -37,13 +44,14 @@ except Exception as e:
 # ===================================================================
 # 2. CONFIGURAÇÕES BASE E LISTA DE TICKERS
 # ===================================================================
-tickers = ["MSFT", "AAPL", "NVDA", "TSLA","PFE"]
+tickers = ["MSFT", "AAPL", "NVDA", "TSLA", "PFE"]
 
 risco_maximo_dolares = 25.00
 multiplicador_trailing_ts = 1.5
 racio_tp_base = 1.2
 
 resultados = []
+resultados_para_sheets = []
 
 # ===================================================================
 # 3. MOTOR MATEMÁTICO V2 E GUILHOTINA
@@ -146,7 +154,7 @@ for ticker in tickers:
             trailing_calculado = preco - (atr * multiplicador_trailing_ts)
             trailing_final = round(max(trailing_calculado, preco_stop_calc), 2)
 
-        # Formatação do dicionário final para visualização / futuro Google Sheets
+        # Dicionário para o terminal
         dados_ativos = {
             "Ticker": ticker,
             "Preço": round(preco, 2),
@@ -165,14 +173,39 @@ for ticker in tickers:
             "Trailing": trailing_final
         }
         resultados.append(dados_ativos)
+
+        # Linha formatada para enviar para o Google Sheets (Colunas B até O)
+        linha_sheets = [
+            round(preco, 2), round(rsi, 2), round(adx, 2), round(atr, 2), 
+            round(rvol, 2), round(dist_mm20, 2), round(momentum, 2), 
+            recomendacao, 
+            round(preco_entrada, 2) if isinstance(preco_entrada, float) else preco_entrada, 
+            preco_stop, preco_tp, preco_be, qtd_acoes, trailing_final
+        ]
+        resultados_para_sheets.append(linha_sheets)
+        
         print(f"[OK] {ticker} analisado. Estado: {recomendacao}")
 
     except Exception as e:
         print(f"[ERRO] Falha ao processar {ticker}: {e}")
+        resultados_para_sheets.append(["ERRO"] * 14)
 
 # ===================================================================
-# 4. EXIBIÇÃO DA MATRIZ DE RESULTADOS
+# 4. EXIBIÇÃO DA MATRIZ NO TERMINAL E ENVIO PARA O SHEETS
 # ===================================================================
 print("\n--- MATRIZ TÁTICA V2 ---")
 df_final = pd.DataFrame(resultados)
 print(df_final.to_string(index=False))
+
+if resultados_para_sheets and WEBHOOK_URL != "COLA_AQUI_O_TEU_WEBHOOK_URL":
+    print("\nA enviar resultados para o Google Sheets...")
+    try:
+        resposta = requests.post(WEBHOOK_URL, json=resultados_para_sheets)
+        if resposta.status_code == 200:
+            print("[SUCESSO] Dados enviados e gravados na aba 'Análise Compra V2'!")
+        else:
+            print(f"[ERRO] O servidor respondeu com o código: {resposta.status_code}")
+    except Exception as e:
+        print(f"[ERRO CRÍTICO] Falha no envio HTTP: {e}")
+else:
+    print("\n[AVISO] WEBHOOK_URL não configurado. Os dados não foram enviados para o Sheets.")
