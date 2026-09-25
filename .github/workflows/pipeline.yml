@@ -21,7 +21,7 @@ jobs:
         run: |
           python -m pip install --upgrade pip setuptools wheel
           pip install yfinance pandas requests google-generativeai
-          pip install pandas-ta
+          pip install pandas-ta --prefer-binary
 
       - name: Passo 1 - Executar Motor Matemático (Gera Dados e Envia Email Base)
         env:
