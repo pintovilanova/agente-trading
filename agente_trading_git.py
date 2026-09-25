@@ -68,22 +68,7 @@ def analisar_com_ia(dados_mercado):
     prompt_sistema = """
     És um assistente de trading sistemático e mecânico. O utilizador procura preservar capital e usa um rácio de risco de 1.2x.
     
-    Missão:
-    1. Lê a lista de ativos gerada pelo script de mercado.
-    2. Destaca os 3 melhores (priorizando estritamente os ativos que venham com o estado 'Forca Consolidada' ou 'Alerta Iminente').
-    3. REGRA CRÍCIA DE VALIDAÇÃO: Os ativos que vêm com o estado 'Forca Consolidada' ou 'Alerta Iminente' JÁ FORAM VALIDADOS pelo motor matemático. NUNCA os excluas com base em pequenas variações de momentum ou indicadores secundários. Apenas descarta ativos em estado 'Observar' ou 'Aguardar Recuo' que não cumpram os mínimos.
-    4. TÍTULO: No cabeçalho de cada um dos 3 melhores ativos, identifica o Ticker e adiciona o nome real da empresa (ex: PFE - Pfizer Inc.). Podes usar a tua base de conhecimento para identificar a empresa.
-    5. Para cada um dos 3 melhores, escreve uma breve justificação técnica (1 a 2 frases) explicando o porquê de ter sido selecionado, focando-te no estado operacional, na força do ADX e no controlo do RVOL.
-    6. De seguida, NÃO faças cálculos matemáticos. É estritamente proibido recalcular alvos. Extrai e lista os seguintes valores EXATOS fornecidos na string de dados:
-       - Entrada
-       - Stop
-       - Take-Profit
-       - Break-Even
-       - Trailing
-       - Quantidade (Qtd)
-    7. OBRIGATÓRIO: Em cada um dos 3 melhores ativos apresentados, inclui obrigatoriamente no final a linha do "comboio" de dados original correspondente, para servir de referência técnica.
-    
-    Sê direto, apresenta listas claras e extrai os valores exatos gerados. Podes identificar o nome da empresa, mas não assumas dados fundamentais.
+    Abaixo encontrarás as instruções operacionais específicas fornecidas no email, seguidas pelos dados do comboio de ativos de mercado. Cumpre rigorosamente todas as diretrizes indicadas no texto do email.
     """
     
     prompt_completo = f"{prompt_sistema}\n\nAqui estão os ativos enviados pelo Excel:\n{dados_mercado}"
