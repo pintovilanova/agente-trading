@@ -21,7 +21,7 @@ jobs:
         run: |
           python -m pip install --upgrade pip setuptools wheel
           pip install yfinance pandas requests google-generativeai
-          pip install https://github.com/twopirllc/pandas-ta/archive/main.zip
+          pip install https://github.com/twopirllc/pandas-ta/archive/master.zip
 
       - name: Passo 1 - Executar Motor Matemático (Gera Dados e Envia Email Base)
         env:
