@@ -283,5 +283,9 @@ for item in comboio_ia:
     )
     bloco_texto_ia += linha + "\n"
 
+# Guarda uma cópia local para o Passo 2 ler instantaneamente (sem falhas de IMAP)
+with open("comboio_temp.txt", "w", encoding="utf-8") as f:
+    f.write(bloco_texto_ia)
+    
 # Envia o email unificado para a caixa de correio
 enviar_email_para_agente_ia(bloco_texto_ia, assunto="tradingRelatorioIA")
