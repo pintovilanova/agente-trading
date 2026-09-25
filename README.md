@@ -34,7 +34,7 @@ The system operates on a hybrid orchestration model, where **Google Apps Script*
 
 ---
 
-## 3. Business Logic & Risk Management (Math.Max Matrix)
+## 2. Business Logic & Risk Management (Math.Max Matrix)
 
 The core of the system is built on a rigid capital preservation algorithm, where the AI acts strictly as an advanced calculator for predefined parameters.
 
@@ -59,7 +59,7 @@ The core of the system is built on a rigid capital preservation algorithm, where
 
 ---
 
-## 4. Resilience & Fault Tolerance (Error Handling)
+## 3. Resilience & Fault Tolerance (Error Handling)
 
 The architecture is designed to be fault-tolerant across three critical vectors:
 
@@ -67,7 +67,7 @@ The architecture is designed to be fault-tolerant across three critical vectors:
 2.  **AI Traffic Spikes (503 Unavailable Error):** The `agente_trading_git.py` script contains a `try/except` block wrapped in a `for` loop, powered by a Tenacity-style exponential backoff algorithm. If the API servers reject the request due to high demand, the system logs the failure and retries up to 10 times, escalating wait periods up to a maximum of 300 seconds (5 minutes) per attempt.
 3.  **Cloud Scheduling Protection (Cron Jobs):** To prevent private repositories from pausing automated schedules due to inactivity (the 60-day rule), the commit cycle and manual/automated executions guarantee daily continuity. The infrastructure relies on the robust UTC time zone (`0 7 * * *`), perfectly aligned with the target morning delivery window.
 
-## 5. Execution Pipeline (Chronological Flow)
+## 4. Execution Pipeline (Chronological Flow)
 
 The system's lifecycle is designed to bypass API rate limits and ensure that US market closing data is fully consolidated prior to analysis. The flow is divided into two main phases: **Nightly Processing** and **Morning Analysis**.
 
