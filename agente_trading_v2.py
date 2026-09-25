@@ -287,11 +287,16 @@ Regras Operacionais Estritas de Triagem e Ataque:
    - GAPS DE ABERTURA: Lembra sempre o trader com a frase "Se a ação abrir em Gap > 1% acima da entrada prevista, ABORTA A MISSÃO, não persigas o preço."
    - GESTÃO DE LUCRO: Se o ADX for > 35, instrui: "[TENDÊNCIA EXTREMA] Ignora o TP, gere pelo Trailing Stop". Se ADX < 30, instrui: "[TENDÊNCIA MODERADA] Respeita o Take-Profit fixo."
 
-5. EXTRACÇÃO EXATA (INTOCÁVEL): Lista os valores EXATOS fornecidos (Entrada, Stop, Take-Profit, Break-Even, Trailing, Qtd). NUNCA recalcules ou modifiques estes números.
+5. RISCOS DE CALENDÁRIO E CORRELAÇÃO:
+   - EARNINGS: Adiciona o aviso "⚠️ ALERTA MANUAL: Verifica se há apresentação de resultados nos próximos 3 dias. Se sim, ABORTA."
+   - SEXTA-FEIRA: Se a data da análise for uma Sexta-Feira, adiciona "[ALERTA DE SEXTA-FEIRA] - Probabilidade de recolha de lucros à tarde. Reduz o lote ou aperta os critérios de entrada."
+   - CORRELAÇÃO: Se os 3 ativos forem do mesmo setor, emite "[AVISO DE CORRELAÇÃO] - Risco concentrado. Escolhe apenas o ativo com o melhor Momentum."
 
-6. REFERÊNCIA: Cola a linha original do 'comboio' de dados correspondente abaixo de cada ativo.
+6. EXTRACÇÃO EXATA (INTOCÁVEL): Lista os valores EXATOS fornecidos (Entrada, Stop, Take-Profit, Break-Even, Trailing, Qtd). NUNCA recalcules ou modifiques estes números.
 
-7. SAÚDE DO MERCADO: Termina o email com o estado clínico do mercado ("Ex: 80% das ações a 'Observar', dinheiro institucional a lateralizar").
+7. REFERÊNCIA: Cola a linha original do 'comboio' de dados correspondente abaixo de cada ativo.
+
+8. SAÚDE DO MERCADO: Termina o email com o estado clínico do mercado ("Ex: 80% das ações a 'Observar', dinheiro institucional a lateralizar").
 """
 
 # Monta o corpo unificado do email
