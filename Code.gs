@@ -1894,3 +1894,68 @@ function dispararAgenteGitHubViaAPI() {
     Logger.log("Erro ao acionar o GitHub (" + respostaCodigo + "): " + response.getContentText());
   }
 }
+
+
+
+// ==========================================
+// NOVO MOTOR V2 (WEBHOOK PARA O GITHUB)
+// ==========================================
+// 1. O Python chama o GET para ler a Watchlist (Agora lê Ticker + Nome)
+function doGet(e) {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var sheet = ss.getSheetByName("Analise Compra");
+  
+  if (!sheet) {
+    return ContentService.createTextOutput(JSON.stringify({"erro": "Aba 'Analise Compra' nao encontrada"}))
+                         .setMimeType(ContentService.MimeType.JSON);
+  }
+  
+  var ultimaLinha = sheet.getLastRow();
+  var ativos = [];
+  
+  if (ultimaLinha >= 3) {
+    // getRange(linha, coluna, qt_linhas, qt_colunas). 
+    // Começa na linha 3, coluna 5 (E), e lê 2 colunas (E e F)
+    var valores = sheet.getRange(3, 5, ultimaLinha - 2, 2).getValues();
+    
+    for (var i = 0; i < valores.length; i++) {
+      var t = valores[i][0]; // Ticker (Coluna E)
+      var n = valores[i][1]; // Nome (Coluna F)
+      if (t && t.toString().trim() !== "") {
+        ativos.push({
+          "ticker": t.toString().trim(),
+          "nome": n ? n.toString().trim() : "N/A"
+        });
+      }
+    }
+  }
+  
+  return ContentService.createTextOutput(JSON.stringify(ativos))
+                       .setMimeType(ContentService.MimeType.JSON);
+}
+
+// 2. O Python envia os resultados via POST para a V2
+function doPost(e) {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var sheet = ss.getSheetByName("Análise Compra V2");
+  
+  if (!sheet) {
+    return ContentService.createTextOutput(JSON.stringify({"status": "erro", "mensagem": "Aba nao encontrada"}))
+                         .setMimeType(ContentService.MimeType.JSON);
+  }
+  
+  var dados = JSON.parse(e.postData.contents);
+  var ultimaLinha = sheet.getLastRow();
+  
+  // Limpa os dados antigos a partir da linha 2. 
+  // Alterado para 17 colunas porque adicionámos o 'Nome' à saída!
+  if (ultimaLinha > 1) {
+    sheet.getRange(2, 1, ultimaLinha - 1, 17).clearContent();
+  }
+  
+  // Escreve os novos dados a partir da Coluna A (1), Linha 2
+  sheet.getRange(2, 1, dados.length, dados[0].length).setValues(dados);
+  
+  return ContentService.createTextOutput(JSON.stringify({"status": "sucesso"}))
+                       .setMimeType(ContentService.MimeType.JSON);
+}
