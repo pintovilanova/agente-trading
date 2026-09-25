@@ -281,6 +281,8 @@ Regras Operacionais Estritas de Triagem e Ataque:
    - REGRA DA MOLA (MM20): Se 'Dist MM20' > 2.5%, alerta [AVISO: PREÇO ESTICADO - Risco de Pullback].
    - COMPRESSÃO (ATR vs RVOL): Se o RVOL for > 1.5 e o Momentum for sólido, marca como [POTENCIAL DE COMPRESSÃO] (alta prioridade).
    - EXAUSTÃO: Se o RSI for > 70 mas o Momentum for baixo (< 1.0) ou RVOL < 1.3, alerta [AVISO DE EXAUSTÃO - Sem Combustível].
+   - BARREIRAS INSTITUCIONAIS: Se o Preço de Entrada ou Take-Profit estiver a menos de 1% de um número redondo maior (ex: 50.00, 100.00, 200.00), alerta [PAREDE INSTITUCIONAL - Risco de rejeição].
+   - ATIVOS ERRÁTICOS: Se o ATR for superior a 5% do Preço atual, alerta [ATIVO ERRÁTICO - Alta Volatilidade] e recomenda evitar o risco de slippage.
    - RECOMENDAÇÃO DE LOTE: Com base no exposto, dita se a entrada deve ser de "Lote Completo" ou "Lote Reduzido a 50%".
 
 4. TÁTICA DE EXECUÇÃO:
@@ -296,7 +298,9 @@ Regras Operacionais Estritas de Triagem e Ataque:
 
 7. REFERÊNCIA: Cola a linha original do 'comboio' de dados correspondente abaixo de cada ativo.
 
-8. SAÚDE DO MERCADO: Termina o email com o estado clínico do mercado ("Ex: 80% das ações a 'Observar', dinheiro institucional a lateralizar").
+8. SAÚDE DO MERCADO E LEI DA MEIA-HORA: 
+   Termina o email com o estado clínico do mercado ("Ex: 80% das ações a 'Observar', dinheiro institucional a lateralizar") E inclui SEMPRE este mandato final a negrito:
+   **"TÁTICA DE EXECUÇÃO OBRIGATÓRIA: Não executar ordens antes das 15h00. Deixar a volatilidade inicial queimar os amadores e confirmar a verdadeira direção institucional."**
 """
 
 # Monta o corpo unificado do email
@@ -317,7 +321,7 @@ for item in comboio_ia:
     )
     bloco_texto_ia += linha + "\n"
 
-# Guarda uma cópia local para o Passo 2 ler instantaneamente (sem falhas de IMAP)
+# Guarda uma cópia local para o Passo 2 ler instantaneamente
 with open("comboio_temp.txt", "w", encoding="utf-8") as f:
     f.write(bloco_texto_ia)
     
