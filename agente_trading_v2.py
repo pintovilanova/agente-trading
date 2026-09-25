@@ -246,13 +246,24 @@ if resultados_para_sheets and WEBHOOK_URL:
         print(f"[ERRO CRÍTICO] Falha HTTP: {e}")
 
 # ===================================================================
-# 6. GERAR BLOCO DE TEXTO E ENVIAR PARA O TEU AGENTE IA
+# 6. GERAR BLOCO DE TEXTO E ENVIAR PARA O TEU AGENTE IA (COM PROMPT EMBUTIDO)
 # ===================================================================
-print("\nA construir o bloco de dados para a IA...")
+print("\nA construir o bloco unificado (Prompt + Comboio) para o email...")
 
-prompt_sistema = """Modo Diário Ativo: Avalia os seguintes ativos da minha watchlist 'Força Consolidada'. Destaca os 3 melhores (com base no ADX > 25, RVOL > 1 e RSI > 50) e alerta para os que devo evitar (Momentum muito negativo ou RSI fraco). Na tua recomendação tática para os 3 melhores, é estritamente proibido arredondar ou usar linguagem aproximada. Extrai e lista os valores EXATOS fornecidos na string de dados para: Entrada, Stop, Take-Profit, Break-Even, Trailing e Qtd. Inclui obrigatoriamente em cada um dos 3 melhores ativos apresentados a linha do 'comboio' de dados original correspondente para servir de referência técnica. Mantém a análise focada na minha estratégia de Math.max e trailing stop."""
+# Prompt blindado que vai embutido diretamente no email de origem
+prompt_sistema_embutido = """MODO DIÁRIO ATIVO: Avalia os seguintes ativos da minha watchlist.
+Regras Operacionais Estritas:
+1. Destaca os 3 melhores (priorizando estritamente os ativos que venham com o estado 'Forca Consolidada' ou 'Alerta Iminente').
+2. REGRA CRÍTICA DE VALIDAÇÃO: Os ativos que vêm com o estado 'Forca Consolidada' ou 'Alerta Iminente' JÁ FORAM VALIDADOS pelo motor matemático. NUNCA os excluas com base em pequenas variações de momentum ou indicadores secundários. Apenas descarta ativos em estado 'Observar' ou 'Aguardar Recuo' que não cumpram os mínimos.
+3. TÍTULO: No cabeçalho de cada um dos 3 melhores ativos, identifica o Ticker e adiciona o nome real da empresa (ex: PFE - Pfizer Inc.).
+4. Para cada um dos 3 melhores, escreve uma breve justificação técnica (1 a 2 frases) focando-te no estado operacional, na força do ADX e no controlo do RVOL.
+5. EXTRACÇÃO EXATA: É estritamente proibido arredondar ou recalcular alvos. Extrai e lista os valores EXATOS fornecidos na string de dados para: Entrada, Stop, Take-Profit, Break-Even, Trailing e Qtd.
+6. REFERÊNCIA: Inclui obrigatoriamente em cada um dos 3 melhores ativos apresentados a linha do 'comboio' de dados original correspondente.
+7. Alerta também brevemente para os ativos que deves evitar (Momentum muito negativo ou RSI fraco fora das exceções validadas).
+"""
 
-bloco_texto_ia = f"{prompt_sistema}\n\n--------------------------------------------------\n"
+# Monta o corpo unificado do email
+bloco_texto_ia = f"{prompt_sistema_embutido}\n\n--------------------------------------------------\n"
 bloco_texto_ia += "DADOS DOS ATIVOS (COMBOIO):\n\n"
 
 for item in comboio_ia:
@@ -269,5 +280,5 @@ for item in comboio_ia:
     )
     bloco_texto_ia += linha + "\n"
 
-# Envia o email que o teu outro script de IA vai apanhar!
+# Envia o email unificado para a caixa de correio
 enviar_email_para_agente_ia(bloco_texto_ia, assunto="tradingRelatorioIA")
