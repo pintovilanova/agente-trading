@@ -1735,8 +1735,17 @@ function verificarEEnviarParaAgente() {
   var rangeColunaS = abaAnalise.getRange(3, 19, ultimaLinha - 2, 1);
   var dadosS = rangeColunaS.getValues();
   
-  // --- PROMPT ATUALIZADO COM A INSTRUÇÃO DO COMBOIO ORIGINAL ---
-  var promptManual = "Modo Diário Ativo: Avalia os seguintes ativos da minha watchlist 'Força Consolidada'. Destaca os 3 melhores (com base no ADX > 25, RVOL > 1 e RSI > 50) e alerta para os que devo evitar (Momentum muito negativo ou RSI fraco). Na tua recomendação tática para os 3 melhores, é estritamente proibido arredondar ou usar linguagem aproximada. Extrai e lista os valores EXATOS fornecidos na string de dados para: Entrada, Stop, Take-Profit, Break-Even, Trailing e Qtd. Inclui obrigatoriamente em cada um dos 3 melhores ativos apresentados a linha do 'comboio' de dados original correspondente para servir de referência técnica. Mantém a análise focada na minha estratégia de Math.max e trailing stop.\n\n--------------------------------------------------\nDADOS DOS ATIVOS (COMBOIO):\n\n";
+  // --- PROMPT ATUALIZADO COM A REGRA CRÍTICA DE VALIDAÇÃO ---
+  var promptManual = "Modo Diário Ativo: Avalia os seguintes ativos da minha watchlist 'Força Consolidada'.\n" +
+    "Regras Operacionais Estritas:\n" +
+    "1. Destaca os 3 melhores (priorizando estritamente os ativos que venham com o estado 'Forca Consolidada' ou 'Alerta Iminente', ADX > 25, RVOL > 1 e RSI > 50).\n" +
+    "2. REGRA CRÍTICA DE VALIDAÇÃO: Os ativos que vêm com o estado 'Forca Consolidada' ou 'Alerta Iminente' JÁ FORAM VALIDADOS pelo motor matemático. NUNCA os excluas com base em pequenas variações de momentum ou indicadores secundários. Apenas descarta ativos em estado 'Observar' ou 'Aguardar Recuo' que não cumpram os mínimos.\n" +
+    "3. Alerta para os que deves evitar (Momentum muito negativo ou RSI fraco).\n" +
+    "4. Na tua recomendação tática para os 3 melhores, é estritamente proibido arredondar ou usar linguagem aproximada. Extrai e lista os valores EXATOS fornecidos na string de dados para: Entrada, Stop, Take-Profit, Break-Even, Trailing e Qtd.\n" +
+    "5. Inclui obrigatoriamente em cada um dos 3 melhores ativos apresentados a linha do 'comboio' de dados original correspondente para servir de referência técnica.\n" +
+    "6. Mantém a análise focada na minha estratégia de Math.max e trailing stop.\n\n" +
+    "--------------------------------------------------\n" +
+    "DADOS DOS ATIVOS (COMBOIO):\n\n";
   
   var textoFinal = promptManual;
   var linhasAdicionadas = 0;
