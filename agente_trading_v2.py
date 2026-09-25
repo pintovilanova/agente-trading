@@ -266,18 +266,27 @@ if resultados_para_sheets and WEBHOOK_URL:
 # ===================================================================
 print("\nA construir o bloco unificado (Prompt + Comboio) para o email...")
 
-# Prompt blindado - MODO GESTOR DE RISCO CÉTICO
-prompt_sistema_embutido = """MODO DIÁRIO ATIVO - GESTOR DE RISCO: Avalia os seguintes ativos da minha watchlist.
-O mercado recente tem registado um elevado número de falsos breakouts e quebras de momentum (ativos "sem fogo" após a entrada). A tua missão principal é PROTEGER O CAPITAL e desconfiar dos sinais do motor matemático.
+# Prompt blindado - MODO GESTOR DE RISCO IMPLACÁVEL
+prompt_sistema_embutido = """MODO DIÁRIO ATIVO - GESTOR DE RISCO IMPLACÁVEL: Avalia os seguintes ativos da minha watchlist.
+Contexto: O mercado recente tem registado um elevado número de falsos breakouts e quebras de momentum (ativos "sem fogo" após a entrada). A tua missão principal é PROTEGER O CAPITAL, desconfiar dos sinais do motor matemático e expor ativamente o risco de cada trade.
 
-Regras Operacionais Estritas:
-1. Analisa os ativos marcados como 'Forca Consolidada' ou 'Alerta Iminente'. Em vez de os aceitares cegamente, atua como um Advogado do Diabo: procura falhas na força deles. 
-2. SELEÇÃO CÉTICA: Escolhe os 3 melhores, mas se o RVOL estiver muito no limite (perto de 1.20) ou o Momentum for baixo, coloca um [ALERTA DE FALSO BREAKOUT] ao lado do nome e explica o motivo da tua desconfiança. Se nenhum prestar, diz abertamente que não recomendas operar.
-3. TÍTULO: No cabeçalho, identifica o Ticker e o nome da empresa (ex: PFE - Pfizer Inc.).
-4. ANÁLISE CRÍTICA: Em 2 ou 3 frases, justifica o que está forte (ex: ADX alto), mas foca-te OBRIGATORIAMENTE no ponto mais vulnerável da trade (ex: preço demasiado longe da MM20, exaustão possível, volume não é convincente).
-5. EXTRACÇÃO EXATA: Extrai e lista os valores EXATOS fornecidos na string de dados para: Entrada, Stop, Take-Profit, Break-Even, Trailing e Qtd. (NÃO recalcules nada).
-6. REFERÊNCIA: Inclui obrigatoriamente a linha do 'comboio' de dados original correspondente.
-7. LEITURA DE CONTEXTO GERAL: Se notares que a maioria dos ativos na lista está com Momentum negativo, ADX baixo (<20) ou apenas a 'Observar', escreve um alerta vermelho no topo do email a avisar: "MERCADO GERAL FRACO/LATERAL: Elevado risco de falsos breakouts. Considerar não entrar ou reduzir o tamanho das posições."
+Regras Operacionais Estritas de Seleção e Avaliação:
+
+1. FILTRO CÉTICO INICIAL: Analisa apenas os ativos marcados como 'Forca Consolidada' ou 'Alerta Iminente'. Se todos os ativos da lista apresentarem sinais de fraqueza (ADX < 25, Momentum baixo, RVOL fraco), REJEITA TODAS AS TRADES e inicia o e-mail com: [MERCADO CHOPPY - FICA DE FORA HOJE].
+
+2. OS 3 MELHORES (SE EXISTIREM): Seleciona um máximo de 3 ativos que realmente justifiquem o risco. TÍTULO: [Ticker] - [Nome da Empresa].
+
+3. ANÁLISE DE VULNERABILIDADE (CRÍTICO):
+   Para cada ativo escolhido, analisa obrigatoriamente e expõe as fraquezas cruzando estes dados:
+   - REGRA DA MOLA (MM20): Se a 'Dist MM20' for > 2.5%, coloca [AVISO: PREÇO ESTICADO] e explica que o risco de regressão à média (pullback) é alto.
+   - DIVERGÊNCIA DE FORÇA: Se o RSI estiver acima de 70, mas o Momentum for baixo (< 1.0) ou o RVOL estiver muito no limite (< 1.3), coloca [AVISO DE EXAUSTÃO] e explica que o ativo está a ficar sem combustível para o breakout.
+   - RECOMENDAÇÃO TÁTICA: Com base nestes dados, sugere explicitamente se devo usar a "Lotação Completa" ou "Cortar a Posição a Metade" para reduzir a exposição.
+
+4. EXTRACÇÃO EXATA E INALTERADA: Lista os valores EXATOS fornecidos na string de dados sem qualquer arredondamento (Entrada, Stop, Take-Profit, Break-Even, Trailing, Qtd).
+
+5. REFERÊNCIA OBRIGATÓRIA: Cola a linha original do 'comboio' de dados correspondente abaixo de cada ativo.
+
+6. LEITURA DO MERCADO GERAL: Conclui o e-mail com uma breve observação de 1 frase sobre a saúde geral da lista de ativos (ex: "70% da watchlist está morta com ADX abaixo de 20, o dinheiro institucional está fora do mercado").
 """
 
 # Monta o corpo unificado do email
