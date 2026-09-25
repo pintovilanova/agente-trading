@@ -41,7 +41,7 @@ for ticker in tickers:
             "ADX": round(ultimo_dia['ADX_14'], 2),
             "ATR": round(ultimo_dia['ATRr_14'], 2),
             "SMA200": round(ultimo_dia['SMA_200'], 2),
-            "Momentum": round(ultimo_dia['ROC_10'], 2),
+            "Momentum": round(ultimo_dia['MOM_10'], 2),
             "RVOL": round(ultimo_dia['RVOL'], 2) # Volume Relativo adicionado
         }
         resultados.append(dados_ativos)
