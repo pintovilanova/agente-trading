@@ -1,3 +1,5 @@
+from datetime import datetime
+from zoneinfo import ZoneInfo
 import yfinance as yf
 import pandas_ta as ta
 import pandas as pd
@@ -191,8 +193,8 @@ for ativo_info in ativos_data:
             # Se for uma recomendação ativa, o trailing nunca pode ser pior que o Stop inicial
             trailing_final = round(max(trailing_base, preco_stop_calc), 2)
 
-        # Captura a data e hora do momento da análise
-        data_atual = pd.Timestamp.now().strftime('%d/%m/%Y %H:%M:%S')
+        # Captura a data e hora ajustada para o fuso horário de Portugal
+        data_atual = datetime.now(ZoneInfo("Europe/Lisbon")).strftime('%d/%m/%Y %H:%M:%S')
 
         # Matriz Completa para o Google Sheets (Aba V2) - 17 Colunas
         linha_sheets = [
@@ -223,7 +225,8 @@ for ativo_info in ativos_data:
             "alvo": preco_tp,
             "be": preco_be,
             "quantidade": qtd_acoes,
-            "trailing": trailing_final
+            "trailing": trailing_final,
+            "data": data_atual
         })
         
         print(f"[OK] {ticker} analisado. Estado: {recomendacao}")
@@ -258,7 +261,7 @@ Regras Operacionais Estritas:
 3. TÍTULO: No cabeçalho de cada um dos 3 melhores ativos, identifica o Ticker e adiciona o nome real da empresa (ex: PFE - Pfizer Inc.).
 4. Para cada um dos 3 melhores, escreve uma breve justificação técnica (1 a 2 frases) focando-te no estado operacional, na força do ADX e no controlo do RVOL.
 5. EXTRACÇÃO EXATA: É estritamente proibido arredondar ou recalcular alvos. Extrai e lista os valores EXATOS fornecidos na string de dados para: Entrada, Stop, Take-Profit, Break-Even, Trailing e Qtd.
-6. REFERÊNCIA: Inclui obrigatoriamente em cada um dos 3 melhores ativos apresentados a linha do 'comboio' de dados original correspondente.
+6. REFERÊNCIA: Inclui obrigatoriamente em cada um dos 3 mejores ativos apresentados a linha do 'comboio' de dados original correspondente.
 7. Alerta também brevemente para os ativos que deves evitar (Momentum muito negativo ou RSI fraco fora das exceções validadas).
 """
 
@@ -275,8 +278,8 @@ for item in comboio_ia:
         f"RSI: {item['rsi']},ADX: {item['adx']},ATR: {item.get('atr', 'N/A')},"
         f"RVOL: {item['rvol']},Estado: {item['estado']},Entrada: {item['entrada']},"
         f"Stop: {item['stop']},Take-Profit: {item['alvo']},Break-Even: {item.get('be', 'N/A')},"
-        f"Qtd: {item['quantidade']},Trailing: {item.get('trailing', 'N/A')},"
-        f"Data: {pd.Timestamp.now().strftime('%d/%m/%Y %H:%M:%S')}"
+        f"Qtd: {item['quantidade']},Trailing: {item['trailing']},"
+        f"Data: {item['data']}"
     )
     bloco_texto_ia += linha + "\n"
 
