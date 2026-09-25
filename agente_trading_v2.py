@@ -2,13 +2,13 @@ import yfinance as yf
 import pandas_ta as ta
 import pandas as pd
 import requests
+import os
 import sys
 
 # ===================================================================
-# 0. CONFIGURAÇÃO DO WEBHOOK DO GOOGLE SHEETS
+# 0. CONFIGURAÇÃO DO WEBHOOK (VIA GITHUB SECRET)
 # ===================================================================
-# Substitui o texto entre aspas pelo URL da Aplicação Web que copiaste do Apps Script
-WEBHOOK_URL = "https://script.google.com/macros/s/AKfycbz5pFfb4fd7LqUPO8mgE1h8I_Qsf-c__eXESuZuh-d7jIxKCmX7-EDQb8qBvyEyVDCfdw/exec"
+WEBHOOK_URL = os.environ.get('WEBHOOK_URL')
 
 # ===================================================================
 # 1. VETO MACRO (SPY FLASH CRASH & BEAR MARKET)
@@ -174,8 +174,9 @@ for ticker in tickers:
         }
         resultados.append(dados_ativos)
 
-        # Linha formatada para enviar para o Google Sheets (Colunas B até O)
+        # Linha formatada para enviar para o Google Sheets (Coluna A = Ticker, Colunas B até O = Indicadores)
         linha_sheets = [
+            ticker,  # <--- Coluna A
             round(preco, 2), round(rsi, 2), round(adx, 2), round(atr, 2), 
             round(rvol, 2), round(dist_mm20, 2), round(momentum, 2), 
             recomendacao, 
@@ -188,7 +189,7 @@ for ticker in tickers:
 
     except Exception as e:
         print(f"[ERRO] Falha ao processar {ticker}: {e}")
-        resultados_para_sheets.append(["ERRO"] * 14)
+        resultados_para_sheets.append(["ERRO"] * 15)
 
 # ===================================================================
 # 4. EXIBIÇÃO DA MATRIZ NO TERMINAL E ENVIO PARA O SHEETS
@@ -197,8 +198,8 @@ print("\n--- MATRIZ TÁTICA V2 ---")
 df_final = pd.DataFrame(resultados)
 print(df_final.to_string(index=False))
 
-if resultados_para_sheets and WEBHOOK_URL != "COLA_AQUI_O_TEU_WEBHOOK_URL":
-    print("\nA enviar resultados para o Google Sheets...")
+if resultados_para_sheets and WEBHOOK_URL:
+    print("\nA enviar resultados para o Google Sheets de forma segura...")
     try:
         resposta = requests.post(WEBHOOK_URL, json=resultados_para_sheets)
         if resposta.status_code == 200:
@@ -208,4 +209,4 @@ if resultados_para_sheets and WEBHOOK_URL != "COLA_AQUI_O_TEU_WEBHOOK_URL":
     except Exception as e:
         print(f"[ERRO CRÍTICO] Falha no envio HTTP: {e}")
 else:
-    print("\n[AVISO] WEBHOOK_URL não configurado. Os dados não foram enviados para o Sheets.")
+    print("\n[AVISO] WEBHOOK_URL não configurado nas Secrets do GitHub.")
