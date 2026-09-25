@@ -24,7 +24,7 @@ for ticker in tickers:
         df.ta.adx(length=14, append=True)
         df.ta.atr(length=14, append=True)
         df.ta.sma(length=200, append=True)
-        df.ta.roc(length=10, append=True) # Momentum
+        df.ta.mom(length=10, append=True) # Momentum
 
         # NOVO: Cálculo do RVOL (Volume Relativo a 20 dias)
         media_volume_20 = df['Volume'].rolling(window=20).mean()
