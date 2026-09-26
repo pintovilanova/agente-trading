@@ -11,6 +11,15 @@ from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 
 # ===================================================================
+# 0.1 TRAVA DE FIM DE SEMANA (Não corre ao Sábado e Domingo)
+# ===================================================================
+dia_da_semana = datetime.now(ZoneInfo("Europe/Lisbon")).weekday()
+# weekday() retorna: 0=Segunda, 1=Terça, ..., 5=Sábado, 6=Domingo
+if dia_da_semana >= 5:
+    print("[INFO] Fim de semana detetado. O mercado está fechado. O Agente vai descansar.")
+    sys.exit(0) # Termina o script pacificamente e não envia e-mail
+
+# ===================================================================
 # 0. CONFIGURAÇÕES E CREDENCIAIS (Lidas do GitHub Secrets)
 # ===================================================================
 WEBHOOK_URL = os.environ.get('WEBHOOK_URL')
