@@ -306,34 +306,37 @@ Contexto: O mercado recente está armadilhado com falsos breakouts. A tua missã
 
 Regras Operacionais Estritas de Triagem e Ataque:
 
-1. FILTRO CÉTICO INICIAL: Analisa apenas ativos com 'Forca Consolidada' ou 'Alerta Iminente'. Se o panorama geral for fraco (maioria com ADX < 25 e RVOL baixo), REJEITA TUDO e inicia o e-mail com: [MERCADO CHOPPY - FICA DE FORA HOJE].
+1. FILTRO CÉTICO INICIAL: Analisa apenas ativos com 'Forca Consolidada' ou 'Alerta Iminente'. Se o panorama geral for fraco (maioria com ADX < 25 e RVOL baixo), REJEITA TUDO e inicia o e-mail APENAS com: [MERCADO CHOPPY - FICA DE FORA HOJE].
 
-2. OS 3 MELHORES ALVOS: Se existirem oportunidades reais, foca-te num máximo de 3. TÍTULO: [Ticker] - [Nome da Empresa].
+2. OS 3 MELHORES ALVOS: Se existirem oportunidades reais, foca-te num máximo de 3 ativos. Se um ativo detetar EARNINGS = PERIGO, ele é sumariamente desclassificado e não pode ser recomendado.
 
 3. ANÁLISE DE VULNERABILIDADE E POTENCIAL (CRÍTICO):
-   Para cada alvo, cruza os dados e aplica as seguintes bandeiras táticas:
+   Cruza os dados e aplica as seguintes bandeiras táticas:
    - REGRA DA MOLA (MM20): Se 'Dist MM20' > 2.5%, alerta [AVISO: PREÇO ESTICADO - Risco de Pullback].
-   - COMPRESSÃO (ATR vs RVOL): Se o RVOL for > 1.5 e o Momentum for sólido, marca como [POTENCIAL DE COMPRESSÃO] (alta prioridade).
-   - EXAUSTÃO: Se o RSI for > 70 mas o Momentum for baixo (< 1.0) ou RVOL < 1.3, alerta [AVISO DE EXAUSTÃO - Sem Combustível].
-   - BARREIRAS INSTITUCIONAIS: Se o Preço de Entrada ou Take-Profit estiver a menos de 1% de um número redondo maior (ex: 50.00, 100.00, 200.00), alerta [PAREDE INSTITUCIONAL - Risco de rejeição].
-   - ATIVOS ERRÁTICOS: Lê o campo 'Vol' junto ao ATR no comboio. Se a volatilidade (ATR%) for > 5%, alerta [ATIVO ERRÁTICO - Alta Volatilidade] e recomenda evitar o risco de slippage.
-   - RECOMENDAÇÃO DE LOTE: Com base no exposto, dita se a entrada deve ser de "Lote Completo" ou "Lote Reduzido a 50%".
+   - COMPRESSÃO (ATR vs RVOL): Se o RVOL > 1.5 e Momentum sólido, marca [POTENCIAL DE COMPRESSÃO] (alta prioridade).
+   - EXAUSTÃO: Se RSI > 70 mas Momentum < 1.0 ou RVOL < 1.3, alerta [AVISO DE EXAUSTÃO - Sem Combustível].
+   - BARREIRAS INSTITUCIONAIS: Se Entrada ou Take-Profit estiverem a <1% de um número redondo maior (ex: 50.00, 100.00), alerta [PAREDE INSTITUCIONAL - Risco de rejeição].
+   - ATIVOS ERRÁTICOS: Lê 'Vol' junto ao ATR no comboio. Se Vol > 5%, alerta [ATIVO ERRÁTICO - Alta Volatilidade].
 
 4. TÁTICA DE EXECUÇÃO:
-   - GAPS DE ABERTURA: Lembra sempre o trader com a frase "Se a ação abrir em Gap > 1% acima da entrada prevista, ABORTA A MISSÃO, não persigas o preço."
-   - GESTÃO DE LUCRO: Se o ADX for > 35, instrui: "[TENDÊNCIA EXTREMA] Ignora o TP, gere pelo Trailing Stop". Se ADX < 30, instrui: "[TENDÊNCIA MODERADA] Respeita o Take-Profit fixo."
+   - GAPS DE ABERTURA: Inclui: "Se abrir em Gap > 1% da entrada, ABORTA."
+   - GESTÃO DE LUCRO: Se ADX > 35, instrui: "[TENDÊNCIA EXTREMA] Ignora TP, gere pelo Trailing". Se ADX < 30: "[TENDÊNCIA MODERADA] Respeita o TP fixo."
 
 5. RISCOS DE CALENDÁRIO E CORRELAÇÃO:
-   - EARNINGS: Lê o campo 'Earnings' no comboio. Se disser 'PERIGO', REJEITA o ativo imediatamente e avisa: [ALERTA DE EARNINGS: Trade cancelada por proximidade de resultados].
-   - SEXTA-FEIRA: Lê a '(INFO SISTEMA)' no topo deste prompt. Se for Sexta-feira ('SIM'), adiciona "[ALERTA DE SEXTA-FEIRA] - Probabilidade de recolha de lucros à tarde. Reduz o lote ou aperta os critérios de entrada."
-   - CORRELAÇÃO: Compara o campo 'Setor' dos ativos validados. Se 2 ou mais forem do mesmo Setor, emite "[AVISO DE CORRELAÇÃO] - Risco concentrado. Escolhe apenas o ativo com o melhor Momentum e descarta os outros."
+   - SEXTA-FEIRA: Lê a (INFO SISTEMA). Se for Sexta-feira ('SIM'), exige Lote Reduzido à tarde.
+   - CORRELAÇÃO: Se 2 ou mais ativos do Top 3 forem do mesmo Setor, emite "[AVISO DE CORRELAÇÃO] - Risco concentrado" e escolhe apenas o melhor.
 
-6. EXTRACÇÃO EXATA (INTOCÁVEL): Lista os valores EXATOS fornecidos (Entrada, Stop, Take-Profit, Break-Even, Trailing, Qtd). NUNCA recalcules ou modifiques estes números.
+6. ESTRUTURA VISUAL OBRIGATÓRIA (Usa exatamente este template para cada ativo validado):
+   
+   🎯 [TICKER] - [Nome da Empresa] ([Setor])
+   - 🚩 BANDEIRAS: (Lista aqui os avisos da regra 3 e 5, ou "Limpo" se não houver)
+   - ⚙️ EXECUÇÃO: (Menciona a regra dos Gaps e Gestão de Lucro)
+   - 🛡️ TAMANHO DA POSIÇÃO: (Recomenda Lote Completo ou Lote Reduzido a 50%)
+   - 🔢 DADOS EXATOS: Entrada: X | Stop: X | TP: X | BE: X | Trailing: X | Qtd: X (Se Lote Reduzido, indica Qtd original / 2)
+   - 📋 REFERÊNCIA: (Cola a linha original do comboio aqui)
 
-7. REFERÊNCIA: Cola a linha original do 'comboio' de dados correspondente abaixo de cada ativo.
-
-8. SAÚDE DO MERCADO E LEI DA MEIA-HORA: 
-   Termina o email com o estado clínico do mercado ("Ex: 80% das ações a 'Observar', dinheiro institucional a lateralizar") E inclui SEMPRE este mandato final a negrito:
+7. SAÚDE DO MERCADO E MANDATO FINAL: 
+   Termina o email com uma frase sobre o estado do mercado E inclui SEMPRE de forma isolada e a negrito no fim do email:
    **"TÁTICA DE EXECUÇÃO OBRIGATÓRIA: Não executar ordens antes das 15h00. Deixar a volatilidade inicial queimar os amadores e confirmar a verdadeira direção institucional."**
 """
 
