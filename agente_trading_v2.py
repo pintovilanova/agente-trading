@@ -17,7 +17,10 @@ dia_da_semana = datetime.now(ZoneInfo("Europe/Lisbon")).weekday()
 # weekday() retorna: 0=Segunda, 1=Terça, ..., 5=Sábado, 6=Domingo
 if dia_da_semana >= 5:
     print("[INFO] Fim de semana detetado. O mercado está fechado. O Agente vai descansar.")
-    sys.exit(0) # Termina o script pacificamente e não envia e-mail
+    sys.exit(0)
+
+# Variável para o Agente IA saber se é Sexta-feira (4 = Sexta)
+hoje_e_sexta = "SIM" if dia_da_semana == 4 else "NÃO"
 
 # ===================================================================
 # 0. CONFIGURAÇÕES E CREDENCIAIS (Lidas do GitHub Secrets)
@@ -118,7 +121,6 @@ for ativo_info in ativos_data:
     nome_empresa = ativo_info.get("nome", "N/A")
     
     try:
-        # Extração de Preços
         df = yf.download(ticker, period="2y", interval="1d", progress=False)
         if df.empty:
             print(f"[AVISO] Sem dados para {ticker}.")
@@ -128,13 +130,15 @@ for ativo_info in ativos_data:
             df.columns = df.columns.droplevel(1)
 
         # ===================================================================
-        # NOVO: DETETAR EARNINGS AUTOMATICAMENTE
+        # NOVO: EXTRAIR EARNINGS E SETOR
         # ===================================================================
         alerta_earnings = "OK"
+        setor = "Desconhecido"
         try:
             ticker_obj = yf.Ticker(ticker)
-            calendario = ticker_obj.calendar
+            setor = ticker_obj.info.get('sector', 'Desconhecido')
             
+            calendario = ticker_obj.calendar
             if isinstance(calendario, dict) and 'Earnings Date' in calendario:
                 proxima_data = calendario['Earnings Date'][0]
                 if hasattr(proxima_data, 'date'):
@@ -146,7 +150,7 @@ for ativo_info in ativos_data:
                 if 0 <= dias_restantes <= 3:
                     alerta_earnings = f"PERIGO (em {dias_restantes} dias)"
         except Exception:
-            alerta_earnings = "Desconhecido"
+            pass
 
         df.ta.rsi(length=14, append=True)
         df.ta.adx(length=14, append=True)
@@ -173,6 +177,9 @@ for ativo_info in ativos_data:
         rsi = ultimo_dia['RSI_14']
         atr = ultimo_dia['ATRr_14']
         momentum = ultimo_dia['MOM_14']
+
+        # Cálculo extra: Volatilidade (ATR em % do Preço)
+        atr_perc = round((atr / preco) * 100, 2)
 
         recomendacao = "Observar"
         preco_entrada = "N/A"
@@ -244,16 +251,18 @@ for ativo_info in ativos_data:
         ]
         resultados_para_sheets.append(linha_sheets)
 
-        # Guardar para o Comboio da IA
+        # Guardar para o Comboio da IA (Agora com Setor e ATR%)
         comboio_ia.append({
             "ticker": ticker,
             "nome": nome_empresa,
+            "setor": setor,
             "estado": recomendacao,
             "preco": round(preco, 2),
             "rsi": round(rsi, 2),
             "adx": round(adx, 2),
             "rvol": round(rvol, 2),
             "atr": round(atr, 2),
+            "atr_perc": atr_perc,
             "momentum": round(momentum, 2),
             "dist_mm20": round(dist_mm20, 2),
             "entrada": round(preco_entrada, 2) if isinstance(preco_entrada, float) else preco_entrada,
@@ -262,7 +271,7 @@ for ativo_info in ativos_data:
             "be": preco_be,
             "quantidade": qtd_acoes,
             "trailing": trailing_final,
-            "earnings": alerta_earnings,  # <--- Earnings dinâmicos adicionados aqui
+            "earnings": alerta_earnings,
             "data": data_atual
         })
         
@@ -290,8 +299,9 @@ if resultados_para_sheets and WEBHOOK_URL:
 # ===================================================================
 print("\nA construir o bloco unificado (Prompt + Comboio) para o email...")
 
-# Prompt blindado - MODO PREDADOR E GESTOR DE RISCO IMPLACÁVEL
-prompt_sistema_embutido = """MODO DIÁRIO ATIVO - PREDADOR DE BREAKOUTS: Avalia os seguintes ativos da minha watchlist.
+# Prompt blindado - MODO PREDADOR E GESTOR DE RISCO IMPLACÁVEL (Com variáveis dinâmicas)
+prompt_sistema_embutido = f"""MODO DIÁRIO ATIVO - PREDADOR DE BREAKOUTS: Avalia os seguintes ativos da minha watchlist.
+(INFO SISTEMA - Hoje é Sexta-feira? {hoje_e_sexta})
 Contexto: O mercado recente está armadilhado com falsos breakouts. A tua missão é PROTEGER O CAPITAL, desconfiar do motor matemático e expor ativamente o risco de cada trade, priorizando apenas os arranques com força institucional real.
 
 Regras Operacionais Estritas de Triagem e Ataque:
@@ -306,7 +316,7 @@ Regras Operacionais Estritas de Triagem e Ataque:
    - COMPRESSÃO (ATR vs RVOL): Se o RVOL for > 1.5 e o Momentum for sólido, marca como [POTENCIAL DE COMPRESSÃO] (alta prioridade).
    - EXAUSTÃO: Se o RSI for > 70 mas o Momentum for baixo (< 1.0) ou RVOL < 1.3, alerta [AVISO DE EXAUSTÃO - Sem Combustível].
    - BARREIRAS INSTITUCIONAIS: Se o Preço de Entrada ou Take-Profit estiver a menos de 1% de um número redondo maior (ex: 50.00, 100.00, 200.00), alerta [PAREDE INSTITUCIONAL - Risco de rejeição].
-   - ATIVOS ERRÁTICOS: Se o ATR for superior a 5% do Preço atual, alerta [ATIVO ERRÁTICO - Alta Volatilidade] e recomenda evitar o risco de slippage.
+   - ATIVOS ERRÁTICOS: Lê o campo 'Vol' junto ao ATR no comboio. Se a volatilidade (ATR%) for > 5%, alerta [ATIVO ERRÁTICO - Alta Volatilidade] e recomenda evitar o risco de slippage.
    - RECOMENDAÇÃO DE LOTE: Com base no exposto, dita se a entrada deve ser de "Lote Completo" ou "Lote Reduzido a 50%".
 
 4. TÁTICA DE EXECUÇÃO:
@@ -314,9 +324,9 @@ Regras Operacionais Estritas de Triagem e Ataque:
    - GESTÃO DE LUCRO: Se o ADX for > 35, instrui: "[TENDÊNCIA EXTREMA] Ignora o TP, gere pelo Trailing Stop". Se ADX < 30, instrui: "[TENDÊNCIA MODERADA] Respeita o Take-Profit fixo."
 
 5. RISCOS DE CALENDÁRIO E CORRELAÇÃO:
-   - EARNINGS: Lê o campo 'Earnings' no comboio de dados. Se disser 'PERIGO', REJEITA o ativo imediatamente e avisa: [ALERTA DE EARNINGS: Trade cancelada por proximidade de resultados].
-   - SEXTA-FEIRA: Se a data da análise for uma Sexta-Feira, adiciona "[ALERTA DE SEXTA-FEIRA] - Probabilidade de recolha de lucros à tarde. Reduz o lote ou aperta os critérios de entrada."
-   - CORRELAÇÃO: Se os 3 ativos forem do mesmo setor, emite "[AVISO DE CORRELAÇÃO] - Risco concentrado. Escolhe apenas o ativo com o melhor Momentum."
+   - EARNINGS: Lê o campo 'Earnings' no comboio. Se disser 'PERIGO', REJEITA o ativo imediatamente e avisa: [ALERTA DE EARNINGS: Trade cancelada por proximidade de resultados].
+   - SEXTA-FEIRA: Lê a '(INFO SISTEMA)' no topo deste prompt. Se for Sexta-feira ('SIM'), adiciona "[ALERTA DE SEXTA-FEIRA] - Probabilidade de recolha de lucros à tarde. Reduz o lote ou aperta os critérios de entrada."
+   - CORRELAÇÃO: Compara o campo 'Setor' dos ativos validados. Se 2 ou mais forem do mesmo Setor, emite "[AVISO DE CORRELAÇÃO] - Risco concentrado. Escolhe apenas o ativo com o melhor Momentum e descarta os outros."
 
 6. EXTRACÇÃO EXATA (INTOCÁVEL): Lista os valores EXATOS fornecidos (Entrada, Stop, Take-Profit, Break-Even, Trailing, Qtd). NUNCA recalcules ou modifiques estes números.
 
@@ -334,19 +344,20 @@ bloco_texto_ia += "DADOS DOS ATIVOS (COMBOIO):\n\n"
 for item in comboio_ia:
     dist_mm20_str = f"{item.get('dist_mm20', 'N/A')}%" if item.get('dist_mm20') != "N/A" else "N/A"
     
+    # A linha que vai para a IA agora tem Setor, Volatilidade % e Earnings mastigados
     linha = (
-        f"{item['ticker']},Nome: {item['nome']},Preço: {item['preco']},"
+        f"{item['ticker']},Nome: {item['nome']},Setor: {item['setor']},Preço: {item['preco']},"
         f"Dist MM20: {dist_mm20_str},Momentum: {item.get('momentum', 'N/A')},"
-        f"RSI: {item['rsi']},ADX: {item['adx']},ATR: {item.get('atr', 'N/A')},"
+        f"RSI: {item['rsi']},ADX: {item['adx']},ATR: {item.get('atr', 'N/A')} (Vol: {item['atr_perc']}%),"
         f"RVOL: {item['rvol']},Estado: {item['estado']},Entrada: {item['entrada']},"
         f"Stop: {item['stop']},Take-Profit: {item['alvo']},Break-Even: {item.get('be', 'N/A')},"
         f"Qtd: {item['quantidade']},Trailing: {item['trailing']},"
-        f"Earnings: {item.get('earnings', 'OK')},"  # <--- Variável lida pela IA
+        f"Earnings: {item.get('earnings', 'OK')},"
         f"Data: {item['data']}"
     )
     bloco_texto_ia += linha + "\n"
 
-# Guarda uma cópia local para o Passo 2 ler instantaneamente
+# Guarda uma cópia local
 with open("comboio_temp.txt", "w", encoding="utf-8") as f:
     f.write(bloco_texto_ia)
     
