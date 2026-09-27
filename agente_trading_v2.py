@@ -118,6 +118,7 @@ for ativo_info in ativos_data:
     nome_empresa = ativo_info.get("nome", "N/A")
     
     try:
+        # Extração de Preços
         df = yf.download(ticker, period="2y", interval="1d", progress=False)
         if df.empty:
             print(f"[AVISO] Sem dados para {ticker}.")
@@ -125,6 +126,27 @@ for ativo_info in ativos_data:
             
         if isinstance(df.columns, pd.MultiIndex):
             df.columns = df.columns.droplevel(1)
+
+        # ===================================================================
+        # NOVO: DETETAR EARNINGS AUTOMATICAMENTE
+        # ===================================================================
+        alerta_earnings = "OK"
+        try:
+            ticker_obj = yf.Ticker(ticker)
+            calendario = ticker_obj.calendar
+            
+            if isinstance(calendario, dict) and 'Earnings Date' in calendario:
+                proxima_data = calendario['Earnings Date'][0]
+                if hasattr(proxima_data, 'date'):
+                    proxima_data = proxima_data.date()
+                
+                hoje = datetime.now(ZoneInfo("Europe/Lisbon")).date()
+                dias_restantes = (proxima_data - hoje).days
+                
+                if 0 <= dias_restantes <= 3:
+                    alerta_earnings = f"PERIGO (em {dias_restantes} dias)"
+        except Exception:
+            alerta_earnings = "Desconhecido"
 
         df.ta.rsi(length=14, append=True)
         df.ta.adx(length=14, append=True)
@@ -160,7 +182,6 @@ for ativo_info in ativos_data:
         qtd_acoes = "N/A"
         multiplicador_atr = 1.0
 
-        # CÁLCULO BASE DO TRAILING APLICADO A TODOS OS ATIVOS (Correção face ao V1)
         trailing_base = preco - (atr * multiplicador_trailing_ts)
         trailing_final = round(trailing_base, 2)
 
@@ -170,24 +191,19 @@ for ativo_info in ativos_data:
         # ===================================================================
         # GUILHOTINA MATEMÁTICA - OTIMIZADA PARA SUBIDAS EMINENTES
         # ===================================================================
-        
-        # 1. REJEIÇÃO IMEDIATA: Preço em queda com volume, ou MOMENTUM NEGATIVO ou ZERO
         if (preco_caiu_hoje and volume_despejo) or (momentum <= 0.5):
             recomendacao = "Observar"
             
-        # 2. CONSOLIDAÇÃO FRACA: Tem variação positiva, mas a tendência geral é fraca (ADX < 25)
         elif var_perc > 0 and adx < 25:
             recomendacao = "Aguardar Recuo"
             preco_entrada = preco - (atr * 0.4) 
             multiplicador_atr = 1.0
             
-        # 3. FORÇA CONSOLIDADA: ADX forte (> 30), Volume Elevado (> 1.20), Momentum robusto (> 1.5)
         elif var_perc > 0 and adx >= 30 and rvol >= 1.20 and (55.00 <= rsi <= 72.00) and (0.00 <= dist_mm20 <= 3.50) and momentum > 1.50:
             recomendacao = "Forca Consolidada"
             preco_entrada = preco - (atr * 0.1) 
             multiplicador_atr = 1.3 
             
-        # 4. ALERTA IMINENTE: Volume começa a entrar (>= 1.00), ADX em tendência (>= 25) e Momentum positivo (> 0.50)
         elif adx >= 25 and rvol >= 1.00 and (50.00 <= rsi <= 75.00) and (-1.00 <= dist_mm20 <= 4.00) and momentum > 0.50:
             recomendacao = "Alerta Iminente"
             preco_entrada = preco - (atr * 0.2)
@@ -212,10 +228,8 @@ for ativo_info in ativos_data:
                 dist_tp = preco_tp - preco_entrada
                 preco_be = round(preco_entrada + (dist_tp / 2), 2)
                 
-            # Se for uma recomendação ativa, o trailing nunca pode ser pior que o Stop inicial
             trailing_final = round(max(trailing_base, preco_stop_calc), 2)
 
-        # Captura a data e hora ajustada para o fuso horário de Portugal
         data_atual = datetime.now(ZoneInfo("Europe/Lisbon")).strftime('%d/%m/%Y %H:%M:%S')
 
         # Matriz Completa para o Google Sheets (Aba V2) - 17 Colunas
@@ -248,6 +262,7 @@ for ativo_info in ativos_data:
             "be": preco_be,
             "quantidade": qtd_acoes,
             "trailing": trailing_final,
+            "earnings": alerta_earnings,  # <--- Earnings dinâmicos adicionados aqui
             "data": data_atual
         })
         
@@ -299,7 +314,7 @@ Regras Operacionais Estritas de Triagem e Ataque:
    - GESTÃO DE LUCRO: Se o ADX for > 35, instrui: "[TENDÊNCIA EXTREMA] Ignora o TP, gere pelo Trailing Stop". Se ADX < 30, instrui: "[TENDÊNCIA MODERADA] Respeita o Take-Profit fixo."
 
 5. RISCOS DE CALENDÁRIO E CORRELAÇÃO:
-   - EARNINGS: Adiciona o aviso "⚠️ ALERTA MANUAL: Verifica se há apresentação de resultados nos próximos 3 dias. Se sim, ABORTA."
+   - EARNINGS: Lê o campo 'Earnings' no comboio de dados. Se disser 'PERIGO', REJEITA o ativo imediatamente e avisa: [ALERTA DE EARNINGS: Trade cancelada por proximidade de resultados].
    - SEXTA-FEIRA: Se a data da análise for uma Sexta-Feira, adiciona "[ALERTA DE SEXTA-FEIRA] - Probabilidade de recolha de lucros à tarde. Reduz o lote ou aperta os critérios de entrada."
    - CORRELAÇÃO: Se os 3 ativos forem do mesmo setor, emite "[AVISO DE CORRELAÇÃO] - Risco concentrado. Escolhe apenas o ativo com o melhor Momentum."
 
@@ -326,6 +341,7 @@ for item in comboio_ia:
         f"RVOL: {item['rvol']},Estado: {item['estado']},Entrada: {item['entrada']},"
         f"Stop: {item['stop']},Take-Profit: {item['alvo']},Break-Even: {item.get('be', 'N/A')},"
         f"Qtd: {item['quantidade']},Trailing: {item['trailing']},"
+        f"Earnings: {item.get('earnings', 'OK')},"  # <--- Variável lida pela IA
         f"Data: {item['data']}"
     )
     bloco_texto_ia += linha + "\n"
