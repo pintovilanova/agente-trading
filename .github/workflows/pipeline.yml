@@ -2,7 +2,7 @@ name: Pipeline Completo de Trading
 
 on:
   schedule:
-    - cron: '30 4 * * 1-5' # Dias úteis às 08:30 UTC
+    - cron: '30 3 * * 1-5' # Dias úteis às 08:30 UTC
   workflow_dispatch: # Permite execução manual a partir do GitHub
 
 jobs:
