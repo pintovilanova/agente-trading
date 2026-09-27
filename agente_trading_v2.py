@@ -1,4 +1,4 @@
-import datetime
+from datetime import datetime
 from zoneinfo import ZoneInfo
 import yfinance as yf
 import pandas_ta as ta
@@ -13,7 +13,7 @@ from email.mime.multipart import MIMEMultipart
 # ===================================================================
 # 0.1 TRAVA DE FIM DE SEMANA (Não corre ao Sábado e Domingo)
 # ===================================================================
-dia_da_semana = datetime.datetime.now(ZoneInfo("Europe/Lisbon")).weekday()
+dia_da_semana = datetime.now(ZoneInfo("Europe/Lisbon")).weekday()
 # weekday() retorna: 0=Segunda, 1=Terça, ..., 5=Sábado, 6=Domingo
 if dia_da_semana >= 5:
     print("[INFO] Fim de semana detetado. O mercado está fechado. O Agente vai descansar.")
