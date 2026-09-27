@@ -1,9 +1,9 @@
 name: Agente Tático de Trading
 
 on:
-  workflow_dispatch:  # Permite chamadas manuais e via API REST
-  schedule:
-   - cron: '30 4 * * 1-5' # Dias úteis às 08:30 UTC
+  workflow_dispatch:  # Permite chamadas manuais no separador "Actions" do GitHub
+  # schedule:
+  #   - cron: '30 4 * * 1-5' # Desativado: Deixou de correr automaticamente em dias úteis
 
 jobs:
   executar-agente:
@@ -23,11 +23,11 @@ jobs:
         python -m pip install --upgrade pip
         pip install -r requirements.txt
 
-    - name: Executar o Agente Python
+    - name: Executar o Agente Python Único
       env:
+        WEBHOOK_URL: ${{ secrets.WEBHOOK_URL }}
         GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
         EMAIL_USER: ${{ secrets.EMAIL_USER }}
         EMAIL_PASS: ${{ secrets.EMAIL_PASS }}
-        ASSUNTO_DO_EMAIL: ${{ secrets.ASSUNTO_DO_EMAIL }}
       run: |
-        python agente_trading_git.py
+        python agente_trading_unico.py
