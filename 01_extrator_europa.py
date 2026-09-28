@@ -248,6 +248,7 @@ for ativo_info in ativos_data:
             f"Stop: {preco_stop},Take-Profit: {preco_tp},Break-Even: {preco_be},"
             f"Qtd: {qtd_acoes},Trailing: {trailing_final},Earnings: {alerta_earnings},Data: {data_atual}"
         )
+        
 
         resultados_para_sheets.append({
             "ticker": ticker,
