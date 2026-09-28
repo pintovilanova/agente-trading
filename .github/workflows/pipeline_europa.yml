@@ -39,4 +39,4 @@ jobs:
         EMAIL_USER: ${{ secrets.EMAIL_USER }}
         EMAIL_PASS: ${{ secrets.EMAIL_PASS }}
       run: |
-        python 02_gemini.py
+        python 02_agente_gemini.py
