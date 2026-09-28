@@ -244,8 +244,21 @@ for ativo_info in ativos_data:
             trailing_final = round(max(trailing_base, preco_stop_calc), 2)
 
         data_atual = datetime.now(ZoneInfo("Europe/Lisbon")).strftime('%d/%m/%Y %H:%M:%S')
+        dist_mm20_str = f"{dist_mm20:.2f}%" if 'dist_mm20' in locals() else "N/A"
 
-        # Matriz em formato de dicionário para o Apps Script atualizar as colunas na folha principal
+        # Linha detalhada do comboio completa para a Coluna S
+        linha_comboio_completa = (
+            f"{ticker},Nome: {nome_empresa},Setor: {setor},Preço: {round(preco, 2)},"
+            f"Dist MM20: {dist_mm20_str},Momentum: {round(momentum, 2)},"
+            f"RSI: {round(rsi, 2)},ADX: {round(adx, 2)},ATR: {round(atr, 2)} (Vol: {atr_perc}%),"
+            f"RVOL: {round(rvol, 2)},Estado: {recomendacao},Entrada: {preco_entrada},"
+            f"Stop: {preco_stop},Take-Profit: {preco_tp},Break-Even: {preco_be},"
+            f"Qtd: {qtd_acoes},Trailing: {trailing_final},"
+            f"Earnings: {alerta_earnings},"
+            f"Data: {data_atual}"
+        )
+
+        # Matriz em formato de dicionário para o Apps Script atualizar as colunas
         linha_dict = {
             "ticker": ticker,
             "preco": round(preco, 2),
@@ -254,7 +267,7 @@ for ativo_info in ativos_data:
             "adx": round(adx, 2),
             "atr": round(atr, 2),
             "time": data_atual,
-            "comboio": recomendacao
+            "comboio": linha_comboio_completa  # Guarda o comboio todo na coluna S!
         }
         resultados_para_sheets.append(linha_dict)
 
@@ -295,7 +308,7 @@ if resultados_para_sheets and WEBHOOK_URL:
     try:
         payload_sheets = {
             "acao": "atualizar_colunas_todas",
-            "aba": "Analise Compra",  # Aba principal do Google Sheets
+            "aba": "Analise Compra",
             "dados": resultados_para_sheets
         }
         
