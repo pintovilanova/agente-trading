@@ -281,14 +281,21 @@ for ativo_info in ativos_data:
         print(f"[ERRO] Falha ao processar {ticker}: {e}")
 
 # ===================================================================
-# 5. ENVIO PARA O GOOGLE SHEETS
+# 5. ENVIO PARA O GOOGLE SHEETS (Atualização Direta na Aba "Analise Compra")
 # ===================================================================
 if resultados_para_sheets and WEBHOOK_URL:
-    print("\nA enviar matriz completa para o Google Sheets (Análise Compra V2)...")
+    print("\nA atualizar o Google Sheets (Aba: Analise Compra)...")
     try:
-        resposta = requests.post(WEBHOOK_URL, json=resultados_para_sheets)
+        # Prepara o payload estruturado exatamente como o Apps Script espera
+        payload_sheets = {
+            "acao": "atualizar_colunas_todas",
+            "aba": "Analise Compra",  # Nome exato da aba principal no Google Sheets
+            "dados": resultados_para_sheets
+        }
+        
+        resposta = requests.post(WEBHOOK_URL, json=payload_sheets)
         if resposta.status_code == 200:
-            print("[SUCESSO] Radar atualizado na folha!")
+            print("[SUCESSO] Radar atualizado na folha principal!")
         else:
             print(f"[ERRO] Status HTTP: {resposta.status_code}")
     except Exception as e:
