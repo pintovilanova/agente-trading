@@ -9,11 +9,14 @@ from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 from datetime import datetime
 
-# Configurações de Variáveis de Ambiente
+# ==========================================
+# CONFIGURAÇÕES E VARIÁVEIS DE AMBIENTE
+# ==========================================
 WEBHOOK_URL = os.environ.get("WEBHOOK_URL")
 EMAIL_USER = os.environ.get("EMAIL_USER")
 EMAIL_PASS = os.environ.get("EMAIL_PASS")
 NOME_FICHEIRO_TXT = "comboio_europa.txt"
+NOME_ABA_EUROPA = "Analise Compra EU"
 
 def calcular_indicadores(ticker):
     try:
@@ -44,10 +47,10 @@ def calcular_indicadores(ticker):
         print(f"Erro ao processar {ticker}: {e}")
         return None
 
-def enviar_email(linhas_comboio):
+def enviar_email_seguranca(linhas_comboio):
     print("A preparar o envio do e-mail de segurança (Plano B)...")
     if not EMAIL_USER or not EMAIL_PASS:
-        print("Erro: Credenciais de e-mail não encontradas nas variáveis de ambiente.")
+        print("Aviso: Credenciais de e-mail não encontradas nas variáveis de ambiente. E-mail ignorado.")
         return
 
     msg = MIMEMultipart()
@@ -106,10 +109,22 @@ DADOS DOS ATIVOS (COMBOIO EUROPA):
         print(f"Falha ao enviar e-mail: {e}")
 
 def processar_europa():
-    print("A iniciar extração de dados da Europa...")
+    print(f"A iniciar extração de dados da Europa (Aba: {NOME_ABA_EUROPA})...")
     
-    resposta = requests.get(WEBHOOK_URL)
-    ativos = resposta.json()
+    # 1. Obter a lista de ativos do Google Sheets (GET passando o parâmetro da aba)
+    url_get = f"{WEBHOOK_URL}?aba={NOME_ABA_EUROPA}"
+    resposta = requests.get(url_get)
+    
+    try:
+        ativos = resposta.json()
+    except Exception as e:
+        print(f"Erro ao ler resposta do Google Sheets: {e}")
+        print(f"Resposta recebida: {resposta.text}")
+        return
+        
+    if not isinstance(ativos, list):
+        print(f"Erro: O retorno do Sheets não é uma lista válida: {ativos}")
+        return
     
     linhas_txt = []
     atualizacoes_sheets = []
@@ -129,6 +144,7 @@ def processar_europa():
             linha_comboio = f"{ticker},Nome: {nome},Setor: Europa,Preço: {dados['preco']},Dist MM20: {dados['dist_mm20']}%,Momentum: {dados['momentum']},RSI: {dados['rsi']},ADX: {dados['adx']},ATR: {dados['atr']},Data: {data_atual}"
             linhas_txt.append(linha_comboio)
             
+            # Pacote de dados para injetar nas colunas individuais do Google Sheets
             atualizacoes_sheets.append({
                 "ticker": ticker,
                 "preco": dados['preco'],
@@ -140,18 +156,21 @@ def processar_europa():
                 "comboio": linha_comboio
             })
 
+    # 2. Gravar o TXT localmente no GitHub
     if linhas_txt:
         with open(NOME_FICHEIRO_TXT, "w", encoding="utf-8") as f:
             f.write("\n".join(linhas_txt))
         print(f"Ficheiro {NOME_FICHEIRO_TXT} gerado com sucesso!")
 
-        # Envia o e-mail de backup (Prompt + Dados prontos a copiar)
-        enviar_email(linhas_txt)
+        # 3. Enviar o e-mail de segurança com o prompt e os dados
+        enviar_email_seguranca(linhas_txt)
 
+    # 4. Enviar atualizações detalhadas de volta para o Google Sheets (POST)
     if atualizacoes_sheets:
-        print("A enviar atualizações detalhadas para o Google Sheets...")
+        print(f"A enviar atualizações detalhadas para o Google Sheets ({NOME_ABA_EUROPA})...")
         payload = {
             "acao": "atualizar_colunas_todas",
+            "aba": NOME_ABA_EUROPA,  # Informa o Apps Script qual a aba a atualizar
             "dados": atualizacoes_sheets
         }
         headers = {'Content-Type': 'application/json'}
