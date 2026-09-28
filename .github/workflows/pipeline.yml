@@ -28,7 +28,7 @@ jobs:
           WEBHOOK_URL: ${{ secrets.WEBHOOK_URL }}
           EMAIL_USER: ${{ secrets.EMAIL_USER }}
           EMAIL_PASS: ${{ secrets.EMAIL_PASS }}
-        run: python agente_trading_v2.py
+        run: python 01_extrator_dados.py
 
       - name: Passo 2 - Executar o Agente Python
         env:
@@ -36,4 +36,4 @@ jobs:
           EMAIL_USER: ${{ secrets.EMAIL_USER }}
           EMAIL_PASS: ${{ secrets.EMAIL_PASS }}
           ASSUNTO_DO_EMAIL: ${{ secrets.ASSUNTO_DO_EMAIL }}
-        run: python agente_trading_git.py
+        run: python 02_agente_gemini.py
