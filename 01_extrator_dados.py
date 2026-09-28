@@ -321,9 +321,12 @@ if resultados_para_sheets and WEBHOOK_URL:
         print(f"[ERRO CRÍTICO] Falha HTTP: {e}")
 
 # ===================================================================
-# 6. GERAR BLOCO DE TEXTO E ENVIAR PARA O TEU AGENTE IA (COM PROMPT EMBUTIDO)
+# 6. GERAR BLOCO DE TEXTO E ENVIAR PARA O AGENTE IA (COM FILTRO CÉTICO)
 # ===================================================================
 print("\nA construir o bloco unificado (Prompt + Comboio) para o email...")
+
+# FILTRO: Seleciona apenas ativos que NÃO estão em "Observar"
+ativos_acionados = [item for item in comboio_ia if item["estado"] != "Observar"]
 
 prompt_sistema_embutido = f"""MODO DIÁRIO ATIVO - PREDADOR DE BREAKOUTS: Avalia os seguintes ativos da minha watchlist.
 (INFO SISTEMA - Hoje é Sexta-feira? {hoje_e_sexta})
@@ -366,23 +369,27 @@ Regras Operacionais Estritas de Triagem e Ataque:
 """
 
 bloco_texto_ia = f"{prompt_sistema_embutido}\n\n--------------------------------------------------\n"
-bloco_texto_ia += "DADOS DOS ATIVOS (COMBOIO):\n\n"
 
-for item in comboio_ia:
-    dist_mm20_str = f"{item.get('dist_mm20', 'N/A')}%" if item.get('dist_mm20') != "N/A" else "N/A"
-    
-    linha = (
-        f"{item['ticker']},Nome: {item['nome']},Setor: {item['setor']},Preço: {item['preco']},"
-        f"Dist MM20: {dist_mm20_str},Momentum: {item.get('momentum', 'N/A')},"
-        f"RSI: {item['rsi']},ADX: {item['adx']},ATR: {item.get('atr', 'N/A')} (Vol: {item['atr_perc']}%),"
-        f"RVOL: {item['rvol']},Estado: {item['estado']},Entrada: {item['entrada']},"
-        f"Stop: {item['stop']},Take-Profit: {item['alvo']},Break-Even: {item.get('be', 'N/A')},"
-        f"Qtd: {item['quantidade']},Trailing: {item['trailing']},"
-        f"Earnings: {item.get('earnings', 'OK')},"
-        f"Data: {item['data']}"
-    )
-    bloco_texto_ia += linha + "\n"
+if not ativos_acionados:
+    bloco_texto_ia += "[MERCADO CHOPPY - FICA DE FORA HOJE] - Nenhum ativo preencheu os requisitos mínimos de entrada.\n"
+else:
+    bloco_texto_ia += "DADOS DOS ATIVOS ACIONADOS (COMBOIO):\n\n"
+    for item in ativos_acionados:
+        dist_mm20_str = f"{item.get('dist_mm20', 'N/A')}%" if item.get('dist_mm20') != "N/A" else "N/A"
+        
+        linha = (
+            f"{item['ticker']},Nome: {item['nome']},Setor: {item['setor']},Preço: {item['preco']},"
+            f"Dist MM20: {dist_mm20_str},Momentum: {item.get('momentum', 'N/A')},"
+            f"RSI: {item['rsi']},ADX: {item['adx']},ATR: {item.get('atr', 'N/A')} (Vol: {item['atr_perc']}%),"
+            f"RVOL: {item['rvol']},Estado: {item['estado']},Entrada: {item['entrada']},"
+            f"Stop: {item['stop']},Take-Profit: {item['alvo']},Break-Even: {item.get('be', 'N/A')},"
+            f"Qtd: {item['quantidade']},Trailing: {item['trailing']},"
+            f"Earnings: {item.get('earnings', 'OK')},"
+            f"Data: {item['data']}"
+        )
+        bloco_texto_ia += linha + "\n"
 
+# Guarda uma cópia local
 with open("comboio_temp.txt", "w", encoding="utf-8") as f:
     f.write(bloco_texto_ia)
     
