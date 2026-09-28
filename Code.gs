@@ -9,7 +9,7 @@ function ANALISE_TACTICA_AUTO(ticker) {
   // LEITURA DINÂMICA DA FOLHA "CONFIGS"
   // ===================================================================
   var configs = {};
-  var riscoMaximoDolares = 25.00; // Alterado para 25.00 diretamente no código
+  var riscoMaximoDolares = 25.00;
   var racioTakeProfitGlobal = null; 
   var multiplicadorTrailing = null;
 
@@ -58,7 +58,7 @@ function ANALISE_TACTICA_AUTO(ticker) {
   } catch (e) {}
 
   // ===================================================================
-  // BUSCA DINÂMICA DO STOP ATUAL NO DIÁRIO DE BORDO (COLUNA Y)
+  // BUSCA DINÂMICA DO STOP ATUAL NO DIÁRIO DE BORDO
   // ===================================================================
   var trailingAnterior = 0;
   
@@ -76,9 +76,7 @@ function ANALISE_TACTICA_AUTO(ticker) {
           
           if (tickerLinha && tickerLinha.toString().trim().toUpperCase() === ticker.toString().trim().toUpperCase()) {
             if (statusLinha && statusLinha.toString().trim().toUpperCase() === "ATIVA") {
-              
               var stopAtualizado = parseFloat(linha[24]);  
-
               if (!isNaN(stopAtualizado) && stopAtualizado > 0) {
                  trailingAnterior = stopAtualizado;
               }
@@ -110,7 +108,6 @@ function ANALISE_TACTICA_AUTO(ticker) {
     var apiKey = apiKeys[k];
     
     try {
-      // --- VETO MACRO (SPY FLASH CRASH & BEAR MARKET) ---
       if (validarTendenciaSPY) {
         var urlSPY = "https://api.twelvedata.com/time_series?symbol=SPY&interval=1day&outputsize=200&apikey=" + apiKey;
         var resSPY = UrlFetchApp.fetch(urlSPY, {"muteHttpExceptions": true});
@@ -125,25 +122,58 @@ function ANALISE_TACTICA_AUTO(ticker) {
             var quedaSPY = ((precoSPY - precoSPYOntem) / precoSPYOntem) * 100;
             
             var somaSPY200 = 0;
-            for (var j = 0; j < 200; j++) {
-              somaSPY200 += parseFloat(dSPY.values[j].close);
-            }
+            for (var j = 0; j < 200; j++) { somaSPY200 += parseFloat(dSPY.values[j].close); }
             var sma200SPY = somaSPY200 / 200;
             
-            // 1. Kill Switch de Pânico: SPY cai 1.5% ou mais num dia
-            if (quedaSPY <= -1.50) {
-              return [["#BLOQUEADO_SPY_PANICO", "SPY caiu " + quedaSPY.toFixed(2) + "%", "", "", "", "", "", "", "", "", "", "", "","", ""]];
-            }
-            // 2. Veto de Bear Market: SPY abaixo da MM200 dias
-            if (precoSPY < sma200SPY) {
-              return [["#BLOQUEADO_SPY_BAIXA", "Mercado < SMA200", "", "", "", "", "", "", "", "", "", "", "","", ""]];
-            }
+            if (quedaSPY <= -1.50) return [["#BLOQUEADO_SPY_PANICO", "SPY caiu " + quedaSPY.toFixed(2) + "%", "", "", "", "", "", "", "", "", "", "", "","", ""]];
+            if (precoSPY < sma200SPY) return [["#BLOQUEADO_SPY_BAIXA", "Mercado < SMA200", "", "", "", "", "", "", "", "", "", "", "","", ""]];
           }
         } else {
           continue; 
         }
       }
       
+      // ===================================================================
+      // NOVO: EXTRAIR SETOR E EARNINGS DIRETAMENTE DO YAHOO FINANCE
+      // ===================================================================
+      var setorAtivo = "Desconhecido";
+      var alertaEarnings = "OK";
+      
+      try {
+        var urlYahoo = "https://query2.finance.yahoo.com/v10/finance/quoteSummary/" + ticker + "?modules=summaryProfile,calendarEvents";
+        var resYahoo = UrlFetchApp.fetch(urlYahoo, {
+          "muteHttpExceptions": true,
+          "headers": { "User-Agent": "Mozilla/5.0" }
+        });
+        
+        if (resYahoo.getResponseCode() === 200) {
+          var dYahoo = JSON.parse(resYahoo.getContentText());
+          if (dYahoo.quoteSummary && dYahoo.quoteSummary.result && dYahoo.quoteSummary.result.length > 0) {
+            var resultYF = dYahoo.quoteSummary.result[0];
+            
+            // 1. Puxar Setor
+            if (resultYF.summaryProfile && resultYF.summaryProfile.sector) {
+              setorAtivo = resultYF.summaryProfile.sector;
+            }
+            
+            // 2. Puxar Earnings
+            if (resultYF.calendarEvents && resultYF.calendarEvents.earnings && resultYF.calendarEvents.earnings.earningsDate) {
+              var rawDate = resultYF.calendarEvents.earnings.earningsDate[0].raw;
+              if (rawDate) {
+                var agora = new Date().getTime();
+                var dataEarnings = rawDate * 1000;
+                var diffDias = Math.floor((dataEarnings - agora) / (1000 * 60 * 60 * 24));
+                
+                if (diffDias >= 0 && diffDias <= 3) {
+                  alertaEarnings = "PERIGO (em " + diffDias + " dias)";
+                }
+              }
+            }
+          }
+        }
+      } catch (eYahoo) {} // Se o Yahoo falhar, segue caminho com Desconhecido/OK
+
+      // Chamadas TwelveData
       var urlVolume = "https://api.twelvedata.com/time_series?symbol=" + ticker + "&interval=1day&outputsize=25&apikey=" + apiKey;
       var urlRSI    = "https://api.twelvedata.com/rsi?symbol=" + ticker + "&interval=1day&time_period=14&apikey=" + apiKey;
       var urlADX    = "https://api.twelvedata.com/adx?symbol=" + ticker + "&interval=1day&time_period=14&apikey=" + apiKey;
@@ -165,7 +195,6 @@ function ANALISE_TACTICA_AUTO(ticker) {
         var somaPrecos20 = 0;
         for (var i = 0; i < 20; i++) { somaPrecos20 += parseFloat(valores[i].close); }
         
-        // Extração numérica da Distância à MM20
         var valDistMM20 = ((preco - (somaPrecos20 / 20)) / (somaPrecos20 / 20)) * 100;
         var distMM20 = valDistMM20.toFixed(2) + "%";
         
@@ -180,6 +209,9 @@ function ANALISE_TACTICA_AUTO(ticker) {
         for (var i = 0; i < 14; i++) { somaTr += (parseFloat(valores[i].high) - parseFloat(valores[i].low)); }
         var atr = parseFloat((somaTr / 14).toFixed(2));
         
+        // NOVO: Cálculo ATR % (Volatilidade)
+        var atrPerc = ((atr / preco) * 100).toFixed(2);
+        
         var rsi = parseFloat(dRSI.values[0].rsi).toFixed(2);
         var adx = parseFloat(dADX.values[0].adx).toFixed(2);
         
@@ -193,7 +225,7 @@ function ANALISE_TACTICA_AUTO(ticker) {
         var qtdAcoes = "N/A";
         
         var multiplicadorATR = 1.0; 
-        var racioTakeProfit = 1.2; // O rácio base arranca a 1.2
+        var racioTakeProfit = 1.2; 
 
         var valRVOL = parseFloat(rvol1);
         var valRSI = parseFloat(rsi);
@@ -201,60 +233,48 @@ function ANALISE_TACTICA_AUTO(ticker) {
         var valMomentum = parseFloat(momentum);
 
         // ===================================================================
-        // FILTRO MATH.MAX: VOLUME DE RECUO & PROTEÇÃO ESTRUTURAL
+        // GUILHOTINA MATEMÁTICA V2
         // ===================================================================
         var precoCaiuHoje = preco < precoAnterior;
-        var volumeDespejo = valRVOL > 1.20; // Queda com volume 20% acima da média diária
+        var volumeDespejo = valRVOL > 1.20; 
 
-        // 1. VETO DE DESPEJO: Bloqueia "facas a cair" disfarçadas de pullbacks
-        if (precoCaiuHoje && volumeDespejo) {
+        if ((precoCaiuHoje && volumeDespejo) || valMomentum <= 0.5) {
           recomendacao = "Observar"; 
         }
-        // 2. VETO DE INÉRCIA: Guilhotina anti-queda livre (Momentum destrutivo)
-        else if (valMomentum < -3.00) {
-          recomendacao = "Observar"; 
-        }
-        // 3. PULLBACK BASAL
-        else if (varPerc > 0 && valADX < 20) {
+        else if (varPerc > 0 && valADX < 25) {
           recomendacao = "Aguardar Recuo";
           precoEntrada = (preco - (atr * 0.4)).toFixed(2);
-          multiplicadorATR = 1; 
-          racioTakeProfit = 1.2; // Cravado a 1.2
+          multiplicadorATR = 1.0; 
         } 
-        // 4. FORÇA CONSOLIDADA: Filtros otimizados e tolerância MM20 estrita (máx 2.50%)
-        else if (varPerc > 0 && valADX >= 25 && valRVOL >= 1.00 && valRSI >= 50.00 && valRSI <= 70.00 && valDistMM20 >= -1.00 && valDistMM20 <= 2.50) { 
+        else if (varPerc > 0 && valADX >= 30 && valRVOL >= 1.20 && valRSI >= 55.00 && valRSI <= 72.00 && valDistMM20 >= 0.00 && valDistMM20 <= 3.50 && valMomentum > 1.50) { 
           recomendacao = "Forca Consolidada";
-          precoEntrada = (preco - (atr * 0.2)).toFixed(2);
-          multiplicadorATR = 1.2; 
-          racioTakeProfit = 1.2; // Cravado a 1.2
+          precoEntrada = (preco - (atr * 0.1)).toFixed(2);
+          multiplicadorATR = 1.3; 
         } 
-        // 5. ALERTA IMINENTE: Margens controladas para captar pressão institucional
-        else if (valADX >= 20 && valRVOL >= 0.85 && valRSI >= 48.00 && valRSI <= 75.00 && valDistMM20 >= -2.00 && valDistMM20 <= 3.50) {
+        else if (valADX >= 25 && valRVOL >= 1.00 && valRSI >= 50.00 && valRSI <= 75.00 && valDistMM20 >= -1.00 && valDistMM20 <= 4.00 && valMomentum > 0.50) {
           recomendacao = "Alerta Iminente";
           precoEntrada = (preco - (atr * 0.2)).toFixed(2); 
           multiplicadorATR = 1.2; 
-          racioTakeProfit = 1.2; // Cravado a 1.2
         } 
-        // 6. REJEIÇÃO GERAL
         else {
           recomendacao = "Observar";
         }
 
+        // ===================================================================
+        // GESTÃO DE RISCO
+        // ===================================================================
         if (recomendacao !== "Observar" && precoEntrada !== "N/A") {
           var precoStopCalc = parseFloat(precoEntrada) - (atr * multiplicadorATR);
           precoStop = precoStopCalc.toFixed(2);
           var riscoPorAcao = parseFloat(precoEntrada) - precoStopCalc;
           
           if (riscoPorAcao > 0) {
-            // --- FATOR DE CONVENCIMENTO (POSITION SIZING DINÂMICO) ---
             var riscoAlocado = riscoMaximoDolares; 
-            
             if (valRVOL >= 3.00) { riscoAlocado += (riscoMaximoDolares * 0.5); } 
             if (valADX >= 35.00) { riscoAlocado += (riscoMaximoDolares * 0.5); } 
 
             var tp = parseFloat(precoEntrada) + (riscoPorAcao * racioTakeProfit);
             precoTakeProfit = tp.toFixed(2);
-            
             qtdAcoes = (riscoAlocado / riscoPorAcao).toFixed(2); 
           }
         }
@@ -265,12 +285,8 @@ function ANALISE_TACTICA_AUTO(ticker) {
           precoBreakeven = (parseFloat(precoEntrada) + (distanciaAteTP / 2)).toFixed(2);
         }
 
-        // ===================================================================
-        // INTEGRAÇÃO DA MATRIZ MATH.MAX (A LEI DO RISCO)
-        // ===================================================================
         var multiTS = multiplicadorTrailing || 1.5; 
         var trailingCalculado = preco - (atr * multiTS); 
-        
         var trailingFinalNum;
         
         if (trailingAnterior > 0) {
@@ -279,18 +295,57 @@ function ANALISE_TACTICA_AUTO(ticker) {
           var pisoNovaEntrada = (precoStop !== "N/A") ? parseFloat(precoStop) : 0;
           trailingFinalNum = Math.max(trailingCalculado, pisoNovaEntrada);
         }
-        
         var precoTrailingStop = trailingFinalNum.toFixed(2);
 
         var apiDateTime = Utilities.formatDate(new Date(), Session.getScriptTimeZone(), "dd/MM/yyyy HH:mm:ss");
         
+        // Colocamos Setor e Earnings formatados juntamente com a Data para a IA ler 
+        // sem quebrar as colunas do teu Google Sheets!
+        var stringDataFinal = apiDateTime + " | Setor: " + setorAtivo + " | Earnings: " + alertaEarnings;
+
+        // --- PREPARAÇÃO DO PROMPT DA IA NO SHEETS (100% Automatizado) ---
+        var diaSemana = new Date().getDay();
+        var hojeESexta = (diaSemana === 5) ? "SIM" : "NÃO";
+
+        var promptManual = "MODO DIÁRIO ATIVO - PREDADOR DE BREAKOUTS: Avalia os seguintes ativos da minha watchlist.\n" +
+          "(INFO SISTEMA - Hoje é Sexta-feira? " + hojeESexta + ")\n" +
+          "Contexto: O mercado recente está armadilhado com falsos breakouts. A tua missão é PROTEGER O CAPITAL, desconfiar do motor matemático e expor ativamente o risco de cada trade, priorizando apenas os arranques com força institucional real.\n\n" +
+          "Regras Operacionais Estritas de Triagem e Ataque:\n\n" +
+          "1. FILTRO CÉTICO INICIAL: Analisa apenas ativos com 'Forca Consolidada' ou 'Alerta Iminente'. Se o panorama geral for fraco, REJEITA TUDO e inicia a resposta APENAS com: [MERCADO CHOPPY - FICA DE FORA HOJE].\n" +
+          "2. OS 3 MELHORES ALVOS: Foca-te num máximo de 3 ativos. Se um ativo detetar EARNINGS = PERIGO, ele é sumariamente desclassificado e não pode ser recomendado.\n" +
+          "3. ANÁLISE DE VULNERABILIDADE E POTENCIAL (CRÍTICO):\n" +
+          "   - REGRA DA MOLA (MM20): Se 'Dist MM20' > 2.5%, alerta [AVISO: PREÇO ESTICADO - Risco de Pullback].\n" +
+          "   - COMPRESSÃO (ATR vs RVOL): Se RVOL > 1.5 e Momentum sólido, marca [POTENCIAL DE COMPRESSÃO] (alta prioridade).\n" +
+          "   - EXAUSTÃO: Se RSI > 70 mas Momentum < 1.0 ou RVOL < 1.3, alerta [AVISO DE EXAUSTÃO - Sem Combustível].\n" +
+          "   - BARREIRAS INSTITUCIONAIS: Se Entrada ou TP estiver a <1% de um número redondo maior, alerta [PAREDE INSTITUCIONAL].\n" +
+          "   - ATIVOS ERRÁTICOS: Lê 'Vol' junto ao ATR no comboio. Se Vol > 5%, alerta [ATIVO ERRÁTICO - Alta Volatilidade].\n" +
+          "4. TÁTICA DE EXECUÇÃO:\n" +
+          "   - GAPS DE ABERTURA: Inclui: 'Se abrir em Gap > 1% da entrada, ABORTA.'\n" +
+          "   - GESTÃO DE LUCRO: Se ADX > 35, instrui: '[TENDÊNCIA EXTREMA] Ignora TP, gere pelo Trailing'. Se ADX < 30: '[TENDÊNCIA MODERADA] Respeita o TP fixo.'\n" +
+          "5. RISCOS DE CALENDÁRIO E CORRELAÇÃO:\n" +
+          "   - EARNINGS: Lê o campo 'Earnings' no fim da string. Se disser 'PERIGO', REJEITA o ativo imediatamente.\n" +
+          "   - SEXTA-FEIRA: Lê a (INFO SISTEMA). Se for Sexta-feira ('SIM'), exige Lote Reduzido à tarde.\n" +
+          "   - CORRELAÇÃO: Compara o campo 'Setor' dos ativos validados. Se 2 ou mais forem do mesmo Setor, emite '[AVISO DE CORRELAÇÃO] - Risco concentrado' e escolhe apenas um.\n" +
+          "6. ESTRUTURA VISUAL OBRIGATÓRIA (Usa exatamente este template para cada ativo validado):\n\n" +
+          "   🎯 [TICKER] - [Nome da Empresa] ([Setor])\n" +
+          "   - 🚩 BANDEIRAS: (Lista aqui os avisos da regra 3 e 5, ou 'Limpo')\n" +
+          "   - ⚙️ EXECUÇÃO: (Menciona a regra dos Gaps e Gestão de Lucro)\n" +
+          "   - 🛡️ TAMANHO DA POSIÇÃO: (Recomenda Lote Completo ou Lote Reduzido a 50%)\n" +
+          "   - 🔢 DADOS EXATOS: Entrada: X | Stop: X | TP: X | BE: X | Trailing: X | Qtd: X (Se Lote Reduzido, divide a Qtd original por 2)\n" +
+          "   - 📋 REFERÊNCIA: (Cola a linha original do comboio aqui)\n\n" +
+          "7. SAÚDE DO MERCADO E MANDATO FINAL:\n" +
+          "   Termina o relatório com uma frase sobre o estado do mercado E inclui SEMPRE de forma isolada e a negrito no fim:\n" +
+          "   **'TÁTICA DE EXECUÇÃO OBRIGATÓRIA: Não executar ordens antes das 15h00. Deixar a volatilidade inicial queimar os amadores e confirmar a verdadeira direção institucional.'**\n\n" +
+          "--------------------------------------------------\n" +
+          "DADOS DOS ATIVOS (COMBOIO):\n\n";
+
         return [[ 
           "Preço: " + preco.toFixed(2), 
           "Dist MM20: " + distMM20, 
           "Momentum: " + momentum, 
           "RSI: " + rsi, 
           "ADX: " + adx, 
-          "ATR: " + atr.toFixed(2), 
+          "ATR: " + atr.toFixed(2) + " (Vol: " + atrPerc + "%)", 
           "RVOL: " + rvol1, 
           "Estado: " + recomendacao, 
           "Entrada: " + precoEntrada, 
@@ -299,7 +354,7 @@ function ANALISE_TACTICA_AUTO(ticker) {
           "Break-Even: " + precoBreakeven, 
           "Qtd: " + qtdAcoes, 
           "Trailing: " + precoTrailingStop, 
-          "Data: " + apiDateTime 
+          "Data: " + stringDataFinal 
         ]];
         
       } else {
@@ -308,9 +363,8 @@ function ANALISE_TACTICA_AUTO(ticker) {
     } catch (erro) {
       continue; 
     }
-  } // <-- Fim do loop das chaves
+  } 
   
-  // ADICIONAR ESTA LINHA AQUI:
   return [["#ERRO_API", "Limites esgotados", "N/A", "N/A", "N/A", "N/A", "N/A", "Observar", "N/A", "N/A", "N/A", "N/A", "N/A", "N/A", "N/A"]];
 }
 /**
@@ -1343,7 +1397,7 @@ function enviarAlertaTrading(ticker, preco, stop, takeProfit, quantidade, dataRe
 }
 
 // ==============================================================
-// SCRIPT INTRADAY (15h30) - INTEGRAÇÃO COM FUNÇÃO DE E-MAIL EXISTENTE
+// SCRIPT INTRADAY (15h30) - GESTOR DE POSIÇÕES (TREND FOLLOWER)
 // ==============================================================
 function atualizarDiarioIntraday() {
   var ss = SpreadsheetApp.getActiveSpreadsheet();
@@ -1363,128 +1417,115 @@ function atualizarDiarioIntraday() {
   
   if (ultimaLinha < 3) return;
 
-  var dados = sheetDiario.getRange(3, 16, ultimaLinha - 2, 6).getValues();
+  // Extrai da Coluna 16 (P) até à Coluna 23 (W)
+  var dados = sheetDiario.getRange(3, 16, ultimaLinha - 2, 8).getValues();
+
+  // Variável para acumular todos os resumos num único e-mail consolidado
+  var corpoEmailGlobal = "Resumo Intraday - " + hoje + "\n\n========================\n\n";
+  var contadorAtivosAtualizados = 0;
 
   for (var i = 0; i < dados.length; i++) {
     var linhaAtual = i + 3;
-    var textoComboio = dados[i][0].toString();
-    var statusExistente = dados[i][5]; 
+    var textoComboio = dados[i][0].toString(); // Coluna P
+    var statusFechado = dados[i][7].toString().toUpperCase(); // Coluna W
     
     if (textoComboio === "") continue;
-    if (textoComboio.indexOf(hoje) === -1) break; 
     
-    if (statusExistente === "") {
-      
-      var partesComboio = textoComboio.split(",");
-      var tickerT212 = partesComboio[0].trim(); 
-      
-      // Limpa o ticker para obter apenas o símbolo (ex: "AAPL_US_EQ" -> "AAPL")
-      var tickerLimpo = tickerT212.split("_")[0].trim(); 
-      
-      function extrair(chave) {
-        for (var j = 0; j < partesComboio.length; j++) {
-          if (partesComboio[j].indexOf(chave) > -1) {
-            var partesChave = partesComboio[j].split(":");
-            if (partesChave.length > 1) {
-              return partesChave[1].trim();
-            }
+    // BLINDAGEM RIGOROSA: Ignora se a linha estiver vazia/sem valor OU se já estiver fechada
+    if (statusFechado === "" || statusFechado === "WIN" || statusFechado === "LOSS" || statusFechado === "BREAKEVEN" || statusFechado === "FUGIU") {
+      continue;
+    }
+    
+    var partesComboio = textoComboio.split(",");
+    var tickerT212 = partesComboio[0].trim(); 
+    var tickerLimpo = tickerT212.split("_")[0].trim(); 
+    
+    const extrair = (chave) => {
+      for (var j = 0; j < partesComboio.length; j++) {
+        if (partesComboio[j].indexOf(chave) > -1) {
+          var partesChave = partesComboio[j].split(":");
+          if (partesChave.length > 1) {
+            return partesChave[1].trim();
           }
         }
-        return "N/A";
       }
+      return "N/A";
+    };
+    
+    var riscoStr = extrair("ATR:");
+    var risco = riscoStr !== "N/A" ? parseFloat(riscoStr) : 0;
+    var rsi = extrair("RSI:");
+    var distMM20 = extrair("Dist MM20:");
+    var momentum = extrair("Momentum:");
+    var adx = extrair("ADX:");
+    var atr = riscoStr; 
+    var rvol = extrair("RVOL:");
+    var qtd = extrair("Qtd:");
+    
+    if (tickerLimpo && risco > 0) {
+      var maximoDia = 0;
+      var fechoAnterior = 0;
       
-      var riscoStr = extrair("ATR:");
-      var risco = riscoStr !== "N/A" ? parseFloat(riscoStr) : 0;
-      
-      var rsi = extrair("RSI:");
-      var distMM20 = extrair("Dist MM20:");
-      var momentum = extrair("Momentum:");
-      var adx = extrair("ADX:");
-      var atr = riscoStr; 
-      var rvol = extrair("RVOL:");
-      var qtd = extrair("Qtd:");
-      
-      if (tickerLimpo && risco > 0) {
+      try {
+        var url = "https://query1.finance.yahoo.com/v8/finance/chart/" + tickerLimpo;
+        var resposta = UrlFetchApp.fetch(url, {muteHttpExceptions: true});
         
-        var maximoDia = 0;
-        var fechoAnterior = 0;
-        
-        // --- NOVA ABORDAGEM: YAHOO FINANCE API ---
-        // É instantâneo, não bloqueia a folha e não precisa de escrever fórmulas
-        try {
-          var url = "https://query1.finance.yahoo.com/v8/finance/chart/" + tickerLimpo;
-          var resposta = UrlFetchApp.fetch(url, {muteHttpExceptions: true});
+        if (resposta.getResponseCode() === 200) {
+          var json = JSON.parse(resposta.getContentText());
+          var meta = json.chart.result[0].meta;
           
-          if (resposta.getResponseCode() === 200) {
-            var json = JSON.parse(resposta.getContentText());
-            var meta = json.chart.result[0].meta;
-            
-            // Vai buscar diretamente a máxima do dia e o fecho anterior
-            maximoDia = parseFloat(meta.regularMarketDayHigh || meta.regularMarketPrice);
-            fechoAnterior = parseFloat(meta.chartPreviousClose);
-          }
-        } catch(e) {
-          // Se houver algum erro de rede, os valores mantêm-se a 0
+          maximoDia = parseFloat(meta.regularMarketDayHigh || meta.regularMarketPrice);
+          fechoAnterior = parseFloat(meta.chartPreviousClose);
         }
-        // -----------------------------------------
-        
-        var dataHoraIntraday = Utilities.formatDate(new Date(), Session.getScriptTimeZone(), "dd/MM/yyyy HH:mm:ss");
+      } catch(e) { }
+      
+      var dataHoraIntraday = Utilities.formatDate(new Date(), Session.getScriptTimeZone(), "dd/MM/yyyy HH:mm:ss");
 
-        if (!isNaN(maximoDia) && maximoDia > 0 && !isNaN(fechoAnterior) && fechoAnterior > 0) {
+      if (!isNaN(maximoDia) && maximoDia > 0 && !isNaN(fechoAnterior) && fechoAnterior > 0) {
+        
+        if (maximoDia > fechoAnterior) {
+          var precoEntrada = maximoDia - risco;
+          var stopLoss = precoEntrada - risco;
+          var takeProfit = precoEntrada + (risco * 1.5);
+          var statusStr = "Forca Consolidada";
           
-          if (maximoDia > fechoAnterior) {
-            // CÁLCULOS INTRADAY
-            var precoEntrada = maximoDia - risco;
-            var stopLoss = precoEntrada - risco;
-            var takeProfit = precoEntrada + (risco * 1.5);
-            var breakEven = maximoDia; 
-            
-            var precoTrailingStop = maximoDia - (risco * 1.5); 
-            var statusStr = "Forca Consolidada";
-            
-            var resumoIntraday = tickerT212 + " (INTRADAY),Máximo 15h30: " + maximoDia.toFixed(2) + ",Estado: " + statusStr + ",Entrada: " + precoEntrada.toFixed(2) + ",Stop: " + stopLoss.toFixed(2) + ",Take-Profit: " + takeProfit.toFixed(2) + ",Data: " + dataHoraIntraday;
-            
-            sheetDiario.getRange(linhaAtual, COL_MAX_DIA, 1, 6).setValues([[
-              maximoDia.toFixed(2), precoEntrada.toFixed(2), stopLoss.toFixed(2), takeProfit.toFixed(2), statusStr, resumoIntraday
-            ]]);
-            
-            var textoParaEmail = resumoIntraday + "\n\nORIGINAL DA MANHÃ: " + textoComboio;
-            
-            if (typeof enviarAlertaTrading === 'function') {
-              enviarAlertaTrading(
-                tickerT212 + " (INTRADAY)", 
-                precoEntrada.toFixed(2), 
-                stopLoss.toFixed(2), 
-                takeProfit.toFixed(2), 
-                qtd, 
-                dataHoraIntraday, 
-                rsi, distMM20, momentum, adx, atr, rvol, 
-                breakEven.toFixed(2), 
-                statusStr, 
-                precoTrailingStop.toFixed(2), 
-                textoParaEmail
-              );
-            }
-            
-          } else {
-             var statusStr = "Ignorado - S/ Quebra de Fecho";
-             var resumoIntraday = tickerT212 + ",Máximo 15h30: " + maximoDia.toFixed(2) + ",Estado: " + statusStr + ",Data: " + dataHoraIntraday;
-             
-             sheetDiario.getRange(linhaAtual, COL_MAX_DIA, 1, 6).setValues([[
-              maximoDia.toFixed(2), "-", "-", "-", statusStr, resumoIntraday
-            ]]);
-          }
-          
-        } else {
-          var statusStr = "Erro Mercado - Ticker não encontrado";
-          var resumoIntraday = tickerT212 + ",Estado: " + statusStr + ",Data: " + dataHoraIntraday;
+          var resumoIntraday = tickerT212 + " (INTRADAY),Máximo 15h30: " + maximoDia.toFixed(2) + ",Estado: " + statusStr + ",Entrada: " + precoEntrada.toFixed(2) + ",Stop: " + stopLoss.toFixed(2) + ",Take-Profit: " + takeProfit.toFixed(2) + ",Data: " + dataHoraIntraday;
           
           sheetDiario.getRange(linhaAtual, COL_MAX_DIA, 1, 6).setValues([[
-            "Erro API", "-", "-", "-", statusStr, resumoIntraday
+            maximoDia.toFixed(2), precoEntrada.toFixed(2), stopLoss.toFixed(2), takeProfit.toFixed(2), statusStr, resumoIntraday
           ]]);
-        } 
-      }
+          
+          // Adiciona ao texto global do e-mail
+          corpoEmailGlobal += "🔹 " + tickerT212 + "\n" +
+                              "• Máximo 15h30: " + maximoDia.toFixed(2) + "\n" +
+                              "• Nova Entrada: " + precoEntrada.toFixed(2) + "\n" +
+                              "• Novo Stop Loss: " + stopLoss.toFixed(2) + "\n" +
+                              "• Novo Take Profit: " + takeProfit.toFixed(2) + "\n\n";
+          contadorAtivosAtualizados++;
+          
+        } else {
+           var statusStr = "Ignorado - S/ Quebra de Fecho";
+           var resumoIntraday = tickerT212 + ",Máximo 15h30: " + maximoDia.toFixed(2) + ",Estado: " + statusStr + ",Data: " + dataHoraIntraday;
+           
+           sheetDiario.getRange(linhaAtual, COL_MAX_DIA, 1, 6).setValues([[
+            maximoDia.toFixed(2), "-", "-", "-", statusStr, resumoIntraday
+           ]]);
+        }
+        
+      } else {
+        var statusStr = "Erro Mercado - Ticker não encontrado";
+        var resumoIntraday = tickerT212 + ",Estado: " + statusStr + ",Data: " + dataHoraIntraday;
+        
+        sheetDiario.getRange(linhaAtual, COL_MAX_DIA, 1, 6).setValues([[
+          "Erro API", "-", "-", "-", statusStr, resumoIntraday
+        ]]);
+      } 
     }
+  }
+
+  // ENVIA APENAS UM ÚNICO E-MAIL NO FIM COM TODAS AS ATUALIZAÇÕES CONSOLIDADAS
+  if (contadorAtivosAtualizados > 0) {
+    MailApp.sendEmail(Session.getActiveUser().getEmail(), "Relatório Intraday Consolidado - " + hoje, corpoEmailGlobal);
   }
 }
 // ==============================================================
@@ -1735,15 +1776,32 @@ function verificarEEnviarParaAgente() {
   var rangeColunaS = abaAnalise.getRange(3, 19, ultimaLinha - 2, 1);
   var dadosS = rangeColunaS.getValues();
   
-  // --- PROMPT ATUALIZADO COM A REGRA CRÍTICA DE VALIDAÇÃO ---
-  var promptManual = "Modo Diário Ativo: Avalia os seguintes ativos da minha watchlist 'Força Consolidada'.\n" +
-    "Regras Operacionais Estritas:\n" +
-    "1. Destaca os 3 melhores (priorizando estritamente os ativos que venham com o estado 'Forca Consolidada' ou 'Alerta Iminente', ADX > 25, RVOL > 1 e RSI > 50).\n" +
-    "2. REGRA CRÍTICA DE VALIDAÇÃO: Os ativos que vêm com o estado 'Forca Consolidada' ou 'Alerta Iminente' JÁ FORAM VALIDADOS pelo motor matemático. NUNCA os excluas com base em pequenas variações de momentum ou indicadores secundários. Apenas descarta ativos em estado 'Observar' ou 'Aguardar Recuo' que não cumpram os mínimos.\n" +
-    "3. Alerta para os que deves evitar (Momentum muito negativo ou RSI fraco).\n" +
-    "4. Na tua recomendação tática para os 3 melhores, é estritamente proibido arredondar ou usar linguagem aproximada. Extrai e lista os valores EXATOS fornecidos na string de dados para: Entrada, Stop, Take-Profit, Break-Even, Trailing e Qtd.\n" +
-    "5. Inclui obrigatoriamente em cada um dos 3 melhores ativos apresentados a linha do 'comboio' de dados original correspondente para servir de referência técnica.\n" +
-    "6. Mantém a análise focada na minha estratégia de Math.max e trailing stop.\n\n" +
+  // --- PROMPT ATUALIZADO: MODO PREDADOR E GESTOR DE RISCO IMPLACÁVEL ---
+  var promptManual = "MODO DIÁRIO ATIVO - PREDADOR DE BREAKOUTS: Avalia os seguintes ativos da minha watchlist.\n" +
+    "Contexto: O mercado recente está armadilhado com falsos breakouts. A tua missão é PROTEGER O CAPITAL, desconfiar do motor matemático e expor ativamente o risco de cada trade, priorizando apenas os arranques com força institucional real.\n\n" +
+    "Regras Operacionais Estritas de Triagem e Ataque:\n\n" +
+    "1. FILTRO CÉTICO INICIAL: Analisa apenas ativos com 'Forca Consolidada' ou 'Alerta Iminente'. Se o panorama geral for fraco (maioria com ADX < 25 e RVOL baixo), REJEITA TUDO e inicia a resposta com: [MERCADO CHOPPY - FICA DE FORA HOJE].\n" +
+    "2. OS 3 MELHORES ALVOS: Se existirem oportunidades reais, foca-te num máximo de 3. TÍTULO: [Ticker] - [Nome da Empresa].\n" +
+    "3. ANÁLISE DE VULNERABILIDADE E POTENCIAL (CRÍTICO):\n" +
+    "   Para cada alvo, cruza os dados e aplica as seguintes bandeiras táticas:\n" +
+    "   - REGRA DA MOLA (MM20): Se 'Dist MM20' > 2.5%, alerta [AVISO: PREÇO ESTICADO - Risco de Pullback].\n" +
+    "   - COMPRESSÃO (ATR vs RVOL): Se o RVOL for > 1.5 e o Momentum for sólido, marca como [POTENCIAL DE COMPRESSÃO] (alta prioridade).\n" +
+    "   - EXAUSTÃO: Se o RSI for > 70 mas o Momentum for baixo (< 1.0) ou RVOL < 1.3, alerta [AVISO DE EXAUSTÃO - Sem Combustível].\n" +
+    "   - BARREIRAS INSTITUCIONAIS: Se o Preço de Entrada ou Take-Profit estiver a menos de 1% de um número redondo maior (ex: 50.00, 100.00, 200.00), alerta [PAREDE INSTITUCIONAL - Risco de rejeição].\n" +
+    "   - ATIVOS ERRÁTICOS: Se o ATR for superior a 5% do Preço atual, alerta [ATIVO ERRÁTICO - Alta Volatilidade] e recomenda evitar o risco de slippage.\n" +
+    "   - RECOMENDAÇÃO DE LOTE: Com base no exposto, dita se a entrada deve ser de 'Lote Completo' ou 'Lote Reduzido a 50%'.\n" +
+    "4. TÁTICA DE EXECUÇÃO:\n" +
+    "   - GAPS DE ABERTURA: Lembra sempre o trader com a frase 'Se a ação abrir em Gap > 1% acima da entrada prevista, ABORTA A MISSÃO, não persigas o preço.'\n" +
+    "   - GESTÃO DE LUCRO: Se o ADX for > 35, instrui: '[TENDÊNCIA EXTREMA] Ignora o TP, gere pelo Trailing Stop'. Se ADX < 30, instrui: '[TENDÊNCIA MODERADA] Respeita o Take-Profit fixo.'\n" +
+    "5. RISCOS DE CALENDÁRIO E CORRELAÇÃO:\n" +
+    "   - EARNINGS: Adiciona o aviso '⚠️ ALERTA MANUAL: Verifica se há apresentação de resultados nos próximos 3 dias. Se sim, ABORTA.'\n" +
+    "   - SEXTA-FEIRA: Se a data da análise for uma Sexta-Feira, adiciona '[ALERTA DE SEXTA-FEIRA] - Probabilidade de recolha de lucros à tarde. Reduz o lote ou aperta os critérios de entrada.'\n" +
+    "   - CORRELAÇÃO: Se os 3 ativos forem do mesmo setor, emite '[AVISO DE CORRELAÇÃO] - Risco concentrado. Escolhe apenas o ativo com o melhor Momentum.'\n" +
+    "6. EXTRACÇÃO EXATA (INTOCÁVEL): Lista os valores EXATOS fornecidos (Entrada, Stop, Take-Profit, Break-Even, Trailing, Qtd). NUNCA recalcules ou modifiques estes números.\n" +
+    "7. REFERÊNCIA: Cola a linha original do 'comboio' de dados correspondente abaixo de cada ativo.\n" +
+    "8. SAÚDE DO MERCADO E LEI DA MEIA-HORA:\n" +
+    "   Termina o relatório com o estado clínico do mercado ('Ex: 80% das ações a Observar, dinheiro institucional a lateralizar') E inclui SEMPRE este mandato final a negrito:\n" +
+    "   **'TÁTICA DE EXECUÇÃO OBRIGATÓRIA: Não executar ordens antes das 15h00. Deixar a volatilidade inicial queimar os amadores e confirmar a verdadeira direção institucional.'**\n\n" +
     "--------------------------------------------------\n" +
     "DADOS DOS ATIVOS (COMBOIO):\n\n";
   
@@ -1907,15 +1965,20 @@ function dispararAgenteGitHubViaAPI() {
 
 
 // ==========================================
-// NOVO MOTOR V2 (WEBHOOK PARA O GITHUB)
+// MOTOR HÍBRIDO (WEBHOOK PARA O GITHUB: US + EUROPA)
 // ==========================================
-// 1. O Python chama o GET para ler a Watchlist (Agora lê Ticker + Nome)
+
+// 1. O Python chama o GET para ler a Watchlist
 function doGet(e) {
   var ss = SpreadsheetApp.getActiveSpreadsheet();
-  var sheet = ss.getSheetByName("Analise Compra");
+  
+  // Se o Python enviar o nome da aba (ex: ?aba=Europa), usa essa. 
+  // Se não enviar nada (que é o caso do teu script US atual), usa "Analise Compra" por defeito.
+  var nomeAba = (e.parameter && e.parameter.aba) ? e.parameter.aba : "Analise Compra";
+  var sheet = ss.getSheetByName(nomeAba);
   
   if (!sheet) {
-    return ContentService.createTextOutput(JSON.stringify({"erro": "Aba 'Analise Compra' nao encontrada"}))
+    return ContentService.createTextOutput(JSON.stringify({"erro": "Aba '" + nomeAba + "' nao encontrada"}))
                          .setMimeType(ContentService.MimeType.JSON);
   }
   
@@ -1923,13 +1986,12 @@ function doGet(e) {
   var ativos = [];
   
   if (ultimaLinha >= 3) {
-    // getRange(linha, coluna, qt_linhas, qt_colunas). 
-    // Começa na linha 3, coluna 5 (E), e lê 2 colunas (E e F)
+    // Lê as colunas E (Ticker) e F (Nome) a partir da linha 3
     var valores = sheet.getRange(3, 5, ultimaLinha - 2, 2).getValues();
     
     for (var i = 0; i < valores.length; i++) {
-      var t = valores[i][0]; // Ticker (Coluna E)
-      var n = valores[i][1]; // Nome (Coluna F)
+      var t = valores[i][0]; // Ticker
+      var n = valores[i][1]; // Nome
       if (t && t.toString().trim() !== "") {
         ativos.push({
           "ticker": t.toString().trim(),
@@ -1943,28 +2005,50 @@ function doGet(e) {
                        .setMimeType(ContentService.MimeType.JSON);
 }
 
-// 2. O Python envia os resultados via POST para a V2
+// 2. O Python envia os resultados via POST
 function doPost(e) {
   var ss = SpreadsheetApp.getActiveSpreadsheet();
-  var sheet = ss.getSheetByName("Análise Compra V2");
+  var payload = JSON.parse(e.postData.contents);
   
-  if (!sheet) {
-    return ContentService.createTextOutput(JSON.stringify({"status": "erro", "mensagem": "Aba nao encontrada"}))
+  // ==========================================================
+  // LÓGICA UNIFICADA: ATUALIZAÇÃO POR COLUNAS NA ABA INDICADA
+  // ==========================================================
+  if (payload.acao === "atualizar_colunas_todas") {
+    // Recebe o nome da aba enviada pelo Python (ex: "Analise Compra" para os EUA ou "Analise Compra EU" para a Europa)
+    var nomeAba = payload.aba || "Analise Compra"; 
+    var sheet = ss.getSheetByName(nomeAba);
+    
+    if (!sheet) {
+      return ContentService.createTextOutput(JSON.stringify({"status": "erro", "mensagem": "Aba '" + nomeAba + "' nao encontrada"}))
+                           .setMimeType(ContentService.MimeType.JSON);
+    }
+    
+    var dados = payload.dados;
+    var dataRange = sheet.getDataRange();
+    var values = dataRange.getValues();
+    
+    for (var i = 0; i < dados.length; i++) {
+      var d = dados[i];
+      // Procura o Ticker na Coluna E (índice 4)
+      for (var row = 1; row < values.length; row++) {
+        if (values[row][4] === d.ticker) {
+          // Grava valores nas respetivas colunas (G=7, K=11, L=12, M=13, N=14, Q=17, S=19)
+          sheet.getRange(row + 1, 7).setValue(d.preco);
+          sheet.getRange(row + 1, 11).setValue(d.momentum);
+          sheet.getRange(row + 1, 12).setValue(d.rsi);
+          sheet.getRange(row + 1, 13).setValue(d.adx);
+          sheet.getRange(row + 1, 14).setValue(d.atr);
+          sheet.getRange(row + 1, 17).setValue(d.time);
+          sheet.getRange(row + 1, 19).setValue(d.comboio);
+          break;
+        }
+      }
+    }
+    return ContentService.createTextOutput(JSON.stringify({"status": "sucesso"}))
                          .setMimeType(ContentService.MimeType.JSON);
   }
   
-  var dados = JSON.parse(e.postData.contents);
-  var ultimaLinha = sheet.getLastRow();
-  
-  // Limpa os dados antigos a partir da linha 2. 
-  // Alterado para 17 colunas porque adicionámos o 'Nome' à saída!
-  if (ultimaLinha > 1) {
-    sheet.getRange(2, 1, ultimaLinha - 1, 17).clearContent();
-  }
-  
-  // Escreve os novos dados a partir da Coluna A (1), Linha 2
-  sheet.getRange(2, 1, dados.length, dados[0].length).setValues(dados);
-  
-  return ContentService.createTextOutput(JSON.stringify({"status": "sucesso"}))
+  // Caso venha num formato antigo descontinuado
+  return ContentService.createTextOutput(JSON.stringify({"status": "erro", "mensagem": "Ação desconhecida"}))
                        .setMimeType(ContentService.MimeType.JSON);
 }
