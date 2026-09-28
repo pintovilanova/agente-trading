@@ -18,6 +18,19 @@ EMAIL_PASS = os.environ.get("EMAIL_PASS")
 NOME_FICHEIRO_TXT = "comboio_europa.txt"
 NOME_ABA_EUROPA = "Analise Compra EU"
 
+def classificar_forca(adx, momentum, dist_mm20):
+    """
+    Motor de classificação de força e estado do ativo para o mercado europeu.
+    """
+    if adx >= 30 and momentum > 0 and dist_mm20 > 0:
+        return "Força Consolidada"
+    elif adx >= 25 and momentum > -0.5:
+        return "Alerta Iminente"
+    elif adx < 20 or momentum < -1.0:
+        return "Choppy / Sem Força"
+    else:
+        return "Em Observação"
+
 def calcular_indicadores(ticker):
     try:
         df = yf.download(ticker, period="2y", interval="1d", progress=False)
@@ -35,13 +48,25 @@ def calcular_indicadores(ticker):
         
         ultimo = df.iloc[-1]
         
+        preco = round(float(ultimo['Close']), 2)
+        mm20 = float(ultimo['MM20'])
+        dist_mm20 = round(((preco - mm20) / mm20) * 100, 2)
+        momentum = round(float(ultimo['Momentum']), 2)
+        rsi = round(float(ultimo['RSI']), 2)
+        adx = round(float(ultimo['ADX']), 2)
+        atr = round(float(ultimo['ATR']), 2)
+        
+        # Classificação de força baseada nos indicadores
+        status_forca = classificar_forca(adx, momentum, dist_mm20)
+        
         return {
-            "preco": round(float(ultimo['Close']), 2),
-            "dist_mm20": round(((float(ultimo['Close']) - float(ultimo['MM20'])) / float(ultimo['MM20'])) * 100, 2),
-            "momentum": round(float(ultimo['Momentum']), 2),
-            "rsi": round(float(ultimo['RSI']), 2),
-            "adx": round(float(ultimo['ADX']), 2),
-            "atr": round(float(ultimo['ATR']), 2)
+            "preco": preco,
+            "dist_mm20": dist_mm20,
+            "momentum": momentum,
+            "rsi": rsi,
+            "adx": adx,
+            "atr": atr,
+            "forca": status_forca
         }
     except Exception as e:
         print(f"Erro ao processar {ticker}: {e}")
@@ -138,7 +163,8 @@ def processar_europa():
         dados = calcular_indicadores(ticker)
         
         if dados:
-            linha_comboio = f"{ticker},Nome: {nome},Setor: Europa,Preço: {dados['preco']},Dist MM20: {dados['dist_mm20']}%,Momentum: {dados['momentum']},RSI: {dados['rsi']},ADX: {dados['adx']},ATR: {dados['atr']},Data: {data_atual}"
+            # Inclui o campo Força/Status na linha do comboio
+            linha_comboio = f"{ticker},Nome: {nome},Setor: Europa,Força: {dados['forca']},Preço: {dados['preco']},Dist MM20: {dados['dist_mm20']}%,Momentum: {dados['momentum']},RSI: {dados['rsi']},ADX: {dados['adx']},ATR: {dados['atr']},Data: {data_atual}"
             linhas_txt.append(linha_comboio)
             
             atualizacoes_sheets.append({
