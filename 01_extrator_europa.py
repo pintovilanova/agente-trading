@@ -203,17 +203,17 @@ for ativo_info in ativos_data:
             
         elif var_perc > 0 and adx < 25:
             recomendacao = "Aguardar Recuo"
-            preco_entrada = preco - (atr * 0.4) 
+            preco_entrada = round(preco - (atr * 0.4), 2)  # <-- Arredondado a 2 casas
             multiplicador_atr = 1.0
             
         elif var_perc > 0 and adx >= 30 and rvol >= 1.20 and (55.00 <= rsi <= 72.00) and (0.00 <= dist_mm20 <= 3.50) and momentum > 1.50:
             recomendacao = "Forca Consolidada"
-            preco_entrada = preco - (atr * 0.1) 
+            preco_entrada = round(preco - (atr * 0.1), 2)  # <-- Arredondado a 2 casas
             multiplicador_atr = 1.3 
             
         elif adx >= 25 and rvol >= 1.00 and (50.00 <= rsi <= 75.00) and (-1.00 <= dist_mm20 <= 4.00) and momentum > 0.50:
             recomendacao = "Alerta Iminente"
-            preco_entrada = preco - (atr * 0.2)
+            preco_entrada = round(preco - (atr * 0.2), 2)  # <-- Arredondado a 2 casas
             multiplicador_atr = 1.2
             
         else:
