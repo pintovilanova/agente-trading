@@ -222,6 +222,12 @@ for ativo_info in ativos_data:
         # GESTÃO DE RISCO PARA ATIVOS ACIONADOS
         if recomendacao != "Observar" and preco_entrada != "N/A":
             preco_stop_calc = preco_entrada - (atr * multiplicador_atr)
+            
+            # ESCUDO DINÂMICO DA EMA 20
+            if preco_stop_calc > sma20 and preco > sma20:
+                preco_stop_calc = sma20 * 0.995
+                print(f"[DEFESA ESTRUTURAL] {ticker}: Stop recuado para {preco_stop_calc:.2f} (Abaixo da EMA 20)")
+            
             preco_stop = round(preco_stop_calc, 2)
             risco_por_acao = preco_entrada - preco_stop_calc
             
@@ -239,19 +245,20 @@ for ativo_info in ativos_data:
 
         data_atual = datetime.now(ZoneInfo("Europe/Lisbon")).strftime('%d/%m/%Y %H:%M:%S')
 
-        # Matriz Completa para o Google Sheets (Aba V2) - 17 Colunas
-        linha_sheets = [
-            ticker, nome_empresa, 
-            round(preco, 2), round(rsi, 2), round(adx, 2), round(atr, 2), 
-            round(rvol, 2), round(dist_mm20, 2), round(momentum, 2), 
-            recomendacao, 
-            round(preco_entrada, 2) if isinstance(preco_entrada, float) else preco_entrada, 
-            preco_stop, preco_tp, preco_be, qtd_acoes, trailing_final,
-            data_atual
-        ]
-        resultados_para_sheets.append(linha_sheets)
+        # Matriz em formato de dicionário para o Apps Script atualizar as colunas na folha principal
+        linha_dict = {
+            "ticker": ticker,
+            "preco": round(preco, 2),
+            "momentum": round(momentum, 2),
+            "rsi": round(rsi, 2),
+            "adx": round(adx, 2),
+            "atr": round(atr, 2),
+            "time": data_atual,
+            "comboio": recomendacao
+        }
+        resultados_para_sheets.append(linha_dict)
 
-        # Guardar para o Comboio da IA (Agora com Setor e ATR%)
+        # Guardar para o Comboio da IA
         comboio_ia.append({
             "ticker": ticker,
             "nome": nome_empresa,
@@ -286,10 +293,9 @@ for ativo_info in ativos_data:
 if resultados_para_sheets and WEBHOOK_URL:
     print("\nA atualizar o Google Sheets (Aba: Analise Compra)...")
     try:
-        # Prepara o payload estruturado exatamente como o Apps Script espera
         payload_sheets = {
             "acao": "atualizar_colunas_todas",
-            "aba": "Analise Compra",  # Nome exato da aba principal no Google Sheets
+            "aba": "Analise Compra",  # Aba principal do Google Sheets
             "dados": resultados_para_sheets
         }
         
@@ -306,7 +312,6 @@ if resultados_para_sheets and WEBHOOK_URL:
 # ===================================================================
 print("\nA construir o bloco unificado (Prompt + Comboio) para o email...")
 
-# Prompt blindado - MODO PREDADOR E GESTOR DE RISCO IMPLACÁVEL (Com variáveis dinâmicas)
 prompt_sistema_embutido = f"""MODO DIÁRIO ATIVO - PREDADOR DE BREAKOUTS: Avalia os seguintes ativos da minha watchlist.
 (INFO SISTEMA - Hoje é Sexta-feira? {hoje_e_sexta})
 Contexto: O mercado recente está armadilhado com falsos breakouts. A tua missão é PROTEGER O CAPITAL, desconfiar do motor matemático e expor ativamente o risco de cada trade, priorizando apenas os arranques com força institucional real.
@@ -347,14 +352,12 @@ Regras Operacionais Estritas de Triagem e Ataque:
    **"TÁTICA DE EXECUÇÃO OBRIGATÓRIA: Não executar ordens antes das 15h00. Deixar a volatilidade inicial queimar os amadores e confirmar a verdadeira direção institucional."**
 """
 
-# Monta o corpo unificado do email
 bloco_texto_ia = f"{prompt_sistema_embutido}\n\n--------------------------------------------------\n"
 bloco_texto_ia += "DADOS DOS ATIVOS (COMBOIO):\n\n"
 
 for item in comboio_ia:
     dist_mm20_str = f"{item.get('dist_mm20', 'N/A')}%" if item.get('dist_mm20') != "N/A" else "N/A"
     
-    # A linha que vai para a IA agora tem Setor, Volatilidade % e Earnings mastigados
     linha = (
         f"{item['ticker']},Nome: {item['nome']},Setor: {item['setor']},Preço: {item['preco']},"
         f"Dist MM20: {dist_mm20_str},Momentum: {item.get('momentum', 'N/A')},"
@@ -367,9 +370,7 @@ for item in comboio_ia:
     )
     bloco_texto_ia += linha + "\n"
 
-# Guarda uma cópia local
 with open("comboio_temp.txt", "w", encoding="utf-8") as f:
     f.write(bloco_texto_ia)
     
-# Envia o email unificado para a caixa de correio
 enviar_email_para_agente_ia(bloco_texto_ia, assunto="tradingRelatorioIA")
