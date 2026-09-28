@@ -25,9 +25,6 @@ GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY")
 EMAIL_USER = os.environ.get("EMAIL_USER")
 EMAIL_PASS = os.environ.get("EMAIL_PASS")
 
-# Permite ao GitHub Actions forçar o mercado via variável de ambiente, ou deteta pelo ficheiro
-MERCADO = os.environ.get("MERCADO", "").upper()
-
 IMAP_SERVER = "imap.gmail.com"
 SMTP_SERVER = "smtp.gmail.com"
 SMTP_PORT = 587
@@ -39,8 +36,8 @@ client = genai.Client(api_key=GEMINI_API_KEY)
 # 2. EXTRAÇÃO INTELIGENTE (Local + Fallback IMAP)
 # ==========================================
 def extrair_dados_do_market():
-    # Define o ficheiro e o assunto com base no mercado detetado ou passado
-    if MERCADO == "EUROPA" or os.path.exists("comboio_europa.txt"):
+    # Deteta automaticamente o mercado com base no ficheiro txt gerado pelo passo anterior
+    if os.path.exists("comboio_europa.txt"):
         ficheiro = "comboio_europa.txt"
         assunto_alvo = "tradingRelatorioIA Europa"
         tag_mercado = "EUROPA"
@@ -51,7 +48,7 @@ def extrair_dados_do_market():
 
     print(f"A processar mercado: {tag_mercado} (Ficheiro: {ficheiro})...")
 
-    # Tenta ler primeiro do ficheiro local gerado pelo Passo 1
+    # Tenta ler primeiro do ficheiro local
     if os.path.exists(ficheiro):
         print(f"A carregar os dados localmente a partir de '{ficheiro}'...")
         try:
@@ -110,7 +107,7 @@ def analisar_com_ia(dados_mercado):
     for tentativa in range(tentativas):
         try:
             resposta = client.models.generate_content(
-                model='gemini-2.5-flash', # Atualizado para a versão padrão atual do flash se necessário
+                model='gemini-2.5-flash',
                 contents=prompt_completo
             )
             return resposta.text
@@ -138,7 +135,6 @@ def analisar_com_ia(dados_mercado):
 # 4. ENVIAR O RELATÓRIO DE VOLTA POR EMAIL
 # ==========================================
 def enviar_email_resposta(relatorio_texto, tag_mercado):
-    # Define o assunto do e-mail dinamicamente dependendo do mercado
     if tag_mercado == "EUROPA":
         assunto_email = "🇪🇺 Relatório Tático - Mercado Europeu Concluído"
     else:
