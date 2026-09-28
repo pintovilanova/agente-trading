@@ -7,6 +7,7 @@ import requests
 import os
 import sys
 import smtplib
+import json
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 
@@ -14,12 +15,10 @@ from email.mime.multipart import MIMEMultipart
 # 0.1 TRAVA DE FIM DE SEMANA (Não corre ao Sábado e Domingo)
 # ===================================================================
 dia_da_semana = datetime.now(ZoneInfo("Europe/Lisbon")).weekday()
-# weekday() retorna: 0=Segunda, 1=Terça, ..., 5=Sábado, 6=Domingo
 if dia_da_semana >= 5:
     print("[INFO] Fim de semana detetado. O mercado está fechado. O Agente vai descansar.")
     sys.exit(0)
 
-# Variável para o Agente IA saber se é Sexta-feira (4 = Sexta)
 hoje_e_sexta = "SIM" if dia_da_semana == 4 else "NÃO"
 
 # ===================================================================
@@ -33,7 +32,7 @@ SMTP_SERVER = "smtp.gmail.com"
 SMTP_PORT = 587
 
 # ===================================================================
-# 1. FUNÇÃO DE ENVIO DE EMAIL (Para alimentar o teu Agente IA)
+# 1. FUNÇÃO DE ENVIO DE EMAIL
 # ===================================================================
 def enviar_email_para_agente_ia(relatorio_texto, assunto="tradingRelatorioIA"):
     print(f"\nA enviar email para o Agente IA (Assunto: '{assunto}')...")
@@ -129,9 +128,6 @@ for ativo_info in ativos_data:
         if isinstance(df.columns, pd.MultiIndex):
             df.columns = df.columns.droplevel(1)
 
-        # ===================================================================
-        # NOVO: EXTRAIR EARNINGS E SETOR
-        # ===================================================================
         alerta_earnings = "OK"
         setor = "Desconhecido"
         try:
@@ -178,7 +174,6 @@ for ativo_info in ativos_data:
         atr = ultimo_dia['ATRr_14']
         momentum = ultimo_dia['MOM_14']
 
-        # Cálculo extra: Volatilidade (ATR em % do Preço)
         atr_perc = round((atr / preco) * 100, 2)
 
         recomendacao = "Observar"
@@ -203,17 +198,17 @@ for ativo_info in ativos_data:
             
         elif var_perc > 0 and adx < 25:
             recomendacao = "Aguardar Recuo"
-            preco_entrada = round(preco - (atr * 0.4), 2)  # Arredondado a 2 casas decimais
+            preco_entrada = round(preco - (atr * 0.4), 2)  # Arredondado a 2 casas
             multiplicador_atr = 1.0
             
         elif var_perc > 0 and adx >= 30 and rvol >= 1.20 and (55.00 <= rsi <= 72.00) and (0.00 <= dist_mm20 <= 3.50) and momentum > 1.50:
             recomendacao = "Forca Consolidada"
-            preco_entrada = round(preco - (atr * 0.1), 2)  # Arredondado a 2 casas decimais
+            preco_entrada = round(preco - (atr * 0.1), 2)  # Arredondado a 2 casas
             multiplicador_atr = 1.3 
             
         elif adx >= 25 and rvol >= 1.00 and (50.00 <= rsi <= 75.00) and (-1.00 <= dist_mm20 <= 4.00) and momentum > 0.50:
             recomendacao = "Alerta Iminente"
-            preco_entrada = round(preco - (atr * 0.2), 2)  # Arredondado a 2 casas decimais
+            preco_entrada = round(preco - (atr * 0.2), 2)  # Arredondado a 2 casas
             multiplicador_atr = 1.2
             
         else:
@@ -241,25 +236,22 @@ for ativo_info in ativos_data:
                 dist_tp = preco_tp - preco_entrada
                 preco_be = round(preco_entrada + (dist_tp / 2), 2)
                 
-            trailing_final = round(max(trailing_base, preco_stop_calc), 2)
+                trailing_final = round(max(trailing_base, preco_stop_calc), 2)
 
         data_atual = datetime.now(ZoneInfo("Europe/Lisbon")).strftime('%d/%m/%Y %H:%M:%S')
-        dist_mm20_str = f"{dist_mm20:.2f}%" if 'dist_mm20' in locals() else "N/A"
+        preco_entrada_str = f"{preco_entrada:.2f}" if isinstance(preco_entrada, (int, float)) else preco_entrada
 
-        # Linha detalhada do comboio completa para a Coluna S
+        # DADOS PARA O GOOGLE SHEETS
         linha_comboio_completa = (
             f"{ticker},Nome: {nome_empresa},Setor: {setor},Preço: {round(preco, 2)},"
-            f"Dist MM20: {dist_mm20_str},Momentum: {round(momentum, 2)},"
+            f"Dist MM20: {round(dist_mm20, 2)}%,Momentum: {round(momentum, 2)},"
             f"RSI: {round(rsi, 2)},ADX: {round(adx, 2)},ATR: {round(atr, 2)} (Vol: {atr_perc}%),"
-            f"RVOL: {round(rvol, 2)},Estado: {recomendacao},Entrada: {preco_entrada},"
+            f"RVOL: {round(rvol, 2)},Estado: {recomendacao},Entrada: {preco_entrada_str},"
             f"Stop: {preco_stop},Take-Profit: {preco_tp},Break-Even: {preco_be},"
-            f"Qtd: {qtd_acoes},Trailing: {trailing_final},"
-            f"Earnings: {alerta_earnings},"
-            f"Data: {data_atual}"
+            f"Qtd: {qtd_acoes},Trailing: {trailing_final},Earnings: {alerta_earnings},Data: {data_atual}"
         )
 
-        # Matriz em formato de dicionário para o Apps Script atualizar as colunas
-        linha_dict = {
+        resultados_para_sheets.append({
             "ticker": ticker,
             "preco": round(preco, 2),
             "momentum": round(momentum, 2),
@@ -267,11 +259,10 @@ for ativo_info in ativos_data:
             "adx": round(adx, 2),
             "atr": round(atr, 2),
             "time": data_atual,
-            "comboio": linha_comboio_completa  # Guarda o comboio todo na coluna S
-        }
-        resultados_para_sheets.append(linha_dict)
+            "comboio": linha_comboio_completa
+        })
 
-        # Guardar para o Comboio da IA
+        # GUARDAR PARA O COMBOIO DA IA
         comboio_ia.append({
             "ticker": ticker,
             "nome": nome_empresa,
@@ -285,7 +276,7 @@ for ativo_info in ativos_data:
             "atr_perc": atr_perc,
             "momentum": round(momentum, 2),
             "dist_mm20": round(dist_mm20, 2),
-            "entrada": preco_entrada,
+            "entrada": round(preco_entrada, 2) if isinstance(preco_entrada, float) else preco_entrada,
             "stop": preco_stop,
             "alvo": preco_tp,
             "be": preco_be,
@@ -301,7 +292,7 @@ for ativo_info in ativos_data:
         print(f"[ERRO] Falha ao processar {ticker}: {e}")
 
 # ===================================================================
-# 5. ENVIO PARA O GOOGLE SHEETS (Atualização Direta na Aba "Analise Compra")
+# 5. ENVIO PARA O GOOGLE SHEETS
 # ===================================================================
 if resultados_para_sheets and WEBHOOK_URL:
     print("\nA atualizar o Google Sheets (Aba: Analise Compra)...")
@@ -311,21 +302,21 @@ if resultados_para_sheets and WEBHOOK_URL:
             "aba": "Analise Compra",
             "dados": resultados_para_sheets
         }
-        
-        resposta = requests.post(WEBHOOK_URL, json=payload_sheets)
+        headers = {'Content-Type': 'application/json'}
+        resposta = requests.post(WEBHOOK_URL, data=json.dumps(payload_sheets), headers=headers)
         if resposta.status_code == 200:
-            print("[SUCESSO] Radar atualizado na folha principal!")
+            print("[SUCESSO] Google Sheets atualizado com sucesso!")
         else:
-            print(f"[ERRO] Status HTTP: {resposta.status_code}")
+            print(f"[ERRO] Status HTTP: {resposta.status_code} - {resposta.text}")
     except Exception as e:
-        print(f"[ERRO CRÍTICO] Falha HTTP: {e}")
+        print(f"[ERRO CRÍTICO] Falha HTTP Sheets: {e}")
 
 # ===================================================================
 # 6. GERAR BLOCO DE TEXTO E ENVIAR PARA O AGENTE IA (COM FILTRO CÉTICO)
 # ===================================================================
 print("\nA construir o bloco unificado (Prompt + Comboio) para o email...")
 
-# FILTRO: Seleciona apenas ativos que NÃO estão em "Observar"
+# FILTRO: Seleciona apenas ativos acionados (ignora os "Observar")
 ativos_acionados = [item for item in comboio_ia if item["estado"] != "Observar"]
 
 prompt_sistema_embutido = f"""MODO DIÁRIO ATIVO - PREDADOR DE BREAKOUTS: Avalia os seguintes ativos da minha watchlist.
@@ -389,8 +380,7 @@ else:
         )
         bloco_texto_ia += linha + "\n"
 
-# Guarda uma cópia local
 with open("comboio_temp.txt", "w", encoding="utf-8") as f:
     f.write(bloco_texto_ia)
     
-enviar_email_para_agente_ia(bloco_texto_ia, assunto="tradingRelatorioIA")
+enviar_email_para_agente_ia(bloco_texto_ia, assunto="🇺🇸 Relatório Tático - Wall Street Concluído")
