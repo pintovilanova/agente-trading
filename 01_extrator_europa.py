@@ -7,6 +7,7 @@ import requests
 import os
 import sys
 import smtplib
+import json # <-- ADICIONAR ESTA LINHA AQUI
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 
@@ -237,6 +238,7 @@ for ativo_info in ativos_data:
                 trailing_final = round(max(trailing_base, preco_stop_calc), 2)
 
         data_atual = datetime.now(ZoneInfo("Europe/Lisbon")).strftime('%d/%m/%Y %H:%M:%S')
+        
 
         # DADOS PARA O GOOGLE SHEETS (Atualização por colunas via Payload específico)
         resultados_para_sheets.append({
