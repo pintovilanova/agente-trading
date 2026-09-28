@@ -240,7 +240,16 @@ for ativo_info in ativos_data:
         data_atual = datetime.now(ZoneInfo("Europe/Lisbon")).strftime('%d/%m/%Y %H:%M:%S')
         
 
-        # DADOS PARA O GOOGLE SHEETS (Atualização por colunas via Payload específico)
+       # DADOS PARA O GOOGLE SHEETS (Com toda a informação tática detalhada)
+        linha_comboio_completa = (
+            f"{ticker},Nome: {nome_empresa},Setor: {setor},Preço: {round(preco, 2)},"
+            f"Dist MM20: {round(dist_mm20, 2)}%,Momentum: {round(momentum, 2)},"
+            f"RSI: {round(rsi, 2)},ADX: {round(adx, 2)},ATR: {round(atr, 2)} (Vol: {atr_perc}%),"
+            f"RVOL: {round(rvol, 2)},Estado: {recomendacao},Entrada: {preco_entrada},"
+            f"Stop: {preco_stop},Take-Profit: {preco_tp},Break-Even: {preco_be},"
+            f"Qtd: {qtd_acoes},Trailing: {trailing_final},Earnings: {alerta_earnings},Data: {data_atual}"
+        )
+
         resultados_para_sheets.append({
             "ticker": ticker,
             "preco": round(preco, 2),
@@ -249,7 +258,7 @@ for ativo_info in ativos_data:
             "adx": round(adx, 2),
             "atr": round(atr, 2),
             "time": data_atual,
-            "comboio": f"{ticker},Nome: {nome_empresa},Setor: {setor},Força: {recomendacao},Preço: {round(preco, 2)},Dist MM20: {round(dist_mm20, 2)}%,Momentum: {round(momentum, 2)},RSI: {round(rsi, 2)},ADX: {round(adx, 2)},ATR: {round(atr, 2)},Data: {data_atual}"
+            "comboio": linha_comboio_completa
         })
 
         # GUARDAR PARA O COMBOIO DA IA
