@@ -58,10 +58,8 @@ def enviar_email_seguranca(linhas_comboio):
     msg['To'] = EMAIL_USER 
     msg['Subject'] = f"PROMPT EUROPA PRONTO A USAR - {datetime.now().strftime('%d/%m/%Y')}"
     
-    # Verifica se hoje é sexta-feira para preencher o prompt dinamicamente
     hoje_e_sexta = "SIM" if datetime.today().weekday() == 4 else "NÃO"
     
-    # Constrói o corpo do e-mail com o PROMPT COMPLETO + DADOS
     corpo_email = f"""MODO DIÁRIO ATIVO - PREDADOR DE BREAKOUTS (EUROPA): Avalia os seguintes ativos da minha watchlist europeia.
 (INFO SISTEMA - Hoje é Sexta-feira? {hoje_e_sexta})
 Contexto: O mercado europeu está sujeito a aberturas armadilhadas e sofre forte influência da abertura americana à tarde. A tua missão é PROTEGER O CAPITAL, desconfiar do motor matemático e expor ativamente o risco de cada trade, priorizando apenas os arranques com força institucional real.
@@ -111,7 +109,6 @@ DADOS DOS ATIVOS (COMBOIO EUROPA):
 def processar_europa():
     print(f"A iniciar extração de dados da Europa (Aba: {NOME_ABA_EUROPA})...")
     
-    # 1. Obter a lista de ativos do Google Sheets (GET passando o parâmetro da aba)
     url_get = f"{WEBHOOK_URL}?aba={NOME_ABA_EUROPA}"
     resposta = requests.get(url_get)
     
@@ -144,7 +141,6 @@ def processar_europa():
             linha_comboio = f"{ticker},Nome: {nome},Setor: Europa,Preço: {dados['preco']},Dist MM20: {dados['dist_mm20']}%,Momentum: {dados['momentum']},RSI: {dados['rsi']},ADX: {dados['adx']},ATR: {dados['atr']},Data: {data_atual}"
             linhas_txt.append(linha_comboio)
             
-            # Pacote de dados para injetar nas colunas individuais do Google Sheets
             atualizacoes_sheets.append({
                 "ticker": ticker,
                 "preco": dados['preco'],
@@ -156,21 +152,18 @@ def processar_europa():
                 "comboio": linha_comboio
             })
 
-    # 2. Gravar o TXT localmente no GitHub
     if linhas_txt:
         with open(NOME_FICHEIRO_TXT, "w", encoding="utf-8") as f:
             f.write("\n".join(linhas_txt))
         print(f"Ficheiro {NOME_FICHEIRO_TXT} gerado com sucesso!")
 
-        # 3. Enviar o e-mail de segurança com o prompt e os dados
         enviar_email_seguranca(linhas_txt)
 
-    # 4. Enviar atualizações detalhadas de volta para o Google Sheets (POST)
     if atualizacoes_sheets:
         print(f"A enviar atualizações detalhadas para o Google Sheets ({NOME_ABA_EUROPA})...")
         payload = {
             "acao": "atualizar_colunas_todas",
-            "aba": NOME_ABA_EUROPA,  # Informa o Apps Script qual a aba a atualizar
+            "aba": NOME_ABA_EUROPA,
             "dados": atualizacoes_sheets
         }
         headers = {'Content-Type': 'application/json'}
