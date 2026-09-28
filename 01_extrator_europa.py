@@ -7,7 +7,7 @@ import requests
 import os
 import sys
 import smtplib
-import json # <-- ADICIONAR ESTA LINHA AQUI
+import json
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 
@@ -238,9 +238,8 @@ for ativo_info in ativos_data:
                 trailing_final = round(max(trailing_base, preco_stop_calc), 2)
 
         data_atual = datetime.now(ZoneInfo("Europe/Lisbon")).strftime('%d/%m/%Y %H:%M:%S')
-        
 
-       # DADOS PARA O GOOGLE SHEETS (Com toda a informação tática detalhada)
+        # DADOS PARA O GOOGLE SHEETS
         linha_comboio_completa = (
             f"{ticker},Nome: {nome_empresa},Setor: {setor},Preço: {round(preco, 2)},"
             f"Dist MM20: {round(dist_mm20, 2)}%,Momentum: {round(momentum, 2)},"
@@ -311,26 +310,47 @@ if resultados_para_sheets and WEBHOOK_URL:
         print(f"[ERRO CRÍTICO] Falha HTTP Sheets: {e}")
 
 # ===================================================================
-# 6. GERAR BLOCO DE TEXTO E ENVIAR PARA O AGENTE IA
+# 6. GERAR BLOCO DE TEXTO E ENVIAR PARA O AGENTE IA (PROMPT US 1:1)
 # ===================================================================
 print("\nA construir o bloco unificado (Prompt + Comboio) para o email...")
 
+# Prompt idêntico à versão US com todas as 7 regras detalhadas
 prompt_sistema_embutido = f"""MODO DIÁRIO ATIVO - PREDADOR DE BREAKOUTS (EUROPA): Avalia os seguintes ativos da minha watchlist europeia.
 (INFO SISTEMA - Hoje é Sexta-feira? {hoje_e_sexta})
 Contexto: O mercado europeu é volátil e reage fortemente à abertura americana. A tua missão é PROTEGER O CAPITAL, desconfiar do motor matemático e expor ativamente o risco de cada trade, priorizando apenas os arranques com força institucional real.
 
 Regras Operacionais Estritas de Triagem e Ataque:
-1. FILTRO CÉTICO INICIAL: Analisa apenas ativos com 'Forca Consolidada' ou 'Alerta Iminente'. Se o panorama geral for fraco, REJEITA TUDO e inicia o e-mail APENAS com: [MERCADO CHOPPY - FICA DE FORA HOJE].
-2. OS 3 MELHORES ALVOS: Foca-te num máximo de 3 ativos. Se EARNINGS = PERIGO, desclassifica o ativo de imediato.
-3. ANÁLISE DE VULNERABILIDADE E POTENCIAL:
+
+1. FILTRO CÉTICO INICIAL: Analisa apenas ativos com 'Forca Consolidada' ou 'Alerta Iminente'. Se o panorama geral for fraco (maioria com ADX < 25 e RVOL baixo), REJEITA TUDO e inicia o e-mail APENAS com: [MERCADO CHOPPY - FICA DE FORA HOJE].
+
+2. OS 3 MELHORES ALVOS: Se existirem oportunidades reais, foca-te num máximo de 3 ativos. Se um ativo detetar EARNINGS = PERIGO, ele é sumariamente desclassificado e não pode ser recomendado.
+
+3. ANÁLISE DE VULNERABILIDADE E POTENCIAL (CRÍTICO):
+   Cruza os dados e aplica as seguintes bandeiras táticas:
    - REGRA DA MOLA (MM20): Se 'Dist MM20' > 2.5%, alerta [AVISO: PREÇO ESTICADO - Risco de Pullback].
-   - COMPRESSÃO (ATR vs RVOL): Se RVOL > 1.5 e Momentum sólido, marca [POTENCIAL DE COMPRESSÃO].
-   - EXAUSTÃO: Se RSI > 70 mas Momentum < 1.0, alerta [AVISO DE EXAUSTÃO].
-   - BARREIRAS INSTITUCIONAIS: Se Entrada ou Take-Profit estiverem a <1% de um número redondo, alerta [PAREDE INSTITUCIONAL].
-4. TÁTICA DE EXECUÇÃO EUROPA:
-   - GAPS: Inclui: "Se abrir em Gap > 1% da entrada, ABORTA."
-   - GESTÃO: Se ADX > 35, instrui: "[TENDÊNCIA EXTREMA] Ignora TP, gere pelo Trailing". Se ADX < 30: "[TENDÊNCIA MODERADA] Respeita o TP fixo."
-5. MANDATO FINAL:
+   - COMPRESSÃO (ATR vs RVOL): Se o RVOL > 1.5 e Momentum sólido, marca [POTENCIAL DE COMPRESSÃO] (alta prioridade).
+   - EXAUSTÃO: Se RSI > 70 mas Momentum < 1.0 ou RVOL < 1.3, alerta [AVISO DE EXAUSTÃO - Sem Combustível].
+   - BARREIRAS INSTITUCIONAIS: Se Entrada ou Take-Profit estiverem a <1% de um número redondo maior (ex: 50.00, 100.00), alerta [PAREDE INSTITUCIONAL - Risco de rejeição].
+   - ATIVOS ERRÁTICOS: Lê 'Vol' junto ao ATR no comboio. Se Vol > 5%, alerta [ATIVO ERRÁTICO - Alta Volatilidade].
+
+4. TÁTICA DE EXECUÇÃO:
+   - GAPS DE ABERTURA: Inclui: "Se abrir em Gap > 1% da entrada, ABORTA."
+   - GESTÃO DE LUCRO: Se ADX > 35, instrui: "[TENDÊNCIA EXTREMA] Ignora TP, gere pelo Trailing". Se ADX < 30: "[TENDÊNCIA MODERADA] Respeita o TP fixo."
+
+5. RISCOS DE CALENDÁRIO E CORRELAÇÃO:
+   - SEXTA-FEIRA: Lê a (INFO SISTEMA). Se for Sexta-feira ('SIM'), exige Lote Reduzido.
+   - CORRELAÇÃO: Se 2 ou mais ativos do Top 3 forem do mesmo Setor/País, emite "[AVISO DE CORRELAÇÃO] - Risco concentrado" e escolhe apenas o melhor.
+
+6. ESTRUTURA VISUAL OBRIGATÓRIA (Usa exatamente este template para cada ativo validado):
+   
+   🎯 [TICKER] - [Nome da Empresa] ([Setor])
+   - 🚩 BANDEIRAS: (Lista aqui os avisos da regra 3 e 5, ou "Limpo" se não houver)
+   - ⚙️ EXECUÇÃO: (Menciona a regra dos Gaps e Gestão de Lucro)
+   - 🛡️ TAMANHO DA POSIÇÃO: (Recomenda Lote Completo ou Lote Reduzido a 50%)
+   - 🔢 DADOS EXATOS: Entrada: X | Stop: X | TP: X | BE: X | Trailing: X | Qtd: X (Se Lote Reduzido, indica Qtd original / 2)
+   - 📋 REFERÊNCIA: (Cola a linha original do comboio aqui)
+
+7. SAÚDE DO MERCADO E MANDATO FINAL: 
    Termina o email com uma frase sobre o estado do mercado E inclui SEMPRE de forma isolada e a negrito no fim do email:
    **"TÁTICA DE EXECUÇÃO EUROPA: Não executar ordens antes das 09h00 (Hora de Lisboa). Deixar a volatilidade inicial queimar os amadores. Atenção máxima a partir das 14h30 com a abertura de Wall Street."**
 """
