@@ -383,4 +383,4 @@ else:
 with open("comboio_temp.txt", "w", encoding="utf-8") as f:
     f.write(bloco_texto_ia)
     
-enviar_email_para_agente_ia(bloco_texto_ia, assunto="🇺🇸 Relatório Tático - Wall Street")
+enviar_email_para_agente_ia(bloco_texto_ia, assunto="tradingRelatorioIA US")
