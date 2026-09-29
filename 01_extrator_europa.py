@@ -7,7 +7,6 @@ import requests
 import os
 import sys
 import smtplib
-import json
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 
@@ -203,17 +202,17 @@ for ativo_info in ativos_data:
             
         elif var_perc > 0 and adx < 25:
             recomendacao = "Aguardar Recuo"
-            preco_entrada = round(preco - (atr * 0.4), 2)  # <-- Arredondado a 2 casas
+            preco_entrada = round(preco - (atr * 0.4), 2)  
             multiplicador_atr = 1.0
             
         elif var_perc > 0 and adx >= 30 and rvol >= 1.20 and (55.00 <= rsi <= 72.00) and (0.00 <= dist_mm20 <= 3.50) and momentum > 1.50:
             recomendacao = "Forca Consolidada"
-            preco_entrada = round(preco - (atr * 0.1), 2)  # <-- Arredondado a 2 casas
+            preco_entrada = round(preco - (atr * 0.1), 2)  
             multiplicador_atr = 1.3 
             
         elif adx >= 25 and rvol >= 1.00 and (50.00 <= rsi <= 75.00) and (-1.00 <= dist_mm20 <= 4.00) and momentum > 0.50:
             recomendacao = "Alerta Iminente"
-            preco_entrada = round(preco - (atr * 0.2), 2)  # <-- Arredondado a 2 casas
+            preco_entrada = round(preco - (atr * 0.2), 2)  
             multiplicador_atr = 1.2
             
         else:
@@ -222,6 +221,11 @@ for ativo_info in ativos_data:
         # GESTÃO DE RISCO PARA ATIVOS ACIONADOS
         if recomendacao != "Observar" and preco_entrada != "N/A":
             preco_stop_calc = preco_entrada - (atr * multiplicador_atr)
+            
+            # ESCUDO DINÂMICO DA EMA 20
+            if preco_stop_calc > sma20 and preco > sma20:
+                preco_stop_calc = sma20 * 0.995
+            
             preco_stop = round(preco_stop_calc, 2)
             risco_por_acao = preco_entrada - preco_stop_calc
             
@@ -238,17 +242,17 @@ for ativo_info in ativos_data:
                 trailing_final = round(max(trailing_base, preco_stop_calc), 2)
 
         data_atual = datetime.now(ZoneInfo("Europe/Lisbon")).strftime('%d/%m/%Y %H:%M:%S')
+        preco_entrada_str = f"{preco_entrada:.2f}" if isinstance(preco_entrada, (int, float)) else preco_entrada
 
         # DADOS PARA O GOOGLE SHEETS
         linha_comboio_completa = (
             f"{ticker},Nome: {nome_empresa},Setor: {setor},Preço: {round(preco, 2)},"
             f"Dist MM20: {round(dist_mm20, 2)}%,Momentum: {round(momentum, 2)},"
             f"RSI: {round(rsi, 2)},ADX: {round(adx, 2)},ATR: {round(atr, 2)} (Vol: {atr_perc}%),"
-            f"RVOL: {round(rvol, 2)},Estado: {recomendacao},Entrada: {preco_entrada},"
+            f"RVOL: {round(rvol, 2)},Estado: {recomendacao},Entrada: {preco_entrada_str},"
             f"Stop: {preco_stop},Take-Profit: {preco_tp},Break-Even: {preco_be},"
             f"Qtd: {qtd_acoes},Trailing: {trailing_final},Earnings: {alerta_earnings},Data: {data_atual}"
         )
-        
 
         resultados_para_sheets.append({
             "ticker": ticker,
@@ -291,18 +295,18 @@ for ativo_info in ativos_data:
         print(f"[ERRO] Falha ao processar {ticker}: {e}")
 
 # ===================================================================
-# 5. ENVIO PARA O GOOGLE SHEETS (LÓGICA HÍBRIDA EUROPA)
+# 5. ENVIO PARA O GOOGLE SHEETS
 # ===================================================================
 if resultados_para_sheets and WEBHOOK_URL:
-    print(f"\nA enviar atualizações para o Google Sheets ({NOME_ABA_EUROPA})...")
+    print(f"\nA enviar atualizações para o Google Sheets (Aba: {NOME_ABA_EUROPA})...")
     try:
         payload_sheets = {
             "acao": "atualizar_colunas_todas",
             "aba": NOME_ABA_EUROPA,
             "dados": resultados_para_sheets
         }
-        headers = {'Content-Type': 'application/json'}
-        resposta = requests.post(WEBHOOK_URL, data=json.dumps(payload_sheets), headers=headers)
+        # CORREÇÃO CRÍTICA AQUI: Foi reposto o "json=payload_sheets" tal como nos EUA
+        resposta = requests.post(WEBHOOK_URL, json=payload_sheets)
         if resposta.status_code == 200:
             print("[SUCESSO] Google Sheets atualizado com sucesso!")
         else:
@@ -311,7 +315,7 @@ if resultados_para_sheets and WEBHOOK_URL:
         print(f"[ERRO CRÍTICO] Falha HTTP Sheets: {e}")
 
 # ===================================================================
-# 6. GERAR BLOCO DE TEXTO E ENVIAR PARA O AGENTE IA (COM FILTRO CÉTICO)
+# 6. GERAR BLOCO DE TEXTO E ENVIAR PARA O AGENTE IA
 # ===================================================================
 print("\nA construir o bloco unificado (Prompt + Comboio) para o email...")
 
@@ -365,7 +369,7 @@ if not ativos_acionados:
 else:
     bloco_texto_ia += "DADOS DOS ATIVOS ACIONADOS (COMBOIO EUROPA):\n\n"
     for item in ativos_acionados:
-        dist_mm20_str = f"{item.get('dist_mm20', 'N/A')}%"
+        dist_mm20_str = f"{item.get('dist_mm20', 'N/A')}%" if item.get('dist_mm20') != "N/A" else "N/A"
         
         linha = (
             f"{item['ticker']},Nome: {item['nome']},Setor: {item['setor']},Preço: {item['preco']},"
@@ -379,8 +383,8 @@ else:
         )
         bloco_texto_ia += linha + "\n"
 
-# Guarda uma cópia local para a Europa
 with open("comboio_europa.txt", "w", encoding="utf-8") as f:
     f.write(bloco_texto_ia)
     
+# ASSUNTO DE SISTEMA CORRIGIDO (O Agente 02 vai procurar por isto)
 enviar_email_para_agente_ia(bloco_texto_ia, assunto="tradingRelatorioIA Europa")
