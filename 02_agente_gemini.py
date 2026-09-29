@@ -36,19 +36,17 @@ client = genai.Client(api_key=GEMINI_API_KEY)
 # 2. EXTRAÇÃO INTELIGENTE (Local + Fallback IMAP)
 # ==========================================
 def extrair_dados_do_market():
-    # Deteta automaticamente o mercado com base no ficheiro txt gerado pelo passo anterior
     if os.path.exists("comboio_europa.txt"):
         ficheiro = "comboio_europa.txt"
-        assunto_alvo = "tradingRelatorioIA Europa"
+        assunto_alvo = "tradingRelatorioIA Europa" # O que a IA vai procurar na caixa de entrada
         tag_mercado = "EUROPA"
     else:
         ficheiro = "comboio_temp.txt"
-        assunto_alvo = os.environ.get("ASSUNTO_DO_EMAIL", "tradingRelatorioIA")
+        assunto_alvo = "tradingRelatorioIA US" # O que a IA vai procurar na caixa de entrada
         tag_mercado = "US"
 
     print(f"A processar mercado: {tag_mercado} (Ficheiro: {ficheiro})...")
 
-    # Tenta ler primeiro do ficheiro local
     if os.path.exists(ficheiro):
         print(f"A carregar os dados localmente a partir de '{ficheiro}'...")
         try:
@@ -59,7 +57,6 @@ def extrair_dados_do_market():
         except Exception as e:
             print(f"Erro ao ler o ficheiro local: {e}. A tentar via IMAP...")
 
-    # Fallback: Liga-se ao IMAP
     print(f"A ligar à caixa de correio via IMAP para procurar por: '{assunto_alvo}'...")
     try:
         mail = imaplib.IMAP4_SSL(IMAP_SERVER)
@@ -135,12 +132,13 @@ def analisar_com_ia(dados_mercado):
 # 4. ENVIAR O RELATÓRIO DE VOLTA POR EMAIL
 # ==========================================
 def enviar_email_resposta(relatorio_texto, tag_mercado):
+    # Aqui sim, definimos o assunto "bonito" que te vai aparecer no telemóvel/computador
     if tag_mercado == "EUROPA":
-        assunto_email = "🇪🇺 Relatório Tático - Mercado Europeu Concluído"
+        assunto_email = "🇪🇺 IA Predador: Relatório Tático EUROPA"
     else:
-        assunto_email = "🇺🇸 Relatório Tático - Wall Street Concluído"
+        assunto_email = "🇺🇸 IA Predador: Relatório Tático WALL STREET"
 
-    print(f"A enviar o relatório tático por email (Assunto: {assunto_email})...")
+    print(f"A enviar o relatório tático final para ti (Assunto: {assunto_email})...")
     try:
         msg = MIMEMultipart()
         msg['From'] = EMAIL_USER
