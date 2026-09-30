@@ -362,7 +362,7 @@ Regras Operacionais Estritas de Triagem e Ataque:
 bloco_texto_ia = f"{prompt_sistema_embutido}\n\n--------------------------------------------------\n"
 
 if not ativos_acionados:
-    bloco_texto_ia += "[MERCADO CHOPPY - FICA DE FORA HOJE] - Nenhum ativo preencheu os requisitos mínimos de entrada.\n"
+    bloco_texto_ia += "[MERCADO ESTAGNADO - POSTURA DEFENSIVA] - Nenhum ativo preencheu os requisitos mínimos de entrada.\n"
 else:
     bloco_texto_ia += "DADOS DOS ATIVOS ACIONADOS (COMBOIO):\n\n"
     for item in ativos_acionados:
