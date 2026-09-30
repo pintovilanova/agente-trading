@@ -248,10 +248,18 @@ for ativo_info in ativos_data:
         preco_entrada_str = f"{preco_entrada:.2f}" if isinstance(preco_entrada, (int, float)) else preco_entrada
 
         # ==========================================================
-        # CORREÇÃO CRÍTICA: Limpar np.nan para evitar erro de JSON
+        # CORREÇÃO CRÍTICA: Função limpa() Inderrotável
         # ==========================================================
         def limpa(v):
-            return round(float(v), 2) if pd.notna(v) and not np.isnan(v) else "N/A"
+            try:
+                if v == "N/A" or pd.isna(v):
+                    return "N/A"
+                val = float(v)
+                if np.isnan(val):
+                    return "N/A"
+                return round(val, 2)
+            except:
+                return "N/A"
 
         p_preco = limpa(preco)
         p_dist = limpa(dist_mm20)
@@ -323,7 +331,6 @@ if resultados_para_sheets and WEBHOOK_URL:
             "aba": NOME_ABA_EUROPA,
             "dados": resultados_para_sheets
         }
-        # CORREÇÃO CRÍTICA AQUI: Foi reposto o "json=payload_sheets" tal como nos EUA
         resposta = requests.post(WEBHOOK_URL, json=payload_sheets)
         if resposta.status_code == 200:
             print("[SUCESSO] Google Sheets atualizado com sucesso!")
