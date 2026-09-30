@@ -101,10 +101,20 @@ def analisar_com_ia(dados_mercado):
     espera_base = 15
     espera_maxima = 300
 
+    # Começa com o teu modelo de eleição
+    modelo_atual = 'gemini-3.6-flash'
+
     for tentativa in range(tentativas):
         try:
+            # Estratégia de Fallback: Se falhar 2 vezes seguidas, salta para o modelo de alta disponibilidade
+            if tentativa == 2:
+                print(f"[AVISO] O modelo {modelo_atual} está indisponível ou sem cota (limite 20/dia).")
+                print("[TÁTICA] A mudar o motor para 'gemini-1.5-flash' (limite 1500/dia) para garantir o relatório...")
+                modelo_atual = 'gemini-1.5-flash'
+
+            print(f"A tentar gerar relatório com o modelo: {modelo_atual}...")
             resposta = client.models.generate_content(
-                model='gemini-3.6-flash',
+                model=modelo_atual,
                 contents=prompt_completo
             )
             return resposta.text
@@ -119,6 +129,11 @@ def analisar_com_ia(dados_mercado):
                     if tempo_espera > espera_maxima:
                         tempo_espera = espera_maxima
                         
+                    # Se deu erro 429 na primeira ou segunda tentativa, não vale a pena esperar muito, força o ciclo a avançar para o Fallback
+                    if "429" in erro_str and tentativa < 2:
+                        tempo_espera = 5
+                        print("Cota excedida no modelo VIP. A avançar rápido para o modelo de contingência...")
+
                     print(f"Bloqueio de API. A aguardar {tempo_espera} segundos...")
                     time.sleep(tempo_espera)
                 else:
