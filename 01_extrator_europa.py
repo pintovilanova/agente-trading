@@ -353,7 +353,7 @@ Contexto: O mercado europeu é volátil e reage fortemente à abertura americana
 
 Regras Operacionais Estritas de Triagem e Ataque:
 
-1. FILTRO CÉTICO INICIAL: Analisa apenas ativos com 'Forca Consolidada' ou 'Alerta Iminente'. Se o panorama geral for fraco (maioria com ADX < 25 e RVOL baixo), REJEITA a lista de ativos, inicia a resposta com a tag [MERCADO CHOPPY - FICA DE FORA HOJE] e passa diretamente para o passo 7 (Saúde do Mercado).
+1. FILTRO CÉTICO INICIAL: Analisa apenas ativos com 'Forca Consolidada' ou 'Alerta Iminente'. Se o panorama geral for fraco (maioria com ADX < 25 e RVOL baixo), REJEITA a lista de ativos, inicia a resposta com a tag [MERCADO ESTAGNADO - POSTURA DEFENSIVA] e passa diretamente para o passo 7 (Saúde do Mercado).
 
 2. OS 3 MELHORES ALVOS: Se existirem oportunidades reais, foca-te num máximo de 3 ativos. Se um ativo detetar EARNINGS = PERIGO, ele é sumariamente desclassificado e não pode ser recomendado.
 
