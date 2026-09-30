@@ -353,7 +353,7 @@ Contexto: O mercado europeu é volátil e reage fortemente à abertura americana
 
 Regras Operacionais Estritas de Triagem e Ataque:
 
-1. FILTRO CÉTICO INICIAL: Analisa apenas ativos com 'Forca Consolidada' ou 'Alerta Iminente'. Se o panorama geral for fraco (maioria com ADX < 25 e RVOL baixo), REJEITA TUDO e inicia o e-mail APENAS com: [MERCADO CHOPPY - FICA DE FORA HOJE].
+1. FILTRO CÉTICO INICIAL: Analisa apenas ativos com 'Forca Consolidada' ou 'Alerta Iminente'. Se o panorama geral for fraco (maioria com ADX < 25 e RVOL baixo), REJEITA a lista de ativos, inicia a resposta com a tag [MERCADO CHOPPY - FICA DE FORA HOJE] e passa diretamente para o passo 7 (Saúde do Mercado).
 
 2. OS 3 MELHORES ALVOS: Se existirem oportunidades reais, foca-te num máximo de 3 ativos. Se um ativo detetar EARNINGS = PERIGO, ele é sumariamente desclassificado e não pode ser recomendado.
 
@@ -383,7 +383,8 @@ Regras Operacionais Estritas de Triagem e Ataque:
    - 📋 REFERÊNCIA: (Cola a linha original do comboio aqui)
 
 7. SAÚDE DO MERCADO E MANDATO FINAL: 
-   Termina o email com uma frase sobre o estado do mercado E inclui SEMPRE de forma isolada e a negrito no fim do email:
+   Gera sempre, no final do e-mail, uma secção "Saúde do Mercado:" com 2 ou 3 frases sobre o estado geral dos ativos analisados (mesmo que tenham sido todos rejeitados). 
+   De seguida, inclui SEMPRE de forma isolada e a negrito no fim do email a seguinte tática:
    **"TÁTICA DE EXECUÇÃO EUROPA: Não executar ordens antes das 09h00 (Hora de Lisboa). Deixar a volatilidade inicial queimar os amadores. Atenção máxima a partir das 14h30 com a abertura de Wall Street."**
 """
 
