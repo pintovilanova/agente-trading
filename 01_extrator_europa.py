@@ -391,7 +391,7 @@ Regras Operacionais Estritas de Triagem e Ataque:
 bloco_texto_ia = f"{prompt_sistema_embutido}\n\n--------------------------------------------------\n"
 
 if not ativos_acionados:
-    bloco_texto_ia += "[MERCADO CHOPPY - FICA DE FORA HOJE] - Nenhum ativo europeu preencheu os requisitos mínimos de entrada.\n"
+    bloco_texto_ia += "[MERCADO ESTAGNADO - POSTURA DEFENSIVA] - Nenhum ativo europeu preencheu os requisitos mínimos de entrada.\n"
 else:
     bloco_texto_ia += "DADOS DOS ATIVOS ACIONADOS (COMBOIO EUROPA):\n\n"
     for item in ativos_acionados:
