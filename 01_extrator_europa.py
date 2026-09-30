@@ -7,6 +7,7 @@ import requests
 import os
 import sys
 import smtplib
+import numpy as np
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 
@@ -178,7 +179,7 @@ for ativo_info in ativos_data:
         atr = ultimo_dia['ATRr_14']
         momentum = ultimo_dia['MOM_14']
 
-        atr_perc = round((atr / preco) * 100, 2)
+        atr_perc = round((atr / preco) * 100, 2) if pd.notna(atr) and pd.notna(preco) and preco > 0 else "N/A"
 
         recomendacao = "Observar"
         preco_entrada = "N/A"
@@ -188,16 +189,18 @@ for ativo_info in ativos_data:
         qtd_acoes = "N/A"
         multiplicador_atr = 1.0
 
-        trailing_base = preco - (atr * multiplicador_trailing_ts)
-        trailing_final = round(trailing_base, 2)
+        trailing_base = preco - (atr * multiplicador_trailing_ts) if pd.notna(preco) and pd.notna(atr) else "N/A"
+        trailing_final = round(trailing_base, 2) if trailing_base != "N/A" else "N/A"
 
-        preco_caiu_hoje = preco < preco_anterior
-        volume_despejo = rvol > 1.20
+        preco_caiu_hoje = preco < preco_anterior if pd.notna(preco) and pd.notna(preco_anterior) else False
+        volume_despejo = rvol > 1.20 if pd.notna(rvol) else False
 
         # ===================================================================
         # GUILHOTINA MATEMÁTICA - OTIMIZADA PARA SUBIDAS EMINENTES
         # ===================================================================
-        if (preco_caiu_hoje and volume_despejo) or (momentum <= 0.5):
+        if pd.isna(momentum) or pd.isna(adx) or pd.isna(rvol) or pd.isna(rsi) or pd.isna(dist_mm20) or pd.isna(atr):
+             recomendacao = "Observar"
+        elif (preco_caiu_hoje and volume_despejo) or (momentum <= 0.5):
             recomendacao = "Observar"
             
         elif var_perc > 0 and adx < 25:
@@ -244,23 +247,38 @@ for ativo_info in ativos_data:
         data_atual = datetime.now(ZoneInfo("Europe/Lisbon")).strftime('%d/%m/%Y %H:%M:%S')
         preco_entrada_str = f"{preco_entrada:.2f}" if isinstance(preco_entrada, (int, float)) else preco_entrada
 
+        # ==========================================================
+        # CORREÇÃO CRÍTICA: Limpar np.nan para evitar erro de JSON
+        # ==========================================================
+        def limpa(v):
+            return round(float(v), 2) if pd.notna(v) and not np.isnan(v) else "N/A"
+
+        p_preco = limpa(preco)
+        p_dist = limpa(dist_mm20)
+        p_mom = limpa(momentum)
+        p_rsi = limpa(rsi)
+        p_adx = limpa(adx)
+        p_atr = limpa(atr)
+        p_rvol = limpa(rvol)
+        p_atr_perc = limpa(atr_perc)
+
         # DADOS PARA O GOOGLE SHEETS
         linha_comboio_completa = (
-            f"{ticker},Nome: {nome_empresa},Setor: {setor},Preço: {round(preco, 2)},"
-            f"Dist MM20: {round(dist_mm20, 2)}%,Momentum: {round(momentum, 2)},"
-            f"RSI: {round(rsi, 2)},ADX: {round(adx, 2)},ATR: {round(atr, 2)} (Vol: {atr_perc}%),"
-            f"RVOL: {round(rvol, 2)},Estado: {recomendacao},Entrada: {preco_entrada_str},"
+            f"{ticker},Nome: {nome_empresa},Setor: {setor},Preço: {p_preco},"
+            f"Dist MM20: {p_dist}%,Momentum: {p_mom},"
+            f"RSI: {p_rsi},ADX: {p_adx},ATR: {p_atr} (Vol: {p_atr_perc}%),"
+            f"RVOL: {p_rvol},Estado: {recomendacao},Entrada: {preco_entrada_str},"
             f"Stop: {preco_stop},Take-Profit: {preco_tp},Break-Even: {preco_be},"
             f"Qtd: {qtd_acoes},Trailing: {trailing_final},Earnings: {alerta_earnings},Data: {data_atual}"
         )
 
         resultados_para_sheets.append({
             "ticker": ticker,
-            "preco": round(preco, 2),
-            "momentum": round(momentum, 2),
-            "rsi": round(rsi, 2),
-            "adx": round(adx, 2),
-            "atr": round(atr, 2),
+            "preco": p_preco,
+            "momentum": p_mom,
+            "rsi": p_rsi,
+            "adx": p_adx,
+            "atr": p_atr,
             "time": data_atual,
             "comboio": linha_comboio_completa
         })
@@ -271,14 +289,14 @@ for ativo_info in ativos_data:
             "nome": nome_empresa,
             "setor": setor,
             "estado": recomendacao,
-            "preco": round(preco, 2),
-            "rsi": round(rsi, 2),
-            "adx": round(adx, 2),
-            "rvol": round(rvol, 2),
-            "atr": round(atr, 2),
-            "atr_perc": atr_perc,
-            "momentum": round(momentum, 2),
-            "dist_mm20": round(dist_mm20, 2),
+            "preco": p_preco,
+            "rsi": p_rsi,
+            "adx": p_adx,
+            "rvol": p_rvol,
+            "atr": p_atr,
+            "atr_perc": p_atr_perc,
+            "momentum": p_mom,
+            "dist_mm20": p_dist,
             "entrada": round(preco_entrada, 2) if isinstance(preco_entrada, float) else preco_entrada,
             "stop": preco_stop,
             "alvo": preco_tp,
