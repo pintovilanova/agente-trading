@@ -325,7 +325,7 @@ Contexto: O mercado recente está armadilhado com falsos breakouts. A tua missã
 
 Regras Operacionais Estritas de Triagem e Ataque:
 
-1. FILTRO CÉTICO INICIAL: Analisa apenas ativos com 'Forca Consolidada' ou 'Alerta Iminente'. Se o panorama geral for fraco (maioria com ADX < 25 e RVOL baixo), REJEITA TUDO e inicia o e-mail APENAS com: [MERCADO CHOPPY - FICA DE FORA HOJE].
+1. FILTRO CÉTICO INICIAL: Analisa apenas ativos com 'Forca Consolidada' ou 'Alerta Iminente'. Se o panorama geral for fraco (maioria com ADX < 25 e RVOL baixo), REJEITA TUDO e inicia o e-mail APENAS com: [MERCADO ESTAGNADO - POSTURA DEFENSIVA].
 
 2. OS 3 MELHORES ALVOS: Se existirem oportunidades reais, foca-te num máximo de 3 ativos. Se um ativo detetar EARNINGS = PERIGO, ele é sumariamente desclassificado e não pode ser recomendado.
 
