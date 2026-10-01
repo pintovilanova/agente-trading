@@ -34,7 +34,7 @@ SMTP_PORT = 587
 # ===================================================================
 # 1. FUNÇÃO DE ENVIO DE EMAIL
 # ===================================================================
-def enviar_email_para_agente_ia(relatorio_texto, assunto="tradingRelatorioIA"):
+def enviar_email_para_agente_ia(relatorio_texto, assunto="tradingRelatorioIA US"):
     print(f"\nA enviar email para o Agente IA (Assunto: '{assunto}')...")
     try:
         msg = MIMEMultipart()
@@ -62,21 +62,19 @@ try:
     if resposta_webhook.status_code == 200:
         dados_webhook = resposta_webhook.json()
         
-        # Compatibilidade com a nova estrutura unificada (ativos + posicoesAtivas)
         if isinstance(dados_webhook, dict) and "ativos" in dados_webhook:
             ativos_data = dados_webhook.get("ativos", [])
-             = dados_webhook.get("posicoesAtivas", {})
+            posicoes_ativas = dados_webhook.get("posicoesAtivas", {})
         elif isinstance(dados_webhook, list):
-            # Fallback caso o webhook ainda estivesse no formato antigo
             ativos_data = dados_webhook
-             = {}
+            posicoes_ativas = {}
         else:
             ativos_data = []
-             = {}
+            posicoes_ativas = {}
 
         if len(ativos_data) > 0:
             print(f"[SUCESSO] {len(ativos_data)} ativos carregados da Watchlist.")
-            print(f"[SUCESSO] {len()} posições ativas detetadas no Diário de Bordo.")
+            print(f"[SUCESSO] {len(posicoes_ativas)} posições ativas detetadas no Diário de Bordo.")
         else:
             print("[ERRO] A lista de ativos veio vazia.")
             sys.exit(1)
@@ -334,11 +332,10 @@ if resultados_para_sheets and WEBHOOK_URL:
         print(f"[ERRO CRÍTICO] Falha HTTP Sheets: {e}")
 
 # ===================================================================
-# 6. GERAR BLOCO DE TEXTO E ENVIAR PARA O AGENTE IA (COM FILTRO CÉTICO)
+# 6. GERAR BLOCO DE TEXTO E ENVIAR PARA O AGENTE IA
 # ===================================================================
 print("\nA construir o bloco unificado (Prompt + Comboio) para o email...")
 
-# FILTRO: Seleciona apenas ativos acionados (ignora os "Observar")
 ativos_acionados = [item for item in comboio_ia if item["estado"] != "Observar"]
 
 prompt_sistema_embutido = f"""MODO DIÁRIO ATIVO - PREDADOR DE BREAKOUTS: Avalia os seguintes ativos da minha watchlist.
@@ -371,7 +368,7 @@ Regras Operacionais Estritas de Triagem, Carteira e Ataque:
 
 6. GESTÃO DE POSIÇÕES ATIVAS E ESTRUTURA VISUAL OBRIGATÓRIA (CRÍTICO):
    - Verifica o campo 'PosicaoAtiva' em cada linha do comboio.
-   - **REGRA DE OURO:** Se a PosicaoAtiva indicar **SIM**, é **estritamente proibido** sugerir nova entrada. O foco é 100% a gestão da posição existente.
+   - **REGRA DE OURO:** Se a PosicaoAtiva indicar **SIM**, é **estritamente proibido** sugerir nova entrada ou alocação de capital. O foco é 100% a gestão da posição existente.
    - **GESTÃO DO STOP LOSS:** Compara o 'StopAtual' indicado na posição ativa com o valor de 'Trailing' calculado pelo sistema. 
      * Se o 'Trailing' for superior ao 'StopAtual', emite obrigatoriamente a recomendação: [AJUSTE DE STOP: Subir o Stop Loss atual de X para o novo valor de Trailing Y].
      * Se o 'StopAtual' já for superior ou se o trailing ainda estiver abaixo, indica: [MANUTENÇÃO DE STOP: Manter stop atual em X].
@@ -380,7 +377,7 @@ Regras Operacionais Estritas de Triagem, Carteira e Ataque:
    🎯 [TICKER] - [Nome da Empresa] ([Setor])
    - 🚩 BANDEIRAS: (Lista aqui os avisos da regra 3 e 5, ou "Limpo" se não houver)
    - ⚠️ ESTADO NA CARTEIRA: [Se POSIÇÃO JÁ ATIVA: "POSIÇÃO ATIVA (Entrada: X | Stop Atual: Y | Qtd: Z). Análise de Trailing abaixo." | Se NÃO: "Nenhuma posição aberta"]
-   - ⚙️️ EXECUÇÃO / DEFESA: (Indica claramente se deves subir o Stop Loss comparando o Stop Atual com o Trailing, ou mantê-lo)
+   - ⚙️ EXECUÇÃO / DEFESA: (Indica claramente se deves subir o Stop Loss comparando o Stop Atual com o Trailing, ou mantê-lo)
    - 🛡️ TAMANHO DA POSIÇÃO: [Se já tens posição: "N/A - Já em Carteira" | Se não tens: "Lote Completo" ou "Lote Reduzido a 50%"]
    - 🔢 DADOS EXATOS: Entrada: X | Stop: X | TP: X | BE: X | Trailing: X | Qtd: X | Valor a Investir: [Se já tens posição: "N/A - Posição Existente" | Se não tens: ~X$]
    - 📋 REFERÊNCIA: (Cola a linha original do comboio aqui)
