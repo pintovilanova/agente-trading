@@ -325,7 +325,7 @@ Contexto: O mercado recente está armadilhado com falsos breakouts. A tua missã
 
 Regras Operacionais Estritas de Triagem e Ataque:
 
-1. FILTRO CÉTICO INICIAL: Analisa apenas ativos com 'Forca Consolidada' ou 'Alerta Iminente'. Se o panorama geral for fraco (maioria com ADX < 25 e RVOL baixo), REJEITA TUDO e inicia o e-mail APENAS com: [MERCADO ESTAGNADO - POSTURA DEFENSIVA].
+1. AVALIAÇÃO MACRO (FILTRO CÉTICO INICIAL): Olha primeiro para TODOS os ativos do comboio. Se a esmagadora maioria estiver em estado 'Aguardar Recuo', com ADX < 25 e RVOL baixo, o panorama geral é considerado de alto risco. Nesse caso, REJEITA TUDO, não mostres nenhum ativo (mesmo que haja alertas iminentes), inicia o e-mail APENAS com a tag [MERCADO ESTAGNADO - POSTURA DEFENSIVA] e salta imediatamente para o passo 7. Caso o mercado seja favorável, filtra e analisa apenas os que têm 'Forca Consolidada' ou 'Alerta Iminente'.
 
 2. OS 3 MELHORES ALVOS: Se existirem oportunidades reais, foca-te num máximo de 3 ativos. Se um ativo detetar EARNINGS = PERIGO, ele é sumariamente desclassificado e não pode ser recomendado.
 
