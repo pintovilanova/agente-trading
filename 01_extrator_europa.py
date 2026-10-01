@@ -374,12 +374,12 @@ Regras Operacionais Estritas de Triagem e Ataque:
    - CORRELAÇÃO: Se 2 ou mais ativos do Top 3 forem do mesmo Setor/País, emite "[AVISO DE CORRELAÇÃO] - Risco concentrado" e escolhe apenas o melhor.
 
 6. ESTRUTURA VISUAL OBRIGATÓRIA (Usa exatamente este template para cada ativo validado):
-   
+
    🎯 [TICKER] - [Nome da Empresa] ([Setor])
    - 🚩 BANDEIRAS: (Lista aqui os avisos da regra 3 e 5, ou "Limpo" se não houver)
    - ⚙️ EXECUÇÃO: (Menciona a regra dos Gaps e Gestão de Lucro)
    - 🛡️ TAMANHO DA POSIÇÃO: (Recomenda Lote Completo ou Lote Reduzido a 50%)
-   - 🔢 DADOS EXATOS: Entrada: X | Stop: X | TP: X | BE: X | Trailing: X | Qtd: X (Se Lote Reduzido, indica Qtd original / 2)
+   - 🔢 DADOS EXATOS: Entrada: X | Stop: X | TP: X | BE: X | Trailing: X | Qtd: X (Se Lote Reduzido, indica Qtd original / 2) | Valor a Investir: ~X€ (Multiplica o preço de Entrada pela Qtd recomendada)
    - 📋 REFERÊNCIA: (Cola a linha original do comboio aqui)
 
 7. SAÚDE DO MERCADO E MANDATO FINAL: 
