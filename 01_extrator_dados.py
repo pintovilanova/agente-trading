@@ -54,20 +54,34 @@ def enviar_email_para_agente_ia(relatorio_texto, assunto="tradingRelatorioIA"):
         print(f"[ERRO] Falha ao enviar o email para o Agente IA: {e}")
 
 # ===================================================================
-# 2. BUSCAR A WATCHLIST DINAMICAMENTE (Google Sheets)
+# 2. BUSCAR A WATCHLIST E POSIÇÕES ATIVAS (Google Sheets via Webhook)
 # ===================================================================
-print("A carregar a Watchlist a partir do Google Sheets...")
+print("A carregar a Watchlist e Posições Ativas a partir do Google Sheets...")
 try:
-    resposta_tickers = requests.get(WEBHOOK_URL)
-    if resposta_tickers.status_code == 200:
-        ativos_data = resposta_tickers.json()
-        if isinstance(ativos_data, list) and len(ativos_data) > 0:
-            print(f"[SUCESSO] {len(ativos_data)} ativos carregados (com nomes).")
+    resposta_webhook = requests.get(WEBHOOK_URL)
+    if resposta_webhook.status_code == 200:
+        dados_webhook = resposta_webhook.json()
+        
+        # Compatibilidade com a nova estrutura unificada (ativos + posicoesAtivas)
+        if isinstance(dados_webhook, dict) and "ativos" in dados_webhook:
+            ativos_data = dados_webhook.get("ativos", [])
+            posicoes_ativas = dados_webhook.get("posicoesAtivas", {})
+        elif isinstance(dados_webhook, list):
+            # Fallback caso o webhook ainda estivesse no formato antigo
+            ativos_data = dados_webhook
+            posicoes_ativas = {}
+        else:
+            ativos_data = []
+            posicoes_ativas = {}
+
+        if len(ativos_data) > 0:
+            print(f"[SUCESSO] {len(ativos_data)} ativos carregados da Watchlist.")
+            print(f"[SUCESSO] {len(posicoes_ativas)} posições ativas detetadas no Diário de Bordo.")
         else:
             print("[ERRO] A lista de ativos veio vazia.")
             sys.exit(1)
     else:
-        print(f"[ERRO] Falha ao descarregar watchlist: {resposta_tickers.status_code}")
+        print(f"[ERRO] Falha ao descarregar dados: {resposta_webhook.status_code}")
         sys.exit(1)
 except Exception as e:
     print(f"[ERRO CRÍTICO] Falha de comunicação com Sheets: {e}")
@@ -198,17 +212,17 @@ for ativo_info in ativos_data:
             
         elif var_perc > 0 and adx < 25:
             recomendacao = "Aguardar Recuo"
-            preco_entrada = round(preco - (atr * 0.4), 2)  # Arredondado a 2 casas
+            preco_entrada = round(preco - (atr * 0.4), 2)
             multiplicador_atr = 1.0
             
         elif var_perc > 0 and adx >= 30 and rvol >= 1.20 and (55.00 <= rsi <= 72.00) and (0.00 <= dist_mm20 <= 3.50) and momentum > 1.50:
             recomendacao = "Forca Consolidada"
-            preco_entrada = round(preco - (atr * 0.1), 2)  # Arredondado a 2 casas
+            preco_entrada = round(preco - (atr * 0.1), 2)
             multiplicador_atr = 1.3 
             
         elif adx >= 25 and rvol >= 1.00 and (50.00 <= rsi <= 75.00) and (-1.00 <= dist_mm20 <= 4.00) and momentum > 0.50:
             recomendacao = "Alerta Iminente"
-            preco_entrada = round(preco - (atr * 0.2), 2)  # Arredondado a 2 casas
+            preco_entrada = round(preco - (atr * 0.2), 2)
             multiplicador_atr = 1.2
             
         else:
@@ -221,7 +235,6 @@ for ativo_info in ativos_data:
             # ESCUDO DINÂMICO DA EMA 20
             if preco_stop_calc > sma20 and preco > sma20:
                 preco_stop_calc = sma20 * 0.995
-                print(f"[DEFESA ESTRUTURAL] {ticker}: Stop recuado para {preco_stop_calc:.2f} (Abaixo da EMA 20)")
             
             preco_stop = round(preco_stop_calc, 2)
             risco_por_acao = preco_entrada - preco_stop_calc
@@ -241,6 +254,13 @@ for ativo_info in ativos_data:
         data_atual = datetime.now(ZoneInfo("Europe/Lisbon")).strftime('%d/%m/%Y %H:%M:%S')
         preco_entrada_str = f"{preco_entrada:.2f}" if isinstance(preco_entrada, (int, float)) else preco_entrada
 
+        # VERIFICAÇÃO SE JÁ EXISTE POSIÇÃO ATIVA NO DIÁRIO DE BORDO
+        if ticker in posicoes_ativas:
+            pos_info = posicoes_ativas[ticker]
+            info_carteira = f"SIM (Entrada: {pos_info['precoEntrada']}, Qtd: {pos_info['quantidade']})"
+        else:
+            info_carteira = "NÃO"
+
         # DADOS PARA O GOOGLE SHEETS
         linha_comboio_completa = (
             f"{ticker},Nome: {nome_empresa},Setor: {setor},Preço: {round(preco, 2)},"
@@ -248,7 +268,8 @@ for ativo_info in ativos_data:
             f"RSI: {round(rsi, 2)},ADX: {round(adx, 2)},ATR: {round(atr, 2)} (Vol: {atr_perc}%),"
             f"RVOL: {round(rvol, 2)},Estado: {recomendacao},Entrada: {preco_entrada_str},"
             f"Stop: {preco_stop},Take-Profit: {preco_tp},Break-Even: {preco_be},"
-            f"Qtd: {qtd_acoes},Trailing: {trailing_final},Earnings: {alerta_earnings},Data: {data_atual}"
+            f"Qtd: {qtd_acoes},Trailing: {trailing_final},Earnings: {alerta_earnings},"
+            f"PosicaoAtiva: {info_carteira},Data: {data_atual}"
         )
 
         resultados_para_sheets.append({
@@ -283,10 +304,11 @@ for ativo_info in ativos_data:
             "quantidade": qtd_acoes,
             "trailing": trailing_final,
             "earnings": alerta_earnings,
+            "posicao_ativa": info_carteira,
             "data": data_atual
         })
         
-        print(f"[OK] {ticker} analisado. Estado: {recomendacao}")
+        print(f"[OK] {ticker} analisado. Estado: {recomendacao} | Posição Ativa: {info_carteira}")
 
     except Exception as e:
         print(f"[ERRO] Falha ao processar {ticker}: {e}")
@@ -351,9 +373,10 @@ Regras Operacionais Estritas de Triagem e Ataque:
 
    🎯 [TICKER] - [Nome da Empresa] ([Setor])
    - 🚩 BANDEIRAS: (Lista aqui os avisos da regra 3 e 5, ou "Limpo" se não houver)
+   - ⚠️ ESTADO NA CARTEIRA: (Se 'PosicaoAtiva' indicar SIM, avisa que já está aberto e foca na gestão. Se NÃO, indica "Nenhuma posição aberta")
    - ⚙️ EXECUÇÃO: (Menciona a regra dos Gaps e Gestão de Lucro)
-   - 🛡️ TAMANHO DA POSIÇÃO: (Recomenda Lote Completo ou Lote Reduzido a 50%)
-   - 🔢 DADOS EXATOS: Entrada: X | Stop: X | TP: X | BE: X | Trailing: X | Qtd: X (Se Lote Reduzido, indica Qtd original / 2) | Valor a Investir: ~X$ (Multiplica o preço de Entrada pela Qtd recomendada)
+   - 🛡️ TAMANHO DA POSIÇÃO: (Se já tens posição, diz "N/A - Já em Carteira". Se não tens, recomenda Lote Completo ou Reduzido)
+   - 🔢 DADOS EXATOS: Entrada: X | Stop: X | TP: X | BE: X | Trailing: X | Qtd: X (Se Lote Reduzido, indica Qtd original / 2) | Valor a Investir: ~X$ (Apenas se aplicável)
    - 📋 REFERÊNCIA: (Cola a linha original do comboio aqui)
 
 7. SAÚDE DO MERCADO E MANDATO FINAL: 
@@ -378,7 +401,7 @@ else:
             f"Stop: {item['stop']},Take-Profit: {item['alvo']},Break-Even: {item.get('be', 'N/A')},"
             f"Qtd: {item['quantidade']},Trailing: {item['trailing']},"
             f"Earnings: {item.get('earnings', 'OK')},"
-            f"Data: {item['data']}"
+            f"PosicaoAtiva: {item['posicao_ativa']},Data: {item['data']}"
         )
         bloco_texto_ia += linha + "\n"
 
