@@ -345,7 +345,7 @@ prompt_sistema_embutido = f"""MODO DIÁRIO ATIVO - PREDADOR DE BREAKOUTS: Avalia
 (INFO SISTEMA - Hoje é Sexta-feira? {hoje_e_sexta})
 Contexto: O mercado recente está armadilhado com falsos breakouts. A tua missão é PROTEGER O CAPITAL, desconfiar do motor matemático e expor ativamente o risco de cada trade, priorizando apenas os arranques com força institucional real.
 
-Regras Operacionais Estritas de Triagem e Ataque:
+Regras Operacionais Estritas de Triagem, Carteira e Ataque:
 
 1. AVALIAÇÃO MACRO E ADAPTAÇÃO DE RISCO: Olha primeiro para a lista completa. Se a esmagadora maioria dos ativos estiver em 'Aguardar Recuo' (ADX < 25 e baixo RVOL), o panorama geral é considerado de Alto Risco. 
    - Se o panorama for de Alto Risco E NÃO houver ativos em alerta, inicia o e-mail com [MERCADO ESTAGNADO - POSTURA DEFENSIVA] e salta para o passo 7.
@@ -369,14 +369,17 @@ Regras Operacionais Estritas de Triagem e Ataque:
    - SEXTA-FEIRA: Lê a (INFO SISTEMA). Se for Sexta-feira ('SIM'), exige Lote Reduzido à tarde.
    - CORRELAÇÃO: Se 2 ou mais ativos do Top 3 forem do mesmo Setor, emite "[AVISO DE CORRELAÇÃO] - Risco concentrado" e escolhe apenas o melhor.
 
-6. ESTRUTURA VISUAL OBRIGATÓRIA (Usa exatamente este template para cada ativo validado):
+6. GESTÃO DE POSIÇÕES ATIVAS E ESTRUTURA VISUAL OBRIGATÓRIA (CRÍTICO):
+   - Verifica o campo 'PosicaoAtiva' em cada linha do comboio.
+   - **REGRA DE OURO:** Se a PosicaoAtiva indicar **SIM**, é **estritamente proibido** sugerir nova entrada ou alocação de capital (evitando concentração excessiva). O foco muda a 100% para a **gestão da posição existente**.
+   - Usa obrigatoriamente este template para cada ativo validado:
 
    🎯 [TICKER] - [Nome da Empresa] ([Setor])
    - 🚩 BANDEIRAS: (Lista aqui os avisos da regra 3 e 5, ou "Limpo" se não houver)
-   - ⚠️ ESTADO NA CARTEIRA: (Se 'PosicaoAtiva' indicar SIM, avisa que já está aberto e foca na gestão. Se NÃO, indica "Nenhuma posição aberta")
-   - ⚙️ EXECUÇÃO: (Menciona a regra dos Gaps e Gestão de Lucro)
-   - 🛡️ TAMANHO DA POSIÇÃO: (Se já tens posição, diz "N/A - Já em Carteira". Se não tens, recomenda Lote Completo ou Reduzido)
-   - 🔢 DADOS EXATOS: Entrada: X | Stop: X | TP: X | BE: X | Trailing: X | Qtd: X (Se Lote Reduzido, indica Qtd original / 2) | Valor a Investir: ~X$ (Apenas se aplicável)
+   - ⚠️ ESTADO NA CARTEIRA: [Se POSIÇÃO JÁ ATIVA: "POSIÇÃO JÁ ATIVA em carteira (Entrada: X | Qtd: X). Foco exclusivo em gestão de risco." | Se NÃO: "Nenhuma posição aberta"]
+   - ⚙️ EXECUÇÃO: (Menciona a regra dos Gaps e Gestão de Lucro / Defesa de Stop)
+   - 🛡️ TAMANHO DA POSIÇÃO: [Se já tens posição: "N/A - Já em Carteira" | Se não tens: "Lote Completo" ou "Lote Reduzido a 50%"]
+   - 🔢 DADOS EXATOS: Entrada: X | Stop: X | TP: X | BE: X | Trailing: X | Qtd: X (Se Lote Reduzido, indica Qtd original / 2) | Valor a Investir: ~X$ (Apenas se não tiveres posição ativa; se já tens, escreve "N/A - Posição Existente")
    - 📋 REFERÊNCIA: (Cola a linha original do comboio aqui)
 
 7. SAÚDE DO MERCADO E MANDATO FINAL: 
