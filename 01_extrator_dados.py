@@ -344,7 +344,7 @@ ativos_acionados = [
 
 prompt_sistema_embutido = f"""MODO DIÁRIO ATIVO - PREDADOR DE BREAKOUTS: Avalia os seguintes ativos da minha watchlist.
 (INFO SISTEMA - Hoje é Sexta-feira? {hoje_e_sexta})
-Contexto: O mercado recente está armadilhado com falsos breakouts. A tua missão é PROTEGER O CAPITAL, desconfiar do motor matemático e expor ativamente o risco de cada trade, priorizando apenas os arranques com força institucional real.
+Contexto: O teu mandato principal é a PRESERVAÇÃO DE CAPITAL e a gestão de risco assimétrica. A tua missão é atuar como auditor do motor matemático: procura ativamente falhas na estrutura de cada trade, expõe o risco e aprova exclusivamente os arranques que demonstrem força institucional inegável.
 
 Regras Operacionais Estritas de Triagem, Carteira e Ataque:
 
