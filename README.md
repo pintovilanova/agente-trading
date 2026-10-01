@@ -1,4 +1,4 @@
-# Solution Design Document (SDD): Autonomous Trading System
+# Solution Design Document (SDD): Autonomous Trading System ("Predador de Breakouts")
 
 ## 1. Architectural Overview
 
@@ -9,92 +9,96 @@ The system operates on a hybrid orchestration model, where **Google Apps Script*
 | Component | Technology / Service | System Function |
 | :--- | :--- | :--- |
 | **Database & UI** | Google Sheets | Stores watchlists, historical logs via the "Diário de Bordo", control panel (Configs), and data visualization. |
-| **Data Orchestrator** | Google Apps Script | Serves the active watchlist dynamically via Webhook and manages system state flags. |
+| **Data Orchestrator** | Google Apps Script | Serves the active watchlists (US and EU) dynamically via Webhook and manages system state flags. |
 | **Market Data (API)** | yfinance / Twelve Data | Provides technical metrics: Price, ADX, RSI, ATR, RVOL, Momentum, and SMA200. |
-| **Cloud Engine (CI/CD)** | GitHub Actions | Autonomous unified execution environment (Ubuntu) running both the mathematical engine and the AI agent sequentially. |
-| **Processing & AI** | Python 3 + Gemini API | Executes the Math Engine (`v2`) and AI Agent (`git`), utilizing ephemeral local files (`comboio_temp.txt`) for instant, IMAP-free data handoffs. |
+| **Cloud Engine (CI/CD)** | GitHub Actions | Autonomous unified execution environment (Ubuntu) running both the mathematical engines and the AI agent sequentially. |
+| **Processing & AI** | Python 3 + Gemini API | Executes the Math Engines (`01_extrator_us.py`, `01_extrator_europa.py`) and AI Agent (`02_agente_gemini.py`), utilizing ephemeral local files (`comboio_us.txt`, `comboio_europa.txt`) for instant data handoffs. |
 | **Security** | GitHub Secrets | Encrypted storage for API keys, email credentials, and webhook URLs. |
 
 ---
 
+## 2. Execution Phases
+
 ### Phase 1: Mathematical Engine & Data Extraction (GitHub Actions - Step 1)
-*   **04:30 AM - Cloud Awakening:** The unified `.github/workflows/pipeline.yml` workflow is triggered.
-*   **04:31 AM - Watchlist Ingestion & Veto:** The `agente_trading_v2.py` script pulls the daily watchlist from Google Sheets via Webhook. It immediately checks the SPY Macro Filter (SMA200 and crash thresholds) to authorize or veto the daily run.
-*   **04:32 AM - Calculation & Ephemeral Storage:** The script calculates ATR, Distance to SMA20, Momentum, RVOL, RSI, and ADX. It processes the mathematical targets (Stop Loss, Take-Profit, Trailing) and writes the resulting data "train" into a local ephemeral file (`comboio_temp.txt`) on the GitHub runner. A backup copy is emailed to the user for historical auditing.
+* **04:30 AM (US) / 08:30 AM (EU) - Cloud Awakening:** The scheduled workflows are triggered.
+* **Market Separation:** The system uses dedicated scripts (`01_extrator_us.py` and `01_extrator_europa.py`) to handle specific market hours and distinct watchlists.
+* **Watchlist Ingestion & Veto:** The script pulls the daily watchlist from Google Sheets via Webhook. It immediately checks the SPY Macro Filter (SMA200 and crash thresholds) to authorize or veto the daily run.
+* **Calculation & Ephemeral Storage:** The script calculates ATR, Distance to SMA20, Momentum, RVOL, RSI, and ADX. It processes the mathematical targets (Stop Loss, Take-Profit, Trailing) and writes the resulting data "train" into local ephemeral files on the GitHub runner. A backup copy is emailed to the user for historical auditing.
+* **Data Integrity Protocol:** An active filter (`dropna`) drops "ghost days" from pre-market polling, and an `anti-NaN` function sanitizes corrupt API math values, ensuring 100% JSON compliance before pushing to Google Sheets.
 
 ### Phase 2: Artificial Intelligence & Execution (GitHub Actions - Step 2)
-*   **04:35 AM - Zero-Latency Handoff:** The `agente_trading_git.py` script starts on the exact same virtual machine. It instantly reads `comboio_temp.txt`, entirely bypassing external IMAP server connections and potential network blocks. (IMAP remains strictly as a local-PC fallback).
-*   **04:36 AM - Gemini Processing:** The AI processes the data string following blind parametric rules (zero fundamental bias). 
-*   **04:38 AM - Report Delivery:** The system dispatches the final, formatted tactical report to the user's email, highlighting the top 3 setups with their exact mathematical targets.
-
-### Phase 3: Intraday Monitoring (Surgical Trigger)
-*   **03:30 PM - Open Market Evaluation:** Scheduled Apps Script triggers perform a quick ping to check for high volume breakouts and update the `Diário de Bordo` tab with the Intraday status.
+* **Zero-Latency Handoff:** The `02_agente_gemini.py` script starts on the exact same virtual machine. It instantly reads the ephemeral text files, entirely bypassing external IMAP server connections and potential network blocks. (IMAP remains strictly as a local-PC fallback).
+* **Gemini Processing (Strict Mode):** The AI acts as the ultimate Risk Manager. It evaluates the "train" data against strict parametric rules (zero fundamental bias). If the overall market lacks volume (RVOL) or trend strength (ADX), the AI applies the **Guillotine** and vetoes all trades, issuing a `[MERCADO ESTAGNADO - POSTURA DEFENSIVA]` alert.
+* **Report Delivery:** If high-probability setups exist, the system dispatches the final, formatted tactical report highlighting the top 3 assets, their exact mathematical targets, flags (e.g., Earnings danger, Compression potential), and dynamic profit-management rules (Fixed TP vs. Trailing).
 
 ---
 
-## 2. Business Logic & Risk Management (Math.Max Matrix)
+## 3. Business Logic & Risk Management (Math.Max Matrix)
 
-The core of the system is built on a rigid capital preservation algorithm, where the AI acts strictly as an advanced calculator for predefined parameters.
+The core of the system is built on a rigid capital preservation algorithm. The mathematical engine identifies anomalies, and the AI validates institutional commitment.
 
-*   **Qualification Filters (Mandatory):**
-    *   Price action above the SMA200 (SPY Macro Filter).
-    *   ADX > 25 (Strong trend).
-    *   RVOL > 1.0 (Volume anomaly / institutional interest).
-    *   RSI between 50 and 68 (Bullish momentum without being overbought).
+* **Qualification Filters (Mandatory):**
+  * Price action above the SMA200 (SPY Macro Filter).
+  * ADX > 25 (Strong trend).
+  * RVOL > 1.0 (Volume anomaly / institutional interest).
+  * RSI between 50 and 75 (Bullish momentum without being critically overbought).
 
-*   **Exclusion Filters (Guillotine):**
-    *   Severely negative Momentum (e.g., < -3.00). Automatically rejects "falling knives".
-    *   RSI > 70. Rejects overbought assets at risk of imminent correction.
-    *   RVOL > 2.0. Rejects volume climaxes and potential institutional dumping.
+* **Exclusion Filters (The AI Guillotine):**
+  * **Earnings Danger:** Assets reporting earnings within 3 days are sumariamente rejected.
+  * **Market Context Veto:** If the majority of the watchlist exhibits ADX < 25 and low RVOL, the AI assumes a choppy environment and blocks all trades to protect capital.
+  * **Erratic Assets:** If the Volatility percentage (ATR vs. Price) exceeds 5%, the system flags the asset as high risk.
 
-*   **Risk Ratio & Mathematical Targets:**
-    *   Unit Risk = Entry Price - Stop Loss (calculated via ATR multiplier).
-    *   `Take-Profit = Entry + (Unit Risk * 1.2)`
-    *   `Break-Even = Entry + ((Take-Profit - Entry) / 2)`
+* **Risk Ratio & Mathematical Targets:**
+  * Unit Risk = Entry Price - Stop Loss (calculated via ATR multiplier, safeguarded by the SMA20 Shield).
+  * `Take-Profit = Entry + (Unit Risk * 1.2)`
+  * `Break-Even = Entry + ((Take-Profit - Entry) / 2)`
 
-*   **Trailing Stop (The Law of Risk):**
-    *   Implements the formula `Math.max(Calculated Trailing, Previous Trailing)`. Ensures that the Stop Loss mechanically follows the price and never retreats, locking in profits as the trend advances.
-
----
-
-## 3. Resilience & Fault Tolerance (Error Handling)
-
-The architecture is designed to be fault-tolerant across four critical vectors:
-
-1.  **IMAP & Network Block Bypass (Hybrid Handoff):** To prevent cloud-server IMAP timeouts or Google security blocks, the system passes data between the mathematical engine and the AI agent using a localized ephemeral file (`comboio_temp.txt`). External email fetching is retained solely as an automatic fallback for manual local executions.
-2.  **AI Traffic Spikes & Rate Limits (503/429 Errors):** The AI agent utilizes a robust `try/except` block with an exponential backoff algorithm (Tenacity style). If the Gemini API hits rate limits or server overload, it retries up to 10 times, escalating wait periods up to a maximum of 300 seconds (5 minutes) per attempt.
-3.  **Data API Limits:** Dynamic delays and error handling ensure that third-party financial data providers (like yfinance/Twelve Data) do not block the IP address due to high-frequency polling.
-4.  **Cloud Scheduling Protection (Cron Jobs):** To prevent private repositories from pausing automated schedules due to inactivity (the 60-day rule), the integrated CI/CD workflow guarantees daily continuity perfectly aligned with the morning delivery window.
+* **Dynamic Profit Management (AI Ruleset):**
+  * If ADX > 35: "[TENDÊNCIA EXTREMA] Ignora TP, gere pelo Trailing."
+  * If ADX < 30: "[TENDÊNCIA MODERADA] Respeita o TP fixo."
 
 ---
 
-## 4. Execution Pipeline (Chronological Flow)
+## 4. Resilience & Fault Tolerance (Error Handling)
+
+The architecture is designed to be fault-tolerant across multiple critical vectors:
+
+1. **AI Traffic Spikes & Model Fallback (503/429 Errors):** The AI agent utilizes a robust `try/except` block with an exponential backoff algorithm. If the primary VIP model (`gemini-3.6-flash`) hits its strict daily free-tier quota (Error 429) or experiences server overload (Error 503), the system automatically downgrades to the high-availability fallback model (`gemini-2.5-flash`) to guarantee the tactical report delivery without interruption.
+2. **IMAP & Network Block Bypass (Hybrid Handoff):** To prevent cloud-server IMAP timeouts or Google security blocks, data passing between the mathematical engines and the AI agent occurs via localized ephemeral files.
+3. **JSON Payload Sanitization:** The `limpa()` function guarantees that missing market data (`NaN` or `np.float64(nan)`) is caught and converted to `"N/A"`, preventing critical communication crashes with the Google Sheets API.
+4. **Cloud Scheduling Protection (Cron Jobs):** Integrated CI/CD workflows guarantee daily continuity perfectly aligned with morning delivery windows, preventing private repositories from pausing automated schedules due to inactivity.
+
+---
+
+## 5. Execution Pipeline (Chronological Flow)
 
 ```mermaid
 sequenceDiagram
     autonumber
     participant Sheets as Google Sheets
     participant GH as GitHub Actions (Ubuntu)
-    participant Phase1 as Math Engine<br/>(agente_trading_v2.py)
-    participant Phase2 as AI Agent<br/>(agente_trading_git.py)
+    participant Phase1 as Math Engines<br/>(01_extrator_*)
+    participant Phase2 as AI Agent<br/>(02_agente_gemini.py)
     participant AI as Gemini API
 
-    GH->>Phase1: Trigger Unified Workflow @ 04:30 AM (Pass 1)
-    Phase1->>Sheets: Fetch Watchlist via Webhook
-    Phase1->>Phase1: Calculate Indicators & Targets
-    Phase1->>GH: Write comboio_temp.txt (Ephemeral File)
-    Phase1-->>User Email: Send historical backup email
-    GH->>Phase2: Trigger Unified Workflow (Pass 2)
+    GH->>Phase1: Trigger Workflow (Market Open)
+    Phase1->>Sheets: Fetch EU/US Watchlists via Webhook
+    Phase1->>Phase1: Drop Ghost Days & Sanitize Data (Anti-NaN)
+    Phase1->>Phase1: Calculate Indicators & Risk Targets
+    Phase1->>Sheets: Push Clean Data Array to UI
+    Phase1->>GH: Write comboio_temp.txt (Ephemeral)
+    Phase1-->>User Email: Send raw historical backup
+    GH->>Phase2: Trigger AI Engine
     Phase2->>GH: Read comboio_temp.txt (Bypass IMAP)
     Phase2->>AI: Send Prompt + Asset Data
     
-    alt Normal Execution
-        AI-->>Phase2: Returns top 3 asset selection
-    else API Rate Limit / Spike (Error 429 / 503)
+    alt VIP Model Execution (Gemini 3.6)
+        AI-->>Phase2: Returns tactical selection or Defense Veto
+    else Quota Exceeded / Server Full (Error 429 / 503)
         AI--xPhase2: Response Failure
-        Note over Phase2,AI: Exponential Backoff Retry (Max 10x)<br/>Waits 15s, 30s, 60s... up to 300s
-        Phase2->>AI: Retries analysis
-        AI-->>Phase2: Returns top 3 asset selection
+        Note over Phase2,AI: Exponential Backoff & Tactic Switch
+        Phase2->>AI: Fallback to High-Availability Model (Gemini 2.5)
+        AI-->>Phase2: Returns tactical selection or Defense Veto
     end
     
-    Phase2->>User Email: Dispatch Final Tactical Report
+    Phase2->>User Email: Dispatch Final "Predador" Report
