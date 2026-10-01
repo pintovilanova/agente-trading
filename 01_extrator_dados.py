@@ -65,18 +65,18 @@ try:
         # Compatibilidade com a nova estrutura unificada (ativos + posicoesAtivas)
         if isinstance(dados_webhook, dict) and "ativos" in dados_webhook:
             ativos_data = dados_webhook.get("ativos", [])
-            posicoes_ativas = dados_webhook.get("posicoesAtivas", {})
+             = dados_webhook.get("posicoesAtivas", {})
         elif isinstance(dados_webhook, list):
             # Fallback caso o webhook ainda estivesse no formato antigo
             ativos_data = dados_webhook
-            posicoes_ativas = {}
+             = {}
         else:
             ativos_data = []
-            posicoes_ativas = {}
+             = {}
 
         if len(ativos_data) > 0:
             print(f"[SUCESSO] {len(ativos_data)} ativos carregados da Watchlist.")
-            print(f"[SUCESSO] {len(posicoes_ativas)} posições ativas detetadas no Diário de Bordo.")
+            print(f"[SUCESSO] {len()} posições ativas detetadas no Diário de Bordo.")
         else:
             print("[ERRO] A lista de ativos veio vazia.")
             sys.exit(1)
@@ -257,7 +257,7 @@ for ativo_info in ativos_data:
         # VERIFICAÇÃO SE JÁ EXISTE POSIÇÃO ATIVA NO DIÁRIO DE BORDO
         if ticker in posicoes_ativas:
             pos_info = posicoes_ativas[ticker]
-            info_carteira = f"SIM (Entrada: {pos_info['precoEntrada']}, Qtd: {pos_info['quantidade']})"
+            info_carteira = f"SIM (Entrada: {pos_info['precoEntrada']}, StopAtual: {pos_info['stopAtual']}, Qtd: {pos_info['quantidade']})"
         else:
             info_carteira = "NÃO"
 
@@ -371,15 +371,18 @@ Regras Operacionais Estritas de Triagem, Carteira e Ataque:
 
 6. GESTÃO DE POSIÇÕES ATIVAS E ESTRUTURA VISUAL OBRIGATÓRIA (CRÍTICO):
    - Verifica o campo 'PosicaoAtiva' em cada linha do comboio.
-   - **REGRA DE OURO:** Se a PosicaoAtiva indicar **SIM**, é **estritamente proibido** sugerir nova entrada ou alocação de capital (evitando concentração excessiva). O foco muda a 100% para a **gestão da posição existente**.
+   - **REGRA DE OURO:** Se a PosicaoAtiva indicar **SIM**, é **estritamente proibido** sugerir nova entrada. O foco é 100% a gestão da posição existente.
+   - **GESTÃO DO STOP LOSS:** Compara o 'StopAtual' indicado na posição ativa com o valor de 'Trailing' calculado pelo sistema. 
+     * Se o 'Trailing' for superior ao 'StopAtual', emite obrigatoriamente a recomendação: [AJUSTE DE STOP: Subir o Stop Loss atual de X para o novo valor de Trailing Y].
+     * Se o 'StopAtual' já for superior ou se o trailing ainda estiver abaixo, indica: [MANUTENÇÃO DE STOP: Manter stop atual em X].
    - Usa obrigatoriamente este template para cada ativo validado:
 
    🎯 [TICKER] - [Nome da Empresa] ([Setor])
    - 🚩 BANDEIRAS: (Lista aqui os avisos da regra 3 e 5, ou "Limpo" se não houver)
-   - ⚠️ ESTADO NA CARTEIRA: [Se POSIÇÃO JÁ ATIVA: "POSIÇÃO JÁ ATIVA em carteira (Entrada: X | Qtd: X). Foco exclusivo em gestão de risco." | Se NÃO: "Nenhuma posição aberta"]
-   - ⚙️ EXECUÇÃO: (Menciona a regra dos Gaps e Gestão de Lucro / Defesa de Stop)
+   - ⚠️ ESTADO NA CARTEIRA: [Se POSIÇÃO JÁ ATIVA: "POSIÇÃO ATIVA (Entrada: X | Stop Atual: Y | Qtd: Z). Análise de Trailing abaixo." | Se NÃO: "Nenhuma posição aberta"]
+   - ⚙️️ EXECUÇÃO / DEFESA: (Indica claramente se deves subir o Stop Loss comparando o Stop Atual com o Trailing, ou mantê-lo)
    - 🛡️ TAMANHO DA POSIÇÃO: [Se já tens posição: "N/A - Já em Carteira" | Se não tens: "Lote Completo" ou "Lote Reduzido a 50%"]
-   - 🔢 DADOS EXATOS: Entrada: X | Stop: X | TP: X | BE: X | Trailing: X | Qtd: X (Se Lote Reduzido, indica Qtd original / 2) | Valor a Investir: ~X$ (Apenas se não tiveres posição ativa; se já tens, escreve "N/A - Posição Existente")
+   - 🔢 DADOS EXATOS: Entrada: X | Stop: X | TP: X | BE: X | Trailing: X | Qtd: X | Valor a Investir: [Se já tens posição: "N/A - Posição Existente" | Se não tens: ~X$]
    - 📋 REFERÊNCIA: (Cola a linha original do comboio aqui)
 
 7. SAÚDE DO MERCADO E MANDATO FINAL: 
