@@ -347,13 +347,15 @@ print("\nA construir o bloco unificado (Prompt + Comboio) para o email...")
 # FILTRO: Seleciona apenas ativos que NÃO estão em "Observar"
 ativos_acionados = [item for item in comboio_ia if item["estado"] != "Observar"]
 
-prompt_sistema_embutido = f"""MODO DIÁRIO ATIVO - PREDADOR DE BREAKOUTS (EUROPA): Avalia os seguintes ativos da minha watchlist europeia.
+prompt_sistema_embutido = f"""MODO DIÁRIO ATIVO - PREDADOR DE BREAKOUTS: Avalia os seguintes ativos da minha watchlist.
 (INFO SISTEMA - Hoje é Sexta-feira? {hoje_e_sexta})
-Contexto: O mercado europeu é volátil e reage fortemente à abertura americana. A tua missão é PROTEGER O CAPITAL, desconfiar do motor matemático e expor ativamente o risco de cada trade, priorizando apenas os arranques com força institucional real.
+Contexto: O mercado recente está armadilhado com falsos breakouts. A tua missão é PROTEGER O CAPITAL, desconfiar do motor matemático e expor ativamente o risco de cada trade, priorizando apenas os arranques com força institucional real.
 
-Regras Operacionais Estritas de Triagem e Ataque:
+Regras Operacionais Estritas de Triagem, Carteira e Ataque:
 
-1. FILTRO CÉTICO INICIAL: Analisa apenas ativos com 'Forca Consolidada' ou 'Alerta Iminente'. Se o panorama geral for fraco (maioria com ADX < 25 e RVOL baixo), REJEITA a lista de ativos, inicia a resposta com a tag [MERCADO ESTAGNADO - POSTURA DEFENSIVA] e passa diretamente para o passo 7 (Saúde do Mercado).
+1. AVALIAÇÃO MACRO E ADAPTAÇÃO DE RISCO: Olha primeiro para a lista completa. Se a esmagadora maioria dos ativos estiver em 'Aguardar Recuo' (ADX < 25 e baixo RVOL), o panorama geral é considerado de Alto Risco. 
+   - Se o panorama for de Alto Risco E NÃO houver ativos em alerta, inicia o e-mail com [MERCADO ESTAGNADO - POSTURA DEFENSIVA] e salta para o passo 7.
+   - Se o panorama for de Alto Risco, MAS existirem ativos em 'Forca Consolidada' ou 'Alerta Iminente', analisa-os, mas emite obrigatoriamente a bandeira 🚩 [AMBIENTE MACRO HOSTIL - EXIGIDO LOTE REDUZIDO A 50%].
 
 2. OS 3 MELHORES ALVOS: Se existirem oportunidades reais, foca-te num máximo de 3 ativos. Se um ativo detetar EARNINGS = PERIGO, ele é sumariamente desclassificado e não pode ser recomendado.
 
@@ -370,22 +372,25 @@ Regras Operacionais Estritas de Triagem e Ataque:
    - GESTÃO DE LUCRO: Se ADX > 35, instrui: "[TENDÊNCIA EXTREMA] Ignora TP, gere pelo Trailing". Se ADX < 30: "[TENDÊNCIA MODERADA] Respeita o TP fixo."
 
 5. RISCOS DE CALENDÁRIO E CORRELAÇÃO:
-   - SEXTA-FEIRA: Lê a (INFO SISTEMA). Se for Sexta-feira ('SIM'), exige Lote Reduzido.
-   - CORRELAÇÃO: Se 2 ou mais ativos do Top 3 forem do mesmo Setor/País, emite "[AVISO DE CORRELAÇÃO] - Risco concentrado" e escolhe apenas o melhor.
+   - SEXTA-FEIRA: Lê a (INFO SISTEMA). Se for Sexta-feira ('SIM'), exige Lote Reduzido à tarde.
+   - CORRELAÇÃO: Se 2 ou mais ativos do Top 3 forem do mesmo Setor, emite "[AVISO DE CORRELAÇÃO] - Risco concentrado" e escolhe apenas o melhor.
 
-6. ESTRUTURA VISUAL OBRIGATÓRIA (Usa exatamente este template para cada ativo validado):
+6. GESTÃO DE POSIÇÕES ATIVAS E ESTRUTURA VISUAL OBRIGATÓRIA (CRÍTICO):
+   - Verifica o campo 'PosicaoAtiva' em cada linha do comboio.
+   - **REGRA DE OURO:** Se a PosicaoAtiva indicar **SIM**, é **estritamente proibido** sugerir nova entrada ou alocação de capital (evitando concentração excessiva). O foco muda a 100% para a **gestão da posição existente**.
+   - Usa obrigatoriamente este template para cada ativo validado:
 
    🎯 [TICKER] - [Nome da Empresa] ([Setor])
    - 🚩 BANDEIRAS: (Lista aqui os avisos da regra 3 e 5, ou "Limpo" se não houver)
-   - ⚙️ EXECUÇÃO: (Menciona a regra dos Gaps e Gestão de Lucro)
-   - 🛡️ TAMANHO DA POSIÇÃO: (Recomenda Lote Completo ou Lote Reduzido a 50%)
-   - 🔢 DADOS EXATOS: Entrada: X | Stop: X | TP: X | BE: X | Trailing: X | Qtd: X (Se Lote Reduzido, indica Qtd original / 2) | Valor a Investir: ~X€ (Multiplica o preço de Entrada pela Qtd recomendada)
+   - ⚠️ ESTADO NA CARTEIRA: [Se POSIÇÃO JÁ ATIVA: "POSIÇÃO JÁ ATIVA em carteira (Entrada: X | Qtd: X). Foco exclusivo em gestão de risco." | Se NÃO: "Nenhuma posição aberta"]
+   - ⚙️ EXECUÇÃO: (Menciona a regra dos Gaps e Gestão de Lucro / Defesa de Stop)
+   - 🛡️ TAMANHO DA POSIÇÃO: [Se já tens posição: "N/A - Já em Carteira" | Se não tens: "Lote Completo" ou "Lote Reduzido a 50%"]
+   - 🔢 DADOS EXATOS: Entrada: X | Stop: X | TP: X | BE: X | Trailing: X | Qtd: X (Se Lote Reduzido, indica Qtd original / 2) | Valor a Investir: ~€ (Apenas se não tiveres posição ativa; se já tens, escreve "N/A - Posição Existente")
    - 📋 REFERÊNCIA: (Cola a linha original do comboio aqui)
 
 7. SAÚDE DO MERCADO E MANDATO FINAL: 
-   Gera sempre, no final do e-mail, uma secção "Saúde do Mercado:" com 2 ou 3 frases sobre o estado geral dos ativos analisados (mesmo que tenham sido todos rejeitados). 
-   De seguida, inclui SEMPRE de forma isolada e a negrito no fim do email a seguinte tática:
-   **"TÁTICA DE EXECUÇÃO EUROPA: Não executar ordens antes das 09h00 (Hora de Lisboa). Deixar a volatilidade inicial queimar os amadores. Atenção máxima a partir das 14h30 com a abertura de Wall Street."**
+   Termina o email com uma frase sobre o estado do mercado E inclui SEMPRE de forma isolada e a negrito no fim do email:
+   **"TÁTICA DE EXECUÇÃO OBRIGATÓRIA: Não executar ordens antes das 15h00. Deixar a volatilidade inicial queimar os amadores e confirmar a verdadeira direção institucional."**
 """
 
 bloco_texto_ia = f"{prompt_sistema_embutido}\n\n--------------------------------------------------\n"
