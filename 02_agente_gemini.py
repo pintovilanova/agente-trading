@@ -110,7 +110,7 @@ def analisar_com_ia(dados_mercado):
             if tentativa == 2:
                 print(f"[AVISO] O modelo {modelo_atual} está indisponível ou sem cota (limite 20/dia).")
                 print("[TÁTICA] A mudar o motor para o Fallback 'gemini-2.5-flash' para garantir o relatório...")
-                modelo_atual = 'gemini-2.5-flash'  # Podes usar 'gemini-3.0-flash' se o 2.5 também der 404
+                modelo_atual = 'gemini-3.8-flash'  # Podes usar 'gemini-3.0-flash' se o 2.5 também der 404
 
             print(f"A tentar gerar relatório com o modelo: {modelo_atual}...")
             resposta = client.models.generate_content(
