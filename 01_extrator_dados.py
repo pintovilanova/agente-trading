@@ -336,7 +336,11 @@ if resultados_para_sheets and WEBHOOK_URL:
 # ===================================================================
 print("\nA construir o bloco unificado (Prompt + Comboio) para o email...")
 
-ativos_acionados = [item for item in comboio_ia if item["estado"] != "Observar"]
+# FILTRO ATUALIZADO: Inclui sinais de compra OU ativos que já tenhas em carteira (mesmo em "Observar")
+ativos_acionados = [
+    item for item in comboio_ia 
+    if item["estado"] != "Observar" or not item["posicao_ativa"].startswith("NÃO")
+]
 
 prompt_sistema_embutido = f"""MODO DIÁRIO ATIVO - PREDADOR DE BREAKOUTS: Avalia os seguintes ativos da minha watchlist.
 (INFO SISTEMA - Hoje é Sexta-feira? {hoje_e_sexta})
