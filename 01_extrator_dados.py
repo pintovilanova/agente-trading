@@ -160,13 +160,16 @@ for ativo_info in ativos_data:
         except Exception:
             pass
 
+        # Adicionados os novos indicadores aqui
         df.ta.rsi(length=14, append=True)
         df.ta.adx(length=14, append=True)
         df.ta.atr(length=14, append=True)
         df.ta.sma(length=200, append=True)
         df.ta.sma(length=20, append=True)
         df.ta.mom(length=14, append=True)
+        df.ta.ema(length=9, append=True)  # <-- NOVO: EMA 9 Períodos
 
+        # Cálculo do Volume em relação à média de 20 (RVOL > 1 significa Volume > Média 20)
         media_volume_20 = df['Volume'].rolling(window=20).mean()
         df['RVOL'] = df['Volume'] / media_volume_20
 
@@ -179,6 +182,13 @@ for ativo_info in ativos_data:
         
         sma20 = ultimo_dia['SMA_20']
         dist_mm20 = ((preco - sma20) / sma20) * 100
+        
+        # <-- NOVO: Extração dos valores da EMA9 para o cruzamento
+        ema9 = ultimo_dia['EMA_9']
+        ema9_anterior = dia_anterior['EMA_9']
+        
+        cruzou_ema9 = (preco > ema9) and (preco_anterior <= ema9_anterior)
+        acima_ema9 = preco > ema9
 
         rvol = ultimo_dia['RVOL']
         adx = ultimo_dia['ADX_14']
@@ -203,22 +213,28 @@ for ativo_info in ativos_data:
         volume_despejo = rvol > 1.20
 
         # ===================================================================
-        # GUILHOTINA MATEMÁTICA - OTIMIZADA PARA SUBIDAS EMINENTES
+        # GUILHOTINA MATEMÁTICA - OTIMIZADA PARA SUBIDAS EMINENTES E EMA9
         # ===================================================================
         if (preco_caiu_hoje and volume_despejo) or (momentum <= 0.5):
             recomendacao = "Observar"
             
-        elif var_perc > 0 and adx < 25:
+        elif var_perc > 0 and adx < 25 and not cruzou_ema9:
             recomendacao = "Aguardar Recuo"
             preco_entrada = round(preco - (atr * 0.4), 2)
             multiplicador_atr = 1.0
             
-        elif var_perc > 0 and adx >= 30 and rvol >= 1.20 and (55.00 <= rsi <= 72.00) and (0.00 <= dist_mm20 <= 3.50) and momentum > 1.50:
+        # NOVA REGRA: Antecipação de Tendência (Cruzou EMA9 hoje, Momentum Positivo, Volume > Média 20)
+        elif cruzou_ema9 and rvol > 1.00 and momentum > 0.50 and rsi > 50:
+            recomendacao = "Ignicao EMA9"
+            preco_entrada = round(preco - (atr * 0.1), 2)  # Queremos entrar cedo, logo desconto mínimo
+            multiplicador_atr = 1.2
+            
+        elif var_perc > 0 and adx >= 30 and rvol >= 1.20 and (55.00 <= rsi <= 72.00) and (0.00 <= dist_mm20 <= 3.50) and momentum > 1.50 and acima_ema9:
             recomendacao = "Forca Consolidada"
             preco_entrada = round(preco - (atr * 0.1), 2)
             multiplicador_atr = 1.3 
             
-        elif adx >= 25 and rvol >= 1.00 and (50.00 <= rsi <= 75.00) and (-1.00 <= dist_mm20 <= 4.00) and momentum > 0.50:
+        elif adx >= 25 and rvol >= 1.00 and (50.00 <= rsi <= 75.00) and (-1.00 <= dist_mm20 <= 4.00) and momentum > 0.50 and acima_ema9:
             recomendacao = "Alerta Iminente"
             preco_entrada = round(preco - (atr * 0.2), 2)
             multiplicador_atr = 1.2
