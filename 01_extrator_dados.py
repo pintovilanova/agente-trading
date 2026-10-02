@@ -367,13 +367,14 @@ Regras Operacionais Estritas de Triagem, Carteira e Ataque:
 
 1. AVALIAÇÃO MACRO E ADAPTAÇÃO DE RISCO: Olha primeiro para a lista completa. Se a esmagadora maioria dos ativos estiver em 'Aguardar Recuo' (ADX < 25 e baixo RVOL), o panorama geral é considerado de Alto Risco. 
    - Se o panorama for de Alto Risco E NÃO houver ativos em alerta, inicia o e-mail com [MERCADO ESTAGNADO - POSTURA DEFENSIVA] e salta para o passo 7.
-   - Se o panorama for de Alto Risco, MAS existirem ativos em 'Forca Consolidada' ou 'Alerta Iminente', analisa-os, mas emite obrigatoriamente a bandeira 🚩 [AMBIENTE MACRO HOSTIL - EXIGIDO LOTE REDUZIDO A 50%].
+   - Se o panorama for de Alto Risco, MAS existirem ativos em 'Forca Consolidada', 'Ignicao EMA9' ou 'Alerta Iminente', analisa-os, mas emite obrigatoriamente a bandeira 🚩 [AMBIENTE MACRO HOSTIL - EXIGIDO LOTE REDUZIDO A 50%].
 
 2. OS 3 MELHORES ALVOS: Se existirem oportunidades reais, foca-te num máximo de 3 ativos. Se um ativo detetar EARNINGS = PERIGO, ele é sumariamente desclassificado e não pode ser recomendado.
 
 3. ANÁLISE DE VULNERABILIDADE E POTENCIAL (CRÍTICO):
    Cruza os dados e aplica as seguintes bandeiras táticas:
    - REGRA DA MOLA (MM20): Se 'Dist MM20' > 2.5%, alerta [AVISO: PREÇO ESTICADO - Risco de Pullback].
+   - ANTECIPAÇÃO (EMA9): Se o estado for 'Ignicao EMA9', o motor está a tentar apanhar o movimento no início. Valida se o RVOL > 1.0 e se o Momentum apoia. Se sim, marca 🚀 [IGNIÇÃO EMA9 - Ponto de Entrada Antecipado].
    - COMPRESSÃO (ATR vs RVOL): Se o RVOL > 1.5 e Momentum sólido, marca [POTENCIAL DE COMPRESSÃO] (alta prioridade).
    - EXAUSTÃO: Se RSI > 70 mas Momentum < 1.0 ou RVOL < 1.3, alerta [AVISO DE EXAUSTÃO - Sem Combustível].
    - BARREIRAS INSTITUCIONAIS: Se Entrada ou Take-Profit estiverem a <1% de um número redondo maior (ex: 50.00, 100.00), alerta [PAREDE INSTITUCIONAL - Risco de rejeição].
@@ -381,7 +382,7 @@ Regras Operacionais Estritas de Triagem, Carteira e Ataque:
 
 4. TÁTICA DE EXECUÇÃO:
    - GAPS DE ABERTURA: Inclui: "Se abrir em Gap > 1% da entrada, ABORTA."
-   - GESTÃO DE LUCRO: Se ADX > 35, instrui: "[TENDÊNCIA EXTREMA] Ignora TP, gere pelo Trailing". Se ADX < 30: "[TENDÊNCIA MODERADA] Respeita o TP fixo."
+   - GESTÃO DE LUCRO: Se estado for 'Ignicao EMA9', o objetivo é capturar a explosão inicial; gere de perto pelo Trailing. Se ADX > 35: "[TENDÊNCIA EXTREMA] Ignora TP, gere pelo Trailing". Se ADX < 30: "[TENDÊNCIA MODERADA] Respeita o TP fixo."
 
 5. RISCOS DE CALENDÁRIO E CORRELAÇÃO:
    - SEXTA-FEIRA: Lê a (INFO SISTEMA). Se for Sexta-feira ('SIM'), exige Lote Reduzido à tarde.
@@ -397,7 +398,7 @@ Regras Operacionais Estritas de Triagem, Carteira e Ataque:
 
    🎯 [TICKER] - [Nome da Empresa] ([Setor])
    - 🚩 BANDEIRAS: (Lista aqui os avisos da regra 3 e 5, ou "Limpo" se não houver)
-   - ⚠️ ESTADO NA CARTEIRA: [Se POSIÇÃO JÁ ATIVA: "POSIÇÃO ATIVA (Entrada: X | Stop Atual: Y | Qtd: Z). Análise de Trailing abaixo." | Se NÃO: "Nenhuma posição aberta"]
+   - ⚠️️ ESTADO NA CARTEIRA: [Se POSIÇÃO JÁ ATIVA: "POSIÇÃO ATIVA (Entrada: X | Stop Atual: Y | Qtd: Z). Análise de Trailing abaixo." | Se NÃO: "Nenhuma posição aberta"]
    - ⚙️ EXECUÇÃO / DEFESA: (Indica claramente se deves subir o Stop Loss comparando o Stop Atual com o Trailing, ou mantê-lo)
    - 🛡️ TAMANHO DA POSIÇÃO: [Se já tens posição: "N/A - Já em Carteira" | Se não tens: "Lote Completo" ou "Lote Reduzido a 50%"]
    - 🔢 DADOS EXATOS: Entrada: X | Stop: X | TP: X | BE: X | Trailing: X | Qtd: X | Valor a Investir: [Se já tens posição: "N/A - Posição Existente" | Se não tens: ~X$]
