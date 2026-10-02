@@ -278,7 +278,7 @@ for ativo_info in ativos_data:
         # DADOS PARA O GOOGLE SHEETS
         linha_comboio_completa = (
             f"{ticker},Nome: {nome_empresa},Setor: {setor},Preço: {round(preco, 2)},"
-            f"Dist MM20: {round(dist_mm20, 2)}%,Momentum: {round(momentum, 2)},"
+            f"Dist MM20: {round(dist_mm20, 2)}%,EMA9: {round(ema9, 2)},Momentum: {round(momentum, 2)},"
             f"RSI: {round(rsi, 2)},ADX: {round(adx, 2)},ATR: {round(atr, 2)} (Vol: {atr_perc}%),"
             f"RVOL: {round(rvol, 2)},Estado: {recomendacao},Entrada: {preco_entrada_str},"
             f"Stop: {preco_stop},Take-Profit: {preco_tp},Break-Even: {preco_be},"
@@ -311,6 +311,7 @@ for ativo_info in ativos_data:
             "atr_perc": atr_perc,
             "momentum": round(momentum, 2),
             "dist_mm20": round(dist_mm20, 2),
+            "ema9": round(ema9, 2), # <-- ADICIONADO AQUI
             "entrada": round(preco_entrada, 2) if isinstance(preco_entrada, float) else preco_entrada,
             "stop": preco_stop,
             "alvo": preco_tp,
@@ -418,7 +419,7 @@ else:
         
         linha = (
             f"{item['ticker']},Nome: {item['nome']},Setor: {item['setor']},Preço: {item['preco']},"
-            f"Dist MM20: {dist_mm20_str},Momentum: {item.get('momentum', 'N/A')},"
+            f"Dist MM20: {dist_mm20_str},EMA9: {item.get('ema9', 'N/A')},Momentum: {item.get('momentum', 'N/A')},"
             f"RSI: {item['rsi']},ADX: {item['adx']},ATR: {item.get('atr', 'N/A')} (Vol: {item['atr_perc']}%),"
             f"RVOL: {item['rvol']},Estado: {item['estado']},Entrada: {item['entrada']},"
             f"Stop: {item['stop']},Take-Profit: {item['alvo']},Break-Even: {item.get('be', 'N/A')},"
