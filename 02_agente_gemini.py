@@ -14,9 +14,11 @@ import sys
 # 0.1 TRAVA DE FIM DE SEMANA (Não corre ao Sábado e Domingo)
 # ===================================================================
 dia_da_semana = datetime.now(ZoneInfo("Europe/Lisbon")).weekday()
-# if dia_da_semana >= 5:
-#     print("[INFO] Fim de semana detetado. O mercado está fechado. O Agente vai descansar.")
-#     sys.exit(0)
+
+# ATIVADO: Se for sábado (5) ou domingo (6), o script para aqui.
+if dia_da_semana >= 5:
+    print("[INFO] Fim de semana detetado. O mercado está fechado. O Agente vai descansar.")
+    sys.exit(0)
 
 # ==========================================
 # 1. CONFIGURAÇÕES (Lidas do GitHub Secrets)
