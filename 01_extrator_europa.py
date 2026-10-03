@@ -172,6 +172,7 @@ for ativo_info in ativos_data:
         df.ta.sma(length=200, append=True)
         df.ta.sma(length=20, append=True)
         df.ta.mom(length=14, append=True)
+        df.ta.ema(length=9, append=True)  # <-- NOVO: EMA 9 Períodos
 
         media_volume_20 = df['Volume'].rolling(window=20).mean()
         df['RVOL'] = df['Volume'] / media_volume_20
@@ -185,6 +186,13 @@ for ativo_info in ativos_data:
         
         sma20 = ultimo_dia['SMA_20']
         dist_mm20 = ((preco - sma20) / sma20) * 100
+
+        # <-- NOVO: Extração dos valores da EMA9 para o cruzamento
+        ema9 = ultimo_dia['EMA_9']
+        ema9_anterior = dia_anterior['EMA_9']
+        
+        cruzou_ema9 = (preco > ema9) and (preco_anterior <= ema9_anterior) if pd.notna(ema9) and pd.notna(ema9_anterior) else False
+        acima_ema9 = preco > ema9 if pd.notna(ema9) else False
 
         rvol = ultimo_dia['RVOL']
         adx = ultimo_dia['ADX_14']
@@ -209,24 +217,30 @@ for ativo_info in ativos_data:
         volume_despejo = rvol > 1.20 if pd.notna(rvol) else False
 
         # ===================================================================
-        # GUILHOTINA MATEMÁTICA - OTIMIZADA PARA SUBIDAS EMINENTES
+        # GUILHOTINA MATEMÁTICA - OTIMIZADA PARA SUBIDAS EMINENTES E EMA9
         # ===================================================================
         if pd.isna(momentum) or pd.isna(adx) or pd.isna(rvol) or pd.isna(rsi) or pd.isna(dist_mm20) or pd.isna(atr):
              recomendacao = "Observar"
         elif (preco_caiu_hoje and volume_despejo) or (momentum <= 0.5):
             recomendacao = "Observar"
             
-        elif var_perc > 0 and adx < 25:
+        elif var_perc > 0 and adx < 25 and not cruzou_ema9:
             recomendacao = "Aguardar Recuo"
             preco_entrada = round(preco - (atr * 0.4), 2)  
             multiplicador_atr = 1.0
+
+        # NOVA REGRA: Antecipação de Tendência (Cruzou EMA9 hoje, Momentum Positivo, Volume > Média 20)
+        elif cruzou_ema9 and rvol > 1.00 and momentum > 0.50 and rsi > 50:
+            recomendacao = "Ignicao EMA9"
+            preco_entrada = round(preco - (atr * 0.1), 2)  # Queremos entrar cedo, logo desconto mínimo
+            multiplicador_atr = 1.2
             
-        elif var_perc > 0 and adx >= 30 and rvol >= 1.20 and (55.00 <= rsi <= 72.00) and (0.00 <= dist_mm20 <= 3.50) and momentum > 1.50:
+        elif var_perc > 0 and adx >= 30 and rvol >= 1.20 and (55.00 <= rsi <= 72.00) and (0.00 <= dist_mm20 <= 3.50) and momentum > 1.50 and acima_ema9:
             recomendacao = "Forca Consolidada"
             preco_entrada = round(preco - (atr * 0.1), 2)  
             multiplicador_atr = 1.3 
             
-        elif adx >= 25 and rvol >= 1.00 and (50.00 <= rsi <= 75.00) and (-1.00 <= dist_mm20 <= 4.00) and momentum > 0.50:
+        elif adx >= 25 and rvol >= 1.00 and (50.00 <= rsi <= 75.00) and (-1.00 <= dist_mm20 <= 4.00) and momentum > 0.50 and acima_ema9:
             recomendacao = "Alerta Iminente"
             preco_entrada = round(preco - (atr * 0.2), 2)  
             multiplicador_atr = 1.2
@@ -289,11 +303,12 @@ for ativo_info in ativos_data:
         p_atr = limpa(atr)
         p_rvol = limpa(rvol)
         p_atr_perc = limpa(atr_perc)
+        p_ema9 = limpa(ema9) # <-- NOVO: Limpeza da EMA9
 
         # DADOS PARA O GOOGLE SHEETS
         linha_comboio_completa = (
             f"{ticker},Nome: {nome_empresa},Setor: {setor},Preço: {p_preco},"
-            f"Dist MM20: {p_dist}%,Momentum: {p_mom},"
+            f"Dist MM20: {p_dist}%,EMA9: {p_ema9},Momentum: {p_mom}," # <-- ADICIONADA A EMA9 AQUI
             f"RSI: {p_rsi},ADX: {p_adx},ATR: {p_atr} (Vol: {p_atr_perc}%),"
             f"RVOL: {p_rvol},Estado: {recomendacao},Entrada: {preco_entrada_str},"
             f"Stop: {preco_stop},Take-Profit: {preco_tp},Break-Even: {preco_be},"
@@ -326,6 +341,7 @@ for ativo_info in ativos_data:
             "atr_perc": p_atr_perc,
             "momentum": p_mom,
             "dist_mm20": p_dist,
+            "ema9": p_ema9, # <-- ADICIONADA A EMA9 AQUI
             "entrada": round(preco_entrada, 2) if isinstance(preco_entrada, float) else preco_entrada,
             "stop": preco_stop,
             "alvo": preco_tp,
@@ -377,13 +393,14 @@ Regras Operacionais Estritas de Triagem, Carteira e Ataque:
 
 1. AVALIAÇÃO MACRO E ADAPTAÇÃO DE RISCO: Olha primeiro para a lista completa. Se a esmagadora maioria dos ativos estiver em 'Aguardar Recuo' (ADX < 25 e baixo RVOL), o panorama geral é considerado de Alto Risco. 
    - Se o panorama for de Alto Risco E NÃO houver ativos em alerta, inicia o e-mail com [MERCADO ESTAGNADO - POSTURA DEFENSIVA] e salta para o passo 7.
-   - Se o panorama for de Alto Risco, MAS existirem ativos em 'Forca Consolidada' ou 'Alerta Iminente', analisa-os, mas emite obrigatoriamente a bandeira 🚩 [AMBIENTE MACRO HOSTIL - EXIGIDO LOTE REDUZIDO A 50%].
+   - Se o panorama for de Alto Risco, MAS existirem ativos em 'Forca Consolidada', 'Ignicao EMA9' ou 'Alerta Iminente', analisa-os, mas emite obrigatoriamente a bandeira 🚩 [AMBIENTE MACRO HOSTIL - EXIGIDO LOTE REDUZIDO A 50%].
 
 2. OS 3 MELHORES ALVOS: Se existirem oportunidades reais, foca-te num máximo de 3 ativos. Se um ativo detetar EARNINGS = PERIGO, ele é sumariamente desclassificado e não pode ser recomendado.
 
 3. ANÁLISE DE VULNERABILIDADE E POTENCIAL (CRÍTICO):
    Cruza os dados e aplica as seguintes bandeiras táticas:
    - REGRA DA MOLA (MM20): Se 'Dist MM20' > 2.5%, alerta [AVISO: PREÇO ESTICADO - Risco de Pullback].
+   - ANTECIPAÇÃO (EMA9): Se o estado for 'Ignicao EMA9', o motor está a tentar apanhar o movimento no início. Valida se o RVOL > 1.0 e se o Momentum apoia. Se sim, marca 🚀 [IGNIÇÃO EMA9 - Ponto de Entrada Antecipado].
    - COMPRESSÃO (ATR vs RVOL): Se o RVOL > 1.5 e Momentum sólido, marca [POTENCIAL DE COMPRESSÃO] (alta prioridade).
    - EXAUSTÃO: Se RSI > 70 mas Momentum < 1.0 ou RVOL < 1.3, alerta [AVISO DE EXAUSTÃO - Sem Combustível].
    - BARREIRAS INSTITUCIONAIS: Se Entrada ou Take-Profit estiverem a <1% de um número redondo maior (ex: 50.00, 100.00), alerta [PAREDE INSTITUCIONAL - Risco de rejeição].
@@ -391,7 +408,7 @@ Regras Operacionais Estritas de Triagem, Carteira e Ataque:
 
 4. TÁTICA DE EXECUÇÃO:
    - GAPS DE ABERTURA: Inclui: "Se abrir em Gap > 1% da entrada, ABORTA."
-   - GESTÃO DE LUCRO: Se ADX > 35, instrui: "[TENDÊNCIA EXTREMA] Ignora TP, gere pelo Trailing". Se ADX < 30: "[TENDÊNCIA MODERADA] Respeita o TP fixo."
+   - GESTÃO DE LUCRO: Se estado for 'Ignicao EMA9', o objetivo é capturar a explosão inicial; gere de perto pelo Trailing. Se ADX > 35: "[TENDÊNCIA EXTREMA] Ignora TP, gere pelo Trailing". Se ADX < 30: "[TENDÊNCIA MODERADA] Respeita o TP fixo."
 
 5. RISCOS DE CALENDÁRIO E CORRELAÇÃO:
    - SEXTA-FEIRA: Lê a (INFO SISTEMA). Se for Sexta-feira ('SIM'), exige Lote Reduzido à tarde.
@@ -429,7 +446,7 @@ else:
         
         linha = (
             f"{item['ticker']},Nome: {item['nome']},Setor: {item['setor']},Preço: {item['preco']},"
-            f"Dist MM20: {dist_mm20_str},Momentum: {item.get('momentum', 'N/A')},"
+            f"Dist MM20: {dist_mm20_str},EMA9: {item.get('ema9', 'N/A')},Momentum: {item.get('momentum', 'N/A')}," # <-- EMA9 AQUI NO COMBOIO FINAL
             f"RSI: {item['rsi']},ADX: {item['adx']},ATR: {item.get('atr', 'N/A')} (Vol: {item['atr_perc']}%),"
             f"RVOL: {item['rvol']},Estado: {item['estado']},Entrada: {item['entrada']},"
             f"Stop: {item['stop']},Take-Profit: {item['alvo']},Break-Even: {item.get('be', 'N/A')},"
