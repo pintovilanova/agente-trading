@@ -395,7 +395,7 @@ Regras Operacionais Estritas de Triagem, Carteira e Ataque:
    - Se o panorama for de Alto Risco E NÃO houver ativos em alerta, inicia o e-mail com [MERCADO ESTAGNADO - POSTURA DEFENSIVA] e salta para o passo 7.
    - Se o panorama for de Alto Risco, MAS existirem ativos em 'Forca Consolidada', 'Ignicao EMA9' ou 'Alerta Iminente', analisa-os, mas emite obrigatoriamente a bandeira 🚩 [AMBIENTE MACRO HOSTIL - EXIGIDO LOTE REDUZIDO A 50%].
 
-2. OS 3 MELHORES ALVOS: Se existirem oportunidades reais, foca-te num máximo de 3 ativos. Se um ativo detetar EARNINGS = PERIGO, ele é sumariamente desclassificado e não pode ser recomendado.
+2. OS ALVOS (3 PRINCIPAIS + 2 SUPLENTES): Seleciona o Top 3 absoluto das melhores oportunidades para ataque. Se existirem mais configurações de elite, podes adicionar até 2 ativos extra classificados estritamente como 'SUPLENTE' para o caso de os principais abortarem na abertura. Se um ativo detetar EARNINGS = PERIGO, ele é sumariamente desclassificado.
 
 3. ANÁLISE DE VULNERABILIDADE E POTENCIAL (CRÍTICO):
    Cruza os dados e aplica as seguintes bandeiras táticas:
@@ -412,7 +412,7 @@ Regras Operacionais Estritas de Triagem, Carteira e Ataque:
 
 5. RISCOS DE CALENDÁRIO E CORRELAÇÃO:
    - SEXTA-FEIRA: Lê a (INFO SISTEMA). Se for Sexta-feira ('SIM'), exige Lote Reduzido à tarde.
-   - CORRELAÇÃO: Se 2 ou mais ativos do Top 3 forem do mesmo Setor, emite "[AVISO DE CORRELAÇÃO] - Risco concentrado" e escolhe apenas o melhor.
+   - CORRELAÇÃO: Se os ativos escolhidos forem do mesmo Setor, emite "[AVISO DE CORRELAÇÃO] - Risco concentrado".
 
 6. GESTÃO DE POSIÇÕES ATIVAS E ESTRUTURA VISUAL OBRIGATÓRIA (CRÍTICO):
    - Verifica o campo 'PosicaoAtiva' em cada linha do comboio.
@@ -422,12 +422,12 @@ Regras Operacionais Estritas de Triagem, Carteira e Ataque:
      * Se o 'StopAtual' já for superior ou se o trailing ainda estiver abaixo, indica: [MANUTENÇÃO DE STOP: Manter stop atual em X].
    - Usa obrigatoriamente este template para cada ativo validado:
 
-   🎯 [TICKER] - [Nome da Empresa] ([Setor])
+   🎯 [TICKER] - [Nome da Empresa] ([Setor]) [Adicionar tag (SUPLENTE) aqui se não for do Top 3]
    - 🚩 BANDEIRAS: (Lista aqui os avisos da regra 3 e 5, ou "Limpo" se não houver)
    - ⚠️ ESTADO NA CARTEIRA: [Se POSIÇÃO JÁ ATIVA: "POSIÇÃO ATIVA (Entrada: X | Stop Atual: Y | Qtd: Z). Análise de Trailing abaixo." | Se NÃO: "Nenhuma posição aberta"]
    - ⚙️ EXECUÇÃO / DEFESA: (Indica claramente se deves subir o Stop Loss comparando o Stop Atual com o Trailing, ou mantê-lo)
    - 🛡️ TAMANHO DA POSIÇÃO: [Se já tens posição: "N/A - Já em Carteira" | Se não tens: "Lote Completo" ou "Lote Reduzido a 50%"]
-   - 🔢 DADOS EXATOS: Entrada: X | Stop: X | TP: X | BE: X | Trailing: X | Qtd: X | Valor a Investir: [Se já tens posição: "N/A - Posição Existente" | Se não tens: ~X€]
+   - 🔢 DADOS EXATOS: Entrada: X | Stop: X | TP: X | BE: X | Trailing: X | Qtd: X | Valor a Investir: [Se já tens posição: "N/A - Posição Existente" | Se não tens: ~X]
    - 📋 REFERÊNCIA: (Cola a linha original do comboio aqui)
 
 7. SAÚDE DO MERCADO E MANDATO FINAL: 
