@@ -7,6 +7,7 @@ import requests
 import os
 import sys
 import smtplib
+import json
 import numpy as np
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
@@ -64,7 +65,7 @@ try:
     if resposta_webhook.status_code == 200:
         dados_webhook = resposta_webhook.json()
         
-        # Compatibilidade com a estrutura unificada (ativos + posicoesAtivas)
+        # Compatibilidade com a estrutura unificada
         if isinstance(dados_webhook, dict) and "ativos" in dados_webhook:
             ativos_data = dados_webhook.get("ativos", [])
             posicoes_ativas = dados_webhook.get("posicoesAtivas", {})
@@ -124,8 +125,7 @@ risco_maximo_dolares = 25.00
 multiplicador_trailing_ts = 1.5
 racio_tp_base = 1.2
 
-resultados_para_sheets = []
-comboio_ia = []
+dados_temporarios = []
 
 # ===================================================================
 # 4. MOTOR MATEMÁTICO V2 (Para todos os Ativos)
@@ -172,7 +172,7 @@ for ativo_info in ativos_data:
         df.ta.sma(length=200, append=True)
         df.ta.sma(length=20, append=True)
         df.ta.mom(length=14, append=True)
-        df.ta.ema(length=9, append=True)  # <-- NOVO: EMA 9 Períodos
+        df.ta.ema(length=9, append=True)
 
         media_volume_20 = df['Volume'].rolling(window=20).mean()
         df['RVOL'] = df['Volume'] / media_volume_20
@@ -187,7 +187,6 @@ for ativo_info in ativos_data:
         sma20 = ultimo_dia['SMA_20']
         dist_mm20 = ((preco - sma20) / sma20) * 100
 
-        # <-- NOVO: Extração dos valores da EMA9 para o cruzamento
         ema9 = ultimo_dia['EMA_9']
         ema9_anterior = dia_anterior['EMA_9']
         
@@ -229,10 +228,9 @@ for ativo_info in ativos_data:
             preco_entrada = round(preco - (atr * 0.4), 2)  
             multiplicador_atr = 1.0
 
-        # NOVA REGRA: Antecipação de Tendência (Cruzou EMA9 hoje, Momentum Positivo, Volume > Média 20)
         elif cruzou_ema9 and rvol > 1.00 and momentum > 0.50 and rsi > 50:
             recomendacao = "Ignicao EMA9"
-            preco_entrada = round(preco - (atr * 0.1), 2)  # Queremos entrar cedo, logo desconto mínimo
+            preco_entrada = round(preco - (atr * 0.1), 2)
             multiplicador_atr = 1.2
             
         elif var_perc > 0 and adx >= 30 and rvol >= 1.20 and (55.00 <= rsi <= 72.00) and (0.00 <= dist_mm20 <= 3.50) and momentum > 1.50 and acima_ema9:
@@ -272,7 +270,6 @@ for ativo_info in ativos_data:
                 trailing_final = round(max(trailing_base, preco_stop_calc), 2)
 
         data_atual = datetime.now(ZoneInfo("Europe/Lisbon")).strftime('%d/%m/%Y %H:%M:%S')
-        preco_entrada_str = f"{preco_entrada:.2f}" if isinstance(preco_entrada, (int, float)) else preco_entrada
 
         # VERIFICAÇÃO SE JÁ EXISTE POSIÇÃO ATIVA NO DIÁRIO DE BORDO
         if ticker in posicoes_ativas:
@@ -281,82 +278,103 @@ for ativo_info in ativos_data:
         else:
             info_carteira = "NÃO"
 
-        # ==========================================================
-        # CORREÇÃO CRÍTICA: Função limpa() Inderrotável
-        # ==========================================================
         def limpa(v):
             try:
-                if v == "N/A" or pd.isna(v):
-                    return "N/A"
+                if v == "N/A" or pd.isna(v): return "N/A"
                 val = float(v)
-                if np.isnan(val):
-                    return "N/A"
+                if np.isnan(val): return "N/A"
                 return round(val, 2)
             except:
                 return "N/A"
 
-        p_preco = limpa(preco)
-        p_dist = limpa(dist_mm20)
-        p_mom = limpa(momentum)
-        p_rsi = limpa(rsi)
-        p_adx = limpa(adx)
-        p_atr = limpa(atr)
-        p_rvol = limpa(rvol)
-        p_atr_perc = limpa(atr_perc)
-        p_ema9 = limpa(ema9) # <-- NOVO: Limpeza da EMA9
-
-        # DADOS PARA O GOOGLE SHEETS
-        linha_comboio_completa = (
-            f"{ticker},Nome: {nome_empresa},Setor: {setor},Preço: {p_preco},"
-            f"Dist MM20: {p_dist}%,EMA9: {p_ema9},Momentum: {p_mom}," # <-- ADICIONADA A EMA9 AQUI
-            f"RSI: {p_rsi},ADX: {p_adx},ATR: {p_atr} (Vol: {p_atr_perc}%),"
-            f"RVOL: {p_rvol},Estado: {recomendacao},Entrada: {preco_entrada_str},"
-            f"Stop: {preco_stop},Take-Profit: {preco_tp},Break-Even: {preco_be},"
-            f"Qtd: {qtd_acoes},Trailing: {trailing_final},Earnings: {alerta_earnings},"
-            f"PosicaoAtiva: {info_carteira},Data: {data_atual}"
-        )
-
-        resultados_para_sheets.append({
-            "ticker": ticker,
-            "preco": p_preco,
-            "momentum": p_mom,
-            "rsi": p_rsi,
-            "adx": p_adx,
-            "atr": p_atr,
-            "time": data_atual,
-            "comboio": linha_comboio_completa
-        })
-
-        # GUARDAR PARA O COMBOIO DA IA
-        comboio_ia.append({
+        dados_temporarios.append({
             "ticker": ticker,
             "nome": nome_empresa,
             "setor": setor,
+            "preco": limpa(preco),
+            "dist_mm20": limpa(dist_mm20),
+            "ema9": limpa(ema9),
+            "momentum": limpa(momentum),
+            "rsi": limpa(rsi),
+            "adx": limpa(adx),
+            "atr": limpa(atr),
+            "atr_perc": limpa(atr_perc),
+            "rvol": limpa(rvol),
             "estado": recomendacao,
-            "preco": p_preco,
-            "rsi": p_rsi,
-            "adx": p_adx,
-            "rvol": p_rvol,
-            "atr": p_atr,
-            "atr_perc": p_atr_perc,
-            "momentum": p_mom,
-            "dist_mm20": p_dist,
-            "ema9": p_ema9, # <-- ADICIONADA A EMA9 AQUI
             "entrada": round(preco_entrada, 2) if isinstance(preco_entrada, float) else preco_entrada,
             "stop": preco_stop,
-            "alvo": preco_tp,
+            "tp": preco_tp,
             "be": preco_be,
-            "quantidade": qtd_acoes,
+            "qtd_bruta": qtd_acoes,
             "trailing": trailing_final,
             "earnings": alerta_earnings,
             "posicao_ativa": info_carteira,
             "data": data_atual
         })
         
-        print(f"[OK] {ticker} analisado. Estado: {recomendacao} | Posição Ativa: {info_carteira}")
+        print(f"[OK] {ticker} analisado. Estado: {recomendacao}")
 
     except Exception as e:
         print(f"[ERRO] Falha ao processar {ticker}: {e}")
+
+
+# ===================================================================
+# 4.1. AUDITORIA MACRO E CORTE MATEMÁTICO DE LOTES
+# ===================================================================
+total_ativos = len(dados_temporarios)
+ativos_estagnados = sum(1 for d in dados_temporarios if d["estado"] in ["Observar", "Aguardar Recuo"])
+macro_hostil = False
+
+if hoje_e_sexta == "SIM":
+    macro_hostil = True
+elif total_ativos > 0 and (ativos_estagnados / total_ativos) >= 0.70:
+    macro_hostil = True
+
+tipo_lote = "Reduzido a 50%" if macro_hostil else "Completo"
+
+resultados_para_sheets = []
+comboio_ia = []
+
+for d in dados_temporarios:
+    qtd_final = d["qtd_bruta"]
+    
+    if qtd_final != "N/A" and macro_hostil:
+        qtd_final = round(float(qtd_final) / 2, 2)
+        
+    # NOVO: Cálculo automático do Valor a Investir (Preço de Entrada x Quantidade Final)
+    valor_investir = "N/A - Posição Existente"
+    if d['posicao_ativa'].startswith("NÃO") and d['entrada'] != "N/A" and qtd_final != "N/A":
+        val_calc = float(d['entrada']) * float(qtd_final)
+        valor_investir = f"~{val_calc:.2f} EUR" # A assumir euros para mercado Europeu
+
+    entrada_str = f"{d['entrada']:.2f}" if isinstance(d['entrada'], (int, float)) else d['entrada']
+    
+    linha_comboio = (
+        f"{d['ticker']},Nome: {d['nome']},Setor: {d['setor']},Preço: {d['preco']},"
+        f"Dist MM20: {d['dist_mm20']}%,EMA9: {d['ema9']},Momentum: {d['momentum']},"
+        f"RSI: {d['rsi']},ADX: {d['adx']},ATR: {d['atr']} (Vol: {d['atr_perc']}%),"
+        f"RVOL: {d['rvol']},Estado: {d['estado']},Entrada: {entrada_str},"
+        f"Stop: {d['stop']},Take-Profit: {d['tp']},Break-Even: {d['be']},"
+        f"Qtd: {qtd_final},ValorInvestir: {valor_investir},Trailing: {d['trailing']},Lote: {tipo_lote},Earnings: {d['earnings']},"
+        f"PosicaoAtiva: {d['posicao_ativa']},Data: {d['data']}"
+    )
+    
+    resultados_para_sheets.append({
+        "ticker": d['ticker'],
+        "preco": d['preco'],
+        "momentum": d['momentum'],
+        "rsi": d['rsi'],
+        "adx": d['adx'],
+        "atr": d['atr'],
+        "time": d['data'],
+        "comboio": linha_comboio
+    })
+
+    comboio_ia.append(d)
+    comboio_ia[-1]["quantidade"] = qtd_final
+    comboio_ia[-1]["valor_investir"] = valor_investir
+    comboio_ia[-1]["lote"] = tipo_lote
+    comboio_ia[-1]["comboio_str"] = linha_comboio
 
 # ===================================================================
 # 5. ENVIO PARA O GOOGLE SHEETS
@@ -369,7 +387,8 @@ if resultados_para_sheets and WEBHOOK_URL:
             "aba": NOME_ABA_EUROPA,
             "dados": resultados_para_sheets
         }
-        resposta = requests.post(WEBHOOK_URL, json=payload_sheets)
+        headers = {'Content-Type': 'application/json'}
+        resposta = requests.post(WEBHOOK_URL, data=json.dumps(payload_sheets), headers=headers)
         if resposta.status_code == 200:
             print("[SUCESSO] Google Sheets atualizado com sucesso!")
         else:
@@ -382,8 +401,11 @@ if resultados_para_sheets and WEBHOOK_URL:
 # ===================================================================
 print("\nA construir o bloco unificado (Prompt + Comboio) para o email...")
 
-# FILTRO: Seleciona apenas ativos que NÃO estão em "Observar"
-ativos_acionados = [item for item in comboio_ia if item["estado"] != "Observar"]
+# Filtra para o relatório (Ignora Observar, a não ser que tenha posição ativa)
+ativos_acionados = [
+    item for item in comboio_ia 
+    if item["estado"] != "Observar" or not item["posicao_ativa"].startswith("NÃO")
+]
 
 prompt_sistema_embutido = f"""MODO DIÁRIO ATIVO - PREDADOR DE BREAKOUTS: Avalia os seguintes ativos da minha watchlist.
 (INFO SISTEMA - Hoje é Sexta-feira? {hoje_e_sexta})
@@ -417,21 +439,19 @@ Regras Operacionais Estritas de Triagem, Carteira e Ataque:
 6. GESTÃO DE POSIÇÕES ATIVAS E ESTRUTURA VISUAL OBRIGATÓRIA (CRÍTICO):
    - Verifica o campo 'PosicaoAtiva' em cada linha do comboio.
    - **REGRA DE OURO:** Se a PosicaoAtiva indicar **SIM**, é **estritamente proibido** sugerir nova entrada ou alocação de capital. O foco é 100% a gestão da posição existente.
-   - **GESTÃO DO STOP LOSS:** Compara o 'StopAtual' indicado na posição ativa com o valor de 'Trailing' calculado pelo sistema. 
-     * Se o 'Trailing' for superior ao 'StopAtual', emite obrigatoriamente a recomendação: [AJUSTE DE STOP: Subir o Stop Loss atual de X para o novo valor de Trailing Y].
-     * Se o 'StopAtual' já for superior ou se o trailing ainda estiver abaixo, indica: [MANUTENÇÃO DE STOP: Manter stop atual em X].
-   - Usa obrigatoriamente este template para cada ativo validado:
+   - **GESTÃO DO STOP LOSS:** Compara o 'StopAtual' com o 'Trailing'. Se o 'Trailing' for superior, recomenda subir o Stop. Se for igual ou inferior, indica manutenção.
+   - Usa obrigatoriamente este template exato:
 
-   🎯 [TICKER] - [Nome da Empresa] ([Setor]) [Adicionar tag (SUPLENTE) aqui se não for do Top 3]
-   - 🚩 BANDEIRAS: (Lista aqui os avisos da regra 3 e 5, ou "Limpo" se não houver)
-   - ⚠️ ESTADO NA CARTEIRA: [Se POSIÇÃO JÁ ATIVA: "POSIÇÃO ATIVA (Entrada: X | Stop Atual: Y | Qtd: Z). Análise de Trailing abaixo." | Se NÃO: "Nenhuma posição aberta"]
-   - ⚙️ EXECUÇÃO / DEFESA: (Indica claramente se deves subir o Stop Loss comparando o Stop Atual com o Trailing, ou mantê-lo)
-   - 🛡️ TAMANHO DA POSIÇÃO: [Se já tens posição: "N/A - Já em Carteira" | Se não tens: "Lote Completo" ou "Lote Reduzido a 50%"]
-   - 🔢 DADOS EXATOS: Entrada: X | Stop: X | TP: X | BE: X | Trailing: X | Qtd: X | Valor a Investir: [Se já tens posição: "N/A - Posição Existente" | Se não tens: ~X]
+   🎯 [TICKER] - [Nome da Empresa] ([Setor]) [Adicionar tag (SUPLENTE) se aplicável]
+   - 🚩 BANDEIRAS: (Avisos ou "Limpo")
+   - ⚠️ ESTADO NA CARTEIRA: [POSIÇÃO ATIVA... ou Nenhuma posição aberta]
+   - ⚙️ EXECUÇÃO / DEFESA: (Regra dos Gaps e Gestão de Stop)
+   - 🛡️ TAMANHO DA POSIÇÃO: Lê o campo 'Lote' da linha de referência e transcreve (Ex: 'Lote Reduzido a 50%' ou 'Lote Completo').
+   - 🔢 DADOS EXATOS: Entrada: X | Stop: X | TP: X | BE: X | Trailing: X | Qtd: X | Valor a Investir: [Lê o campo 'ValorInvestir' da referência e transcreve diretamente]. NÃO FAÇAS CÁLCULOS.
    - 📋 REFERÊNCIA: (Cola a linha original do comboio aqui)
 
 7. SAÚDE DO MERCADO E MANDATO FINAL: 
-   Termina o email com uma frase sobre o estado do mercado E inclui SEMPRE de forma isolada e a negrito no fim do email:
+   Termina com a frase obrigatória a negrito:
    **"TÁTICA DE EXECUÇÃO OBRIGATÓRIA: Não executar ordens antes das 15h00. Deixar a volatilidade inicial queimar os amadores e confirmar a verdadeira direção institucional."**
 """
 
@@ -442,19 +462,7 @@ if not ativos_acionados:
 else:
     bloco_texto_ia += "DADOS DOS ATIVOS ACIONADOS (COMBOIO EUROPA):\n\n"
     for item in ativos_acionados:
-        dist_mm20_str = f"{item.get('dist_mm20', 'N/A')}%" if item.get('dist_mm20') != "N/A" else "N/A"
-        
-        linha = (
-            f"{item['ticker']},Nome: {item['nome']},Setor: {item['setor']},Preço: {item['preco']},"
-            f"Dist MM20: {dist_mm20_str},EMA9: {item.get('ema9', 'N/A')},Momentum: {item.get('momentum', 'N/A')}," # <-- EMA9 AQUI NO COMBOIO FINAL
-            f"RSI: {item['rsi']},ADX: {item['adx']},ATR: {item.get('atr', 'N/A')} (Vol: {item['atr_perc']}%),"
-            f"RVOL: {item['rvol']},Estado: {item['estado']},Entrada: {item['entrada']},"
-            f"Stop: {item['stop']},Take-Profit: {item['alvo']},Break-Even: {item.get('be', 'N/A')},"
-            f"Qtd: {item['quantidade']},Trailing: {item['trailing']},"
-            f"Earnings: {item.get('earnings', 'OK')},"
-            f"PosicaoAtiva: {item['posicao_ativa']},Data: {item['data']}"
-        )
-        bloco_texto_ia += linha + "\n"
+        bloco_texto_ia += item["comboio_str"] + "\n"
 
 with open("comboio_europa.txt", "w", encoding="utf-8") as f:
     f.write(bloco_texto_ia)
