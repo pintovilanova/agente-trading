@@ -279,7 +279,6 @@ for ativo_info in ativos_data:
             except:
                 return "N/A"
 
-        # Guardar temporariamente para a auditoria macro
         dados_temporarios.append({
             "ticker": ticker,
             "nome": nome_empresa,
@@ -330,10 +329,15 @@ comboio_ia = []
 for d in dados_temporarios:
     qtd_final = d["qtd_bruta"]
     
-    # Python aplica o corte de 50% diretamente se o ambiente for hostil
     if qtd_final != "N/A" and macro_hostil:
         qtd_final = round(float(qtd_final) / 2, 2)
         
+    # NOVO: Cálculo automático do Valor a Investir (Preço de Entrada x Quantidade Final)
+    valor_investir = "N/A - Posição Existente"
+    if d['posicao_ativa'].startswith("NÃO") and d['entrada'] != "N/A" and qtd_final != "N/A":
+        val_calc = float(d['entrada']) * float(qtd_final)
+        valor_investir = f"~{val_calc:.2f} USD"
+
     entrada_str = f"{d['entrada']:.2f}" if isinstance(d['entrada'], (int, float)) else d['entrada']
     
     linha_comboio = (
@@ -342,7 +346,7 @@ for d in dados_temporarios:
         f"RSI: {d['rsi']},ADX: {d['adx']},ATR: {d['atr']} (Vol: {d['atr_perc']}%),"
         f"RVOL: {d['rvol']},Estado: {d['estado']},Entrada: {entrada_str},"
         f"Stop: {d['stop']},Take-Profit: {d['tp']},Break-Even: {d['be']},"
-        f"Qtd: {qtd_final},Trailing: {d['trailing']},Lote: {tipo_lote},Earnings: {d['earnings']},"
+        f"Qtd: {qtd_final},ValorInvestir: {valor_investir},Trailing: {d['trailing']},Lote: {tipo_lote},Earnings: {d['earnings']},"
         f"PosicaoAtiva: {d['posicao_ativa']},Data: {d['data']}"
     )
     
@@ -359,6 +363,7 @@ for d in dados_temporarios:
 
     comboio_ia.append(d)
     comboio_ia[-1]["quantidade"] = qtd_final
+    comboio_ia[-1]["valor_investir"] = valor_investir
     comboio_ia[-1]["lote"] = tipo_lote
     comboio_ia[-1]["comboio_str"] = linha_comboio
 
@@ -425,14 +430,14 @@ Regras Operacionais Estritas de Triagem, Carteira e Ataque:
    - Verifica o campo 'PosicaoAtiva' em cada linha do comboio.
    - **REGRA DE OURO:** Se a PosicaoAtiva indicar **SIM**, é **estritamente proibido** sugerir nova entrada ou alocação de capital. O foco é 100% a gestão da posição existente.
    - **GESTÃO DO STOP LOSS:** Compara o 'StopAtual' com o 'Trailing'. Se o 'Trailing' for superior, recomenda subir o Stop. Se for igual ou inferior, indica manutenção.
-   - Usa obrigatoriamente este template:
+   - Usa obrigatoriamente este template exato:
 
    🎯 [TICKER] - [Nome da Empresa] ([Setor]) [Adicionar tag (SUPLENTE) se aplicável]
    - 🚩 BANDEIRAS: (Avisos ou "Limpo")
    - ⚠️ ESTADO NA CARTEIRA: [POSIÇÃO ATIVA... ou Nenhuma posição aberta]
    - ⚙️ EXECUÇÃO / DEFESA: (Regra dos Gaps e Gestão de Stop)
-   - 🛡️ TAMANHO DA POSIÇÃO: Lê o campo 'Lote' da linha de referência e transcreve a decisão do motor (Ex: 'Lote Reduzido a 50%' ou 'Lote Completo').
-   - 🔢 DADOS EXATOS: Transcreve EXATAMENTE os valores da referência. NÃO FAÇAS CÁLCULOS MATEMÁTICOS DE REDUÇÃO. A 'Qtd' fornecida já foi cortada a 50% pelo motor matemático se o ambiente for hostil.
+   - 🛡️ TAMANHO DA POSIÇÃO: Lê o campo 'Lote' da linha de referência e transcreve (Ex: 'Lote Reduzido a 50%' ou 'Lote Completo').
+   - 🔢 DADOS EXATOS: Entrada: X | Stop: X | TP: X | BE: X | Trailing: X | Qtd: X | Valor a Investir: [Lê o campo 'ValorInvestir' da referência e transcreve diretamente]. NÃO FAÇAS CÁLCULOS.
    - 📋 REFERÊNCIA: (Cola a linha original do comboio aqui)
 
 7. SAÚDE DO MERCADO E MANDATO FINAL: 
