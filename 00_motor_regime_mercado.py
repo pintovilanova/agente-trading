@@ -54,20 +54,21 @@ def enviar_alerta_macro(assunto, corpo):
 print("A executar auditoria macro global do mercado US...")
 
 try:
-    # Descarregar dados do SPY (S&P 500) e ^VIX (Índice de Volatilidade)
-    dados_macro = yf.download(["SPY", "^VIX"], period="2y", interval="1d", progress=False)
+    # Descarregar SPY e VIX de forma isolada para garantir histórico limpo de 200 dias
+    df_spy = yf.download("SPY", period="3y", interval="1d", progress=False)
+    df_vix = yf.download("^VIX", period="1y", interval="1d", progress=False)
     
-    if dados_macro.empty:
+    if df_spy.empty or df_vix.empty:
         print("[ERRO CRÍTICO] Não foi possível obter dados macro do Yahoo Finance.")
         sys.exit(1)
 
-    # Tratar colunas multi-nível do yfinance
-    df_spy = dados_macro['Close'][['SPY']].copy()
-    df_spy.columns = ['Close']
-    df_spy.ta.sma(length=200, append=True)
+    if isinstance(df_spy.columns, pd.MultiIndex):
+        df_spy.columns = df_spy.columns.droplevel(1)
+    if isinstance(df_vix.columns, pd.MultiIndex):
+        df_vix.columns = df_vix.columns.droplevel(1)
 
-    df_vix = dados_macro['Close'][['^VIX']].copy()
-    df_vix.columns = ['Close']
+    # Calcular SMA 200 explicitamente com pandas para evitar falhas do pandas_ta
+    df_spy['SMA_200'] = df_spy['Close'].rolling(window=200).mean()
 
     spy_hoje = df_spy.iloc[-1]
     spy_ontem = df_spy.iloc[-2]
@@ -77,13 +78,11 @@ try:
     preco_spy_ontem = spy_ontem['Close']
     sma200_spy = spy_hoje['SMA_200']
 
-    # Métricas de Risco Macro
     queda_spy = ((preco_spy - preco_spy_ontem) / preco_spy_ontem) * 100
-    abaixo_sma200 = preco_spy < sma200_spy
-    pánico_vix = vix_vix = vix_hoje > 30.00  # VIX acima de 30 indica pánico extremo no mercado
+    abaixo_sma200 = preco_spy < sma200_spy if pd.notna(sma200_spy) else False
 
     print(f"-> SPY Fecho: {preco_spy:.2f} USD (Var 1D: {queda_spy:.2f}%)")
-    print(f"-> SPY SMA200: {sma200_spy:.2f} USD")
+    print(f"-> SPY SMA200: {sma200_spy:.2f} USD" if pd.notna(sma200_spy) else "-> SPY SMA200: A calcular (insuficiente)")
     print(f"-> VIX Atual: {vix_hoje:.2f}")
 
     # ===================================================================
