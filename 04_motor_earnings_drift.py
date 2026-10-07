@@ -83,7 +83,6 @@ def analisar_earnings_drift(ticker, nome_empresa, setor):
     try:
         ticker_obj = yf.Ticker(ticker)
         
-        # Obter histórico recente (últimos 3 meses para capturar o evento de earnings)
         df = ticker_obj.history(period="3mo")
         if df.empty:
             return None
@@ -91,7 +90,6 @@ def analisar_earnings_drift(ticker, nome_empresa, setor):
         if isinstance(df.columns, pd.MultiIndex):
             df.columns = df.columns.droplevel(1)
 
-        # Indicadores de Confirmação Institucional
         df.ta.atr(length=14, append=True)
         df.ta.sma(length=20, append=True)
         df.ta.ema(length=9, append=True)
@@ -99,7 +97,6 @@ def analisar_earnings_drift(ticker, nome_empresa, setor):
         media_volume_20 = df['Volume'].rolling(window=20).mean()
         df['RVOL'] = df['Volume'] / media_volume_20
 
-        # Verificar data do último relatório de resultados (Earnings)
         earnings_recente = False
         data_earnings_str = "N/A"
         
@@ -114,7 +111,7 @@ def analisar_earnings_drift(ticker, nome_empresa, setor):
                         d_earn = pd.to_datetime(idx).date()
                     
                     dias_passados = (hoje - d_earn).days
-                    if 0 <= dias_passados <= 5: # Ocorreu nos últimos 5 dias úteis
+                    if 0 <= dias_passados <= 5:
                         earnings_recente = True
                         data_earnings_str = d_earn.strftime('%d/%m/%Y')
                         break
@@ -122,7 +119,7 @@ def analisar_earnings_drift(ticker, nome_empresa, setor):
             pass
 
         if not earnings_recente:
-            return None # Ignora se não houver earnings fresco
+            return None
 
         ultimo_dia = df.iloc[-1]
         dia_anterior = df.iloc[-2]
@@ -133,15 +130,11 @@ def analisar_earnings_drift(ticker, nome_empresa, setor):
         rvol = ultimo_dia['RVOL']
         minimo_dia = ultimo_dia['Low']
 
-        # Filtro de Validação PEAD:
-        # 1. Ação subiu forte no rescaldo dos resultados (var_perc >= 2%)
-        # 2. Volume institucional explosivo (RVOL >= 2.0)
         if var_perc >= 2.0 and rvol >= 2.0:
             estado = "EARNINGS MOMENTUM - Drift Detetado"
             entrada = round(preco, 2)
-            # Stop Loss colocado abaixo do mínimo da vela de arranque
             stop_loss = round(minimo_dia * 0.99, 2)
-            alvo_tp = round(entrada + ((entrada - stop_loss) * 2.0), 2) # Rácio 2:1
+            alvo_tp = round(entrada + ((entrada - stop_loss) * 2.0), 2)
             
             risco = entrada - stop_loss
             qtd_acoes = round(RISCO_MAXIMO_DOLARES / risco, 2) if risco > 0 else "N/A"
@@ -184,29 +177,14 @@ def analisar_earnings_drift(ticker, nome_empresa, setor):
 # 4. EXECUÇÃO PRINCIPAL E INTEGRAÇÃO (Sheets + Email)
 # ===================================================================
 def executar_motor():
-
-    resultados_para_sheets.append({
-    "ticker": "TEST",
-    "preco": 150.25,
-    "data_earnings": "07/10/2026",
-    "var_perc": "5.00%",
-    "rvol": 3.5,
-    "estado": "EARNINGS MOMENTUM - Teste GitHub",
-    "entrada": 150.25,
-    "stop": 145.00,
-    "tp": 160.75,
-    "qtd": 5.0,
-    "valor_investir": "~750.00 USD",
-    "comboio": "TEST, Teste de escrita no Google Sheets via GitHub"
-})
+    # Inicialização obrigatória das variáveis no topo da função
+    resultados_para_sheets = []
+    comboio_ia = []
     
     ativos = buscar_watchlist()
     if not ativos:
         sys.exit(1)
         
-    resultados_para_sheets = []
-    comboio_ia = []
-    
     for ativo_info in ativos:
         ticker = ativo_info.get("ticker")
         if not ticker or ticker == "#N/A": continue
