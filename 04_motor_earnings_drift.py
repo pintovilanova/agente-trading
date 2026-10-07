@@ -131,7 +131,6 @@ def analisar_earnings_drift(ticker, nome_empresa, setor):
         preco_anterior = dia_anterior['Close']
         var_perc = ((preco - preco_anterior) / preco_anterior) * 100
         rvol = ultimo_dia['RVOL']
-        atr = ultimo_dia['ATRr_14']
         minimo_dia = ultimo_dia['Low']
 
         # Filtro de Validação PEAD:
@@ -165,7 +164,15 @@ def analisar_earnings_drift(ticker, nome_empresa, setor):
         return {
             "ticker": ticker,
             "preco": limpa(preco),
+            "data_earnings": data_earnings_str,
+            "var_perc": f"{limpa(var_perc)}%",
+            "rvol": limpa(rvol),
             "estado": estado,
+            "entrada": limpa(entrada),
+            "stop": limpa(stop_loss),
+            "tp": limpa(alvo_tp),
+            "qtd": qtd_acoes,
+            "valor_investir": valor_investir,
             "comboio_str": linha_comboio
         }
 
@@ -199,21 +206,26 @@ def executar_motor():
             resultados_para_sheets.append({
                 "ticker": res['ticker'],
                 "preco": res['preco'],
-                "momentum": 0,
-                "rsi": 0,
-                "adx": 0,
-                "atr": 0,
+                "data_earnings": res['data_earnings'],
+                "var_perc": res['var_perc'],
+                "rvol": res['rvol'],
+                "estado": res['estado'],
+                "entrada": res['entrada'],
+                "stop": res['stop'],
+                "tp": res['tp'],
+                "qtd": res['qtd'],
+                "valor_investir": res['valor_investir'],
                 "time": datetime.now(ZoneInfo("Europe/Lisbon")).strftime('%d/%m/%Y %H:%M:%S'),
                 "comboio": res['comboio_str']
             })
             comboio_ia.append(res['comboio_str'])
 
-    # Atualizar o Google Sheets
-    if resultados_para_sheets and WEBHOOK_URL:
+    # Atualizar o Google Sheets (Aba: Earnings Drift)
+    if WEBHOOK_URL:
         print("\nA atualizar o Google Sheets (Aba: Earnings Drift)...")
         try:
             payload_sheets = {
-                "acao": "atualizar_colunas_todas",
+                "acao": "atualizar_earnings_drift",
                 "aba": "Earnings Drift",
                 "dados": resultados_para_sheets
             }
@@ -233,30 +245,4 @@ Estamos a surfar a onda de revisão em alta de lucros pelos analistas.
 
 Regras de Validação:
 1. VALIDAÇÃO DO CATALISADOR: Confirma se o volume (RVOL >= 2.0) e a variação de preço validam a forte entrada de fundos após os resultados.
-2. TÁTICA DE SAÍDA: O rácio de risco é superior (2:1), permitindo surfar o movimento com o Stop Loss bem protegido abaixo do mínimo da vela de arranque.
-
-Estrutura Visual Obrigatória:
-🎯 [TICKER] - [Nome da Empresa] ([Setor])
-- 🚀 CATALISADOR DE EARNINGS: [Data e Variação Pós-Resultados]
-- 🩸 PEGADA INSTITUCIONAL: [RVOL Elevado]
-- ⚙️ TÁTICA: EARNINGS DRIFT. Surfar tendência com rácio 2:1.
-- 🔢 DADOS EXATOS: Entrada: X | Stop: X | TP: X | Qtd: X | Valor a Investir: X
-- 📋 REFERÊNCIA: [Linha do Comboio]
-"""
-    
-    bloco_texto_ia = f"{prompt_ia}\n\n--------------------------------------------------\n"
-    
-    if not comboio_ia:
-        bloco_texto_ia += "[SEM OPORTUNIDADES PEAD] - Nenhuma ação da Watchlist apresentou resultados com desvio explosivo nos últimos dias.\n"
-    else:
-        bloco_texto_ia += "DADOS DOS ATIVOS EM EARNINGS DRIFT (COMBOIO):\n\n"
-        for linha in comboio_ia:
-            bloco_texto_ia += linha + "\n"
-            
-    with open("comboio_earnings_temp.txt", "w", encoding="utf-8") as f:
-        f.write(bloco_texto_ia)
-        
-    enviar_email(bloco_texto_ia)
-
-if __name__ == "__main__":
-    executar_motor()
+2. TÁTICA DE SAÍDA: O rácio de risco é superior (2:1), permitindo surfar o movimento com o Stop Loss bem protegido abaixo do mínimo
