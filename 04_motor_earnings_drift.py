@@ -184,6 +184,22 @@ def analisar_earnings_drift(ticker, nome_empresa, setor):
 # 4. EXECUÇÃO PRINCIPAL E INTEGRAÇÃO (Sheets + Email)
 # ===================================================================
 def executar_motor():
+
+    resultados_para_sheets.append({
+    "ticker": "TEST",
+    "preco": 150.25,
+    "data_earnings": "07/10/2026",
+    "var_perc": "5.00%",
+    "rvol": 3.5,
+    "estado": "EARNINGS MOMENTUM - Teste GitHub",
+    "entrada": 150.25,
+    "stop": 145.00,
+    "tp": 160.75,
+    "qtd": 5.0,
+    "valor_investir": "~750.00 USD",
+    "comboio": "TEST, Teste de escrita no Google Sheets via GitHub"
+})
+    
     ativos = buscar_watchlist()
     if not ativos:
         sys.exit(1)
