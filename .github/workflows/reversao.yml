@@ -1,0 +1,37 @@
+name: Predador de Reversão (Mean Reversion)
+
+on:
+  schedule:
+    # Corre às 20:30 (hora de Lisboa/Londres), de 2ª a 6ª feira. 
+    # O mercado fecha às 21:00, apanha a vela diária quase formada.
+    - cron: '30 20 * * 1-5'
+  workflow_dispatch: # Permite execução manual a partir do GitHub
+
+jobs:
+  executar-reversao:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout do código
+        uses: actions/checkout@v4
+
+      - name: Configurar o Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Instalar as Bibliotecas
+        run: |
+          python -m pip install --upgrade pip
+          pip install yfinance pandas pandas-ta requests
+          pip install -r requirements.txt
+
+      - name: Passo 1 - Ligar o Motor de Reversão à Média
+        env:
+          WEBHOOK_URL: ${{ secrets.WEBHOOK_URL }}
+          EMAIL_USER: ${{ secrets.EMAIL_USER }}
+          EMAIL_PASS: ${{ secrets.EMAIL_PASS }}
+        run: python 03_motor_mean_reversion.py
+
+      # NOTA TÁTICA: O 03_motor já gera o email diretamente. 
+      # Não precisamos do passo do Agente Gemini aqui a menos que queiras 
+      # que a IA leia e te resuma o texto novamente. O motor puro já te dá o que precisas.
