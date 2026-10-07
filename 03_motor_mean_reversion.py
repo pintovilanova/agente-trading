@@ -87,6 +87,22 @@ def analisar_reversao_media(ticker, nome_empresa, setor):
         if isinstance(df.columns, pd.MultiIndex):
             df.columns = df.columns.droplevel(1)
 
+        ultimo_dia = df.iloc[-1]
+        preco = ultimo_dia['Close']
+
+        # -------------------------------------------------------------
+        # FILTROS DE SEGURANÇA ESTRUTURAL (ANTI-LIXO BOLSISTA)
+        # 1. Rejeitar Penny Stocks (Preço inferior a 3.00 USD)
+        # 2. Rejeitar o setor imobiliário / mREITs (como ORC) se identificado
+        # -------------------------------------------------------------
+        if pd.isna(preco) or preco < 3.00:
+            print(f"[FILTRADO] {ticker} rejeitado por preço baixo (Preço: {preco}).")
+            return None
+            
+        if setor and any(termo in setor.lower() for term in ["real estate", "reit", "mortgage"]):
+            print(f"[FILTRADO] {ticker} rejeitado por pertencer ao setor REIT/Imobiliário.")
+            return None
+
         # Indicadores Base
         df['SMA_20'] = df['Close'].rolling(window=20).mean()
         
@@ -104,15 +120,12 @@ def analisar_reversao_media(ticker, nome_empresa, setor):
         df['SMA_20_Vol'] = df['Volume'].rolling(window=20).mean()
         df['RVOL'] = df['Volume'] / df['SMA_20_Vol']
 
-        ultimo_dia = df.iloc[-1]
-        
-        preco = ultimo_dia['Close']
-        sma20 = ultimo_dia['SMA_20']
+        sma20 = ultimo_dia['SMA_20'] if 'SMA_20' in df.columns else np.nan
         ema9 = ultimo_dia['EMA_9']
         rsi = ultimo_dia['RSI_14']
         rvol = ultimo_dia['RVOL']
         
-        dist_mm20 = ((preco - sma20) / sma20) * 100
+        dist_mm20 = ((preco - sma20) / sma20) * 100 if pd.notna(sma20) else 0.0
         
         # Deteção de Absorção (Candlestick)
         abertura = ultimo_dia['Open']
@@ -215,7 +228,7 @@ Não estás à procura de tendências; estás a apanhar a correção de uma anom
 
 Regras de Triagem e Execução:
 1. VALIDAÇÃO DE FUNDO: Confirma a Capitulação. Um RVOL > 1.5 ou "Absorção: Sim" indicam que o dinheiro institucional começou a comprar o pânico.
-2. VETO FUNDAMENTAL: Se souberes que a queda foi originada por um risco de falência, fraude fiscal ou diluição grave de ações, emite um VETO OBRIGATÓRIO.
+2. VETO FUNDAMENTAL: O motor já filtra penny stocks (<$3) e mREITs, mas se souberes que a queda foi originada por fraude ou falência iminente, emite um VETO OBRIGATÓRIO.
 3. TÁTICA DE SAÍDA (Hit & Run): O alvo de Take-Profit é fixo e cravado na EMA9. Não recomendes o uso de Trailing Stops. O objetivo é comprar barato e largar a ação mal ela toque na linha dos 9 dias.
 4. TÁTICA DE ENTRADA: Recomenda execução próxima do fecho (para confirmar a vela de absorção) ou o uso de Buy Limit na zona de pânico.
 
