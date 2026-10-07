@@ -239,10 +239,35 @@ def executar_motor():
             print(f"[ERRO CRÍTICO] Falha HTTP Sheets: {e}")
 
     # Construção do Prompt e Envio de Email para o Agente IA
-    prompt_ia = """MODO CAÇADOR DE EARNINGS DRIFT (PEAD)
-O teu mandato é identificar empresas que surpreenderam o mercado nos resultados trimestrais e dispararam com volume institucional maciço.
-Estamos a surfar a onda de revisão em alta de lucros pelos analistas.
+    prompt_ia = (
+        "MODO CAÇADOR DE EARNINGS DRIFT (PEAD)\n"
+        "O teu mandato é identificar empresas que surpreenderam o mercado nos resultados trimestrais e dispararam com volume institucional maciço.\n"
+        "Estamos a surfar a onda de revisão em alta de lucros pelos analistas.\n\n"
+        "Regras de Validação:\n"
+        "1. VALIDAÇÃO DO CATALISADOR: Confirma se o volume (RVOL >= 2.0) e a variação de preço validam a forte entrada de fundos após os resultados.\n"
+        "2. TÁTICA DE SAÍDA: O rácio de risco é superior (2:1), permitindo surfar o movimento com o Stop Loss bem protegido abaixo do mínimo da vela de arranque.\n\n"
+        "Estrutura Visual Obrigatória:\n"
+        "🎯 [TICKER] - [Nome da Empresa] ([Setor])\n"
+        "- 🚀 CATALISADOR DE EARNINGS: [Data e Variação Pós-Resultados]\n"
+        "- 🩸 PEGADA INSTITUCIONAL: [RVOL Elevado]\n"
+        "- ⚙️ TÁTICA: EARNINGS DRIFT. Surfar tendência com rácio 2:1.\n"
+        "- 🔢 DADOS EXATOS: Entrada: X | Stop: X | TP: X | Qtd: X | Valor a Investir: X\n"
+        "- 📋 REFERÊNCIA: [Linha do Comboio]\n"
+    )
+    
+    bloco_texto_ia = f"{prompt_ia}\n--------------------------------------------------\n"
+    
+    if not comboio_ia:
+        bloco_texto_ia += "[SEM OPORTUNIDADES PEAD] - Nenhuma ação da Watchlist apresentou resultados com desvio explosivo nos últimos dias.\n"
+    else:
+        bloco_texto_ia += "DADOS DOS ATIVOS EM EARNINGS DRIFT (COMBOIO):\n\n"
+        for linha in comboio_ia:
+            bloco_texto_ia += linha + "\n"
+            
+    with open("comboio_earnings_temp.txt", "w", encoding="utf-8") as f:
+        f.write(bloco_texto_ia)
+        
+    enviar_email(bloco_texto_ia)
 
-Regras de Validação:
-1. VALIDAÇÃO DO CATALISADOR: Confirma se o volume (RVOL >= 2.0) e a variação de preço validam a forte entrada de fundos após os resultados.
-2. TÁTICA DE SAÍDA: O rácio de risco é superior (2:1), permitindo surfar o movimento com o Stop Loss bem protegido abaixo do mínimo
+if __name__ == "__main__":
+    executar_motor()
