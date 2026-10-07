@@ -1,0 +1,33 @@
+name: Motor de Earnings Drift (PEAD)
+
+on:
+  schedule:
+    # Corre de 2ª a 6ª feira às 21:15 (logo após o fecho do mercado US às 21:00)
+    - cron: '15 21 * * 1-5'
+  workflow_dispatch:
+
+jobs:
+  executar-pead:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout do código
+        uses: actions/checkout@v4
+
+      - name: Configurar o Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Instalar as Bibliotecas
+        run: |
+          python -m pip install --upgrade pip
+          pip install yfinance pandas pandas-ta requests
+          if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
+
+      # Opcional: Podes colar aqui o Passo 0 do Disjuntor Macro se quiseres blindar também o PEAD
+      - name: Executar Motor de Earnings Drift
+        env:
+          WEBHOOK_URL: ${{ secrets.WEBHOOK_URL }}
+          EMAIL_USER: ${{ secrets.EMAIL_USER }}
+          EMAIL_PASS: ${{ secrets.EMAIL_PASS }}
+        run: python 04_motor_earnings_drift.py
