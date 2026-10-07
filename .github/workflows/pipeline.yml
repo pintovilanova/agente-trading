@@ -21,8 +21,20 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           pip install yfinance pandas pandas-ta requests
-          pip install -r requirements.txt
+          if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
 
+      # ===================================================================
+      # PASSO 0 - O DISJUNTOR MACRO (Se falhar, aborta o pipeline todo)
+      # ===================================================================
+      - name: Passo 0 - Disjuntor Macro (Regime de Mercado)
+        env:
+          EMAIL_USER: ${{ secrets.EMAIL_USER }}
+          EMAIL_PASS: ${{ secrets.EMAIL_PASS }}
+        run: python 00_motor_regime_mercado.py
+
+      # ===================================================================
+      # PASSO 1 - Ligar o Motor V2 (Breakouts)
+      # ===================================================================
       - name: Passo 1 - Ligar o Motor V2
         env:
           WEBHOOK_URL: ${{ secrets.WEBHOOK_URL }}
@@ -30,6 +42,9 @@ jobs:
           EMAIL_PASS: ${{ secrets.EMAIL_PASS }}
         run: python 01_extrator_dados.py
 
+      # ===================================================================
+      # PASSO 2 - Executar o Agente Python
+      # ===================================================================
       - name: Passo 2 - Executar o Agente Python
         env:
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
