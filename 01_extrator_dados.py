@@ -121,7 +121,7 @@ except Exception as e:
 # CONFIGURAÇÕES DE RISCO INSTITUCIONAL (MÉTODO CARVER)
 # ===================================================================
 CAPITAL_TOTAL_CONTA = 10400.00  # <-- AJUSTA AQUI O VALOR DA TUA CONTA (Trading212 / XTB)
-ALVO_VOLATILIDADE_ANUAL = 0.20 # Alvo de 20% ao ano de flutuação de capital (Padrão Quant)
+ALVO_VOLATILIDADE_ANUAL = 0.05 # Alvo de 20% ao ano de flutuação de capital (Padrão Quant)
 
 # Calcula o orçamento diário de volatilidade (dividido pela constante 16, raiz de 256 dias úteis)
 VOLATILIDADE_ALVO_DIARIA_USD = (CAPITAL_TOTAL_CONTA * ALVO_VOLATILIDADE_ANUAL) / 16.0 
