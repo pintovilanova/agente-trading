@@ -1,10 +1,15 @@
 # ===================================================================
-# SISTEMA DE TRADING INSTITUCIONAL - PIPELINE MESTRE UNIFICADO
+# SISTEMA DE TRADING INSTITUCIONAL - 99. PIPELINE MESTRE UNIFICADO
 # ===================================================================
 # Descrição Geral:
-# Este script centraliza a execução de todos os motores quantitativos 
-# do ecossistema (Regime Macro, Breakouts, Earnings Drift e Connors-Chan). 
-# Orquestra a sequência de análise e consolida a entrega no servidor de nuvem.
+# Este script centraliza e executa de forma sequencial todo o ecossistema 
+# quantitativo da nuvem (GitHub Actions):
+# 00 - Disjuntor Macro (SPY)
+# 01 - Motor V2 (Breakouts)
+# 03 - Motor Mean Reversion / Pânico Profundo
+# 04 - Motor Earnings Drift / PEAD
+# 05 - Motor Connors-Chan / Exaustão de Curto Prazo
+# 02 - Orquestrador IA Final (Auditoria Gemini e Envio de Relatório)
 # ===================================================================
 
 import os
@@ -34,16 +39,20 @@ def executar_pipeline_mestre():
     print("\n[PASSO 2] A executar Motor V2 (Breakouts)...")
     os.system("python 01_extrator_dados.py")
 
-    # 3. Executar Motor de Earnings Drift (PEAD)
-    print("\n[PASSO 3] A executar Motor Earnings Drift...")
-    os.system("python 03_motor_earnings.py")
+    # 3. Executar Motor de Reversão à Média / Pânico (03)
+    print("\n[PASSO 3] A executar Motor Mean Reversion (Pânico)...")
+    os.system("python 03_motor_mean_reversion.py")
 
-    # 4. Executar Motor Connors-Chan (Reversão Estatística de Curto Prazo)
-    print("\n[PASSO 4] A executar Motor Connors-Chan...")
+    # 4. Executar Motor de Earnings Drift / PEAD (04)
+    print("\n[PASSO 4] A executar Motor Earnings Drift...")
+    os.system("python 04_motor_earnings_drift.py")
+
+    # 5. Executar Motor Connors-Chan / Exaustão de Curto Prazo (05)
+    print("\n[PASSO 5] A executar Motor Connors-Chan...")
     os.system("python 05_motor_reversao_chan.py")
 
-    # 5. Executar Orquestrador IA Final (Auditoria e Envio do Relatório Tático)
-    print("\n[PASSO 5] A consolidar com o Agente IA (Gemini) e a enviar email final...")
+    # 6. Executar Orquestrador IA Final (Auditoria e Envio do Relatório Tático)
+    print("\n[PASSO 6] A consolidar com o Agente IA (Gemini) e a enviar email final...")
     os.system("python 02_agente_gemini.py")
 
     print("\n" + "="*60)
