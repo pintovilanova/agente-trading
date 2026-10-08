@@ -20,7 +20,7 @@ jobs:
       - name: Instalar as Bibliotecas
         run: |
           python -m pip install --upgrade pip
-          pip install yfinance pandas pandas-ta requests
+          pip install yfinance pandas pandas-ta requests google-genai
           if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
 
       # ===================================================================
@@ -35,7 +35,7 @@ jobs:
       # ===================================================================
       # PASSO 1 - Ligar o Motor V2 (Breakouts)
       # ===================================================================
-      - name: Passo 1 - Ligar o Motor V2
+      - name: Passo 1 - Ligar o Motor V2 (Breakouts)
         env:
           WEBHOOK_URL: ${{ secrets.WEBHOOK_URL }}
           EMAIL_USER: ${{ secrets.EMAIL_USER }}
@@ -43,12 +43,31 @@ jobs:
         run: python 01_extrator_dados.py
 
       # ===================================================================
-      # PASSO 2 - Executar o Agente Python
+      # PASSO 1.1 - Executar o Orquestrador IA para Breakouts
       # ===================================================================
-      - name: Passo 2 - Executar o Agente Python
+      - name: Passo 1.1 - Agente IA (Breakouts)
         env:
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
           EMAIL_USER: ${{ secrets.EMAIL_USER }}
           EMAIL_PASS: ${{ secrets.EMAIL_PASS }}
-          ASSUNTO_DO_EMAIL: ${{ secrets.ASSUNTO_DO_EMAIL }}
+        run: python 02_agente_gemini.py
+
+      # ===================================================================
+      # PASSO 2 - Ligar o Motor Connors-Chan (Reversão Estatística)
+      # ===================================================================
+      - name: Passo 2 - Ligar o Motor Connors-Chan
+        env:
+          WEBHOOK_URL: ${{ secrets.WEBHOOK_URL }}
+          EMAIL_USER: ${{ secrets.EMAIL_USER }}
+          EMAIL_PASS: ${{ secrets.EMAIL_PASS }}
+        run: python 05_motor_reversao_chan.py
+
+      # ===================================================================
+      # PASSO 2.1 - Executar o Orquestrador IA para Connors-Chan
+      # ===================================================================
+      - name: Passo 2.1 - Agente IA (Connors-Chan)
+        env:
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          EMAIL_USER: ${{ secrets.EMAIL_USER }}
+          EMAIL_PASS: ${{ secrets.EMAIL_PASS }}
         run: python 02_agente_gemini.py
