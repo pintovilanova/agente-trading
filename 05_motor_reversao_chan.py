@@ -7,21 +7,6 @@
 # identificar exaustões de curto prazo em ativos da Watchlist através da 
 # confluência de feixes estatísticos extremos (Preço abaixo da Banda de 
 # Bollinger Inferior e RSI de 2 períodos em sobrevenda extrema < 10).
-#
-# Pilares Técnicos e Arquitetura:
-# 1. Filtros de Segurança Estrutural (Anti-Lixo):
-#    - Rejeição automática de Penny Stocks (Preço < 3.00 USD).
-#    - Exclusão estrita do setor imobiliário / REITs / mREITs.
-# 2. Gatilhos de Exaustão Connors-Chan:
-#    - Preço de fecho abaixo da Banda de Bollinger Inferior (20 períodos, 2 Desvios).
-#    - RSI ultrarrápido (2 períodos) inferior a 10.0 (Sobrevenda extrema).
-# 3. Gestão de Risco Institucional (Método Carver - Target Volatility):
-#    - Orçamento de flutuação diária calculado com base na volatilidade 
-#      anual alvo (5%) sobre o capital total da conta ($10,400.00).
-#    - Dimensionamento de posições baseado no ATR (Average True Range).
-# 4. Execução e Saída (Mean Reversion):
-#    - Stop Loss físico cravado de forma prudente (baseado no ATR ou mínimo do dia).
-#    - Take-Profit natural cravado na Média Móvel Simples (SMA 20 / Banda Média).
 # ===================================================================
 
 import pandas as pd
@@ -59,10 +44,9 @@ SMTP_PORT = 587
 # ===================================================================
 # CONFIGURAÇÕES DE RISCO INSTITUCIONAL (MÉTODO CARVER)
 # ===================================================================
-CAPITAL_TOTAL_CONTA = 10400.00  # Capital atualizado da conta
-ALVO_VOLATILIDADE_ANUAL = 0.05  # Alvo de 5% ao ano de flutuação (Conservador)
+CAPITAL_TOTAL_CONTA = 10400.00  
+ALVO_VOLATILIDADE_ANUAL = 0.05  
 
-# Orçamento diário de volatilidade do Carver (constante 16 para raiz de 256 dias úteis)
 VOLATILIDADE_ALVO_DIARIA_USD = (CAPITAL_TOTAL_CONTA * ALVO_VOLATILIDADE_ANUAL) / 16.0 
 
 # ===================================================================
@@ -121,6 +105,10 @@ def analisar_connors_chan(ticker, nome_empresa, setor):
         if isinstance(df.columns, pd.MultiIndex):
             df.columns = df.columns.droplevel(1)
 
+        # BLINDAGEM CONTRA IPOs RECENTES (Histórico curto):
+        if len(df) < 25:
+            return None
+
         ultimo_dia = df.iloc[-1]
         preco = ultimo_dia['Close']
 
@@ -140,11 +128,14 @@ def analisar_connors_chan(ticker, nome_empresa, setor):
         df.ta.rsi(length=2, append=True)              # Cria RSI_2
         df.ta.atr(length=14, append=True)             # Cria ATRr_14
 
+        # Recolher o último dia com as colunas novas
+        ultimo_dia = df.iloc[-1]
+
         bbl_inferior = ultimo_dia.get('BBL_20_2.0', np.nan)
         bb_media = ultimo_dia.get('BBM_20_2.0', np.nan)
         rsi_2 = ultimo_dia.get('RSI_2', np.nan)
-        atr = ultimo_dia.get('ATr_14', ultimo_dia.get('ATRr_14', np.nan))
-        minimo = ultimo_dia['Low']
+        atr = ultimo_dia.get('ATRr_14', np.nan)
+        minimo = ultimo_dia.get('Low', preco)
 
         estado = "Observar"
         entrada = "N/A"
@@ -155,16 +146,13 @@ def analisar_connors_chan(ticker, nome_empresa, setor):
         
         # -------------------------------------------------------------
         # A MATEMÁTICA DO GATILHO DE EXAUSTÃO CONNORS-CHAN
-        # Condições: Fecho abaixo da Banda Inferior E RSI(2) < 10
         # -------------------------------------------------------------
         if pd.notna(bbl_inferior) and pd.notna(rsi_2) and (preco < bbl_inferior) and (rsi_2 < 10.0):
             estado = "EXAUSTÃO ESTATÍSTICA - Connors-Chan"
             entrada = round(preco, 2)
             
-            # Alvo natural de reversão: A Média Móvel Central (Banda Média / SMA20)
             alvo_tp = round(bb_media, 2) if pd.notna(bb_media) else round(preco * 1.03, 2)
             
-            # Stop Loss técnico defensivo (1.5x ATR abaixo do preço de entrada ou abaixo do mínimo)
             stop_calc = preco - (atr * 1.5) if pd.notna(atr) else minimo * 0.98
             stop_loss = round(min(stop_calc, minimo * 0.99), 2)
             
@@ -175,7 +163,6 @@ def analisar_connors_chan(ticker, nome_empresa, setor):
                  estado = "Rejeitado (Rácio de Risco Negativo)"
                  entrada = alvo_tp = stop_loss = "N/A"
             else:
-                 # CÁLCULO DE MESTRE CARVER: Dimensionamento por Volatilidade (ATR)
                  if pd.notna(atr) and atr > 0:
                      qtd_acoes = round(VOLATILIDADE_ALVO_DIARIA_USD / atr, 2)
                  else:
@@ -234,21 +221,25 @@ def executar_motor():
                 ativos_acionados.append(res)
                 
     prompt_ia = """MODO PREDADOR CONNORS-CHAN (REVERSÃO DE CURTO PRAZO)
-O teu mandato é auditar ações que atingiram um desvio estatístico extremo de curto prazo (fecho abaixo da Banda de Bollinger inferior e RSI de 2 períodos em sobrevenda profunda < 10).
-Estás a caçar anomalias elásticas para ressaltos imediatos rumo à média (SMA20).
+O teu mandato é auditar os sinais estatísticos gerados pelo motor Python e formatá-los.
+
+🚨 REGRAS DE OURO (ANTI-ALUCINAÇÃO DE DADOS) 🚨
+1. ZERO CRIATIVIDADE: É ESTRITAMENTE PROIBIDO inventar notícias, motivos de queda, lucros, previsões ou datas que não estejam na linha do comboio.
+2. FONTE ÚNICA: Retira os dados EXCLUSIVAMENTE da linha do comboio fornecida.
+3. NARRATIVA NEUTRA: Se não tiveres detalhes sobre o motivo da queda, escreve apenas 'Anomalia estatística baseada em exaustão técnica extrema'.
 
 Regras de Triagem e Execução:
-1. VALIDAÇÃO DE EXAUSTÃO: Confirma que o RSI(2) está abaixo de 10 e que o preço rompeu a Banda de Bollinger inferior, sinalizando um esgotamento de vendedores.
-2. VETO FUNDAMENTAL: O motor já filtra penny stocks (<$3) e mREITs, mas emite veto se houver notícias de falência ou fraude.
-3. TÁTICA DE SAÍDA: O alvo de Take-Profit é cravado na Banda Central de Bollinger (SMA20). O objetivo é um ressalto ultrarrápido de 1 a 3 dias.
-4. TÁTICA DE ENTRADA: Execução no fecho da sessão ou abertura seguinte alinhada com o dimensionamento de volatilidade Carver.
+1. VALIDAÇÃO DE EXAUSTÃO: Confirma que o RSI(2) está abaixo de 10 e que o preço rompeu a Banda de Bollinger inferior.
+2. VETO FUNDAMENTAL: Emite veto obrigatório caso exista um rácio de risco negativo.
+3. TÁTICA DE SAÍDA: O alvo de Take-Profit é cravado na Banda Central de Bollinger (SMA20).
+4. TÁTICA DE ENTRADA: Execução com alocação rígida baseada em volatilidade (Carver).
 
 Estrutura Visual Obrigatória:
 🎯 [TICKER] - [Nome da Empresa] ([Setor])
 - 🚨 SINAL CONNORS-CHAN: [Destacar BBLower e RSI(2) extremo]
 - ⚙️ TÁTICA: SWING REVERSION. Alvo na SMA20 / Banda Média.
 - 🔢 DADOS EXATOS: Entrada: X | Stop: X | TP (SMA20): X | Qtd: X | Valor a Investir: X
-- 📋 REFERÊNCIA: [Linha do Comboio]
+- 📋 REFERÊNCIA: [Linha do Comboio exata]
 """
     
     bloco_texto_ia = f"{prompt_ia}\n\n--------------------------------------------------\n"
