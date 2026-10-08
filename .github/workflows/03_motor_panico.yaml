@@ -1,4 +1,4 @@
-name: Tático - Apenas Motor Pânico
+name: 03 Tático - Apenas Motor Pânico
 
 on:
   workflow_dispatch: # Permite disparar este motor manualmente a qualquer momento
