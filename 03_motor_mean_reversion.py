@@ -29,7 +29,14 @@ EMAIL_PASS = os.environ.get("EMAIL_PASS")
 SMTP_SERVER = "smtp.gmail.com"
 SMTP_PORT = 587
 
-RISCO_MAXIMO_DOLARES = 25.00
+# ===================================================================
+# CONFIGURAÇÕES DE RISCO INSTITUCIONAL (MÉTODO CARVER)
+# ===================================================================
+CAPITAL_TOTAL_CONTA = 10400.00  # Capital atualizado da conta
+ALVO_VOLATILIDADE_ANUAL = 0.05  # Alvo de 5% ao ano de flutuação (Conservador)
+
+# Orçamento diário de volatilidade do Carver (constante 16 para raiz de 256 dias úteis)
+VOLATILIDADE_ALVO_DIARIA_USD = (CAPITAL_TOTAL_CONTA * ALVO_VOLATILIDADE_ANUAL) / 16.0 
 
 # ===================================================================
 # 2. FUNÇÕES DE REDE
@@ -76,7 +83,7 @@ def enviar_email(conteudo):
         print(f"[ERRO] Falha ao enviar email: {e}")
 
 # ===================================================================
-# 3. MOTOR MATEMÁTICO: REVERSÃO À MÉDIA
+# 3. MOTOR MATEMÁTICO: REVERSÃO À MÉDIA (COM TARGET VOLATILITY)
 # ===================================================================
 def analisar_reversao_media(ticker, nome_empresa, setor):
     try:
@@ -92,14 +99,12 @@ def analisar_reversao_media(ticker, nome_empresa, setor):
 
         # -------------------------------------------------------------
         # FILTROS DE SEGURANÇA ESTRUTURAL (ANTI-LIXO BOLSISTA)
-        # 1. Rejeitar Penny Stocks (Preço inferior a 3.00 USD)
-        # 2. Rejeitar o setor imobiliário / mREITs (como ORC) se identificado
         # -------------------------------------------------------------
         if pd.isna(preco) or preco < 3.00:
             print(f"[FILTRADO] {ticker} rejeitado por preço baixo (Preço: {preco}).")
             return None
             
-        if setor and any(termo in setor.lower() for term in ["real estate", "reit", "mortgage"]):
+        if setor and any(termo in setor.lower() for termo in ["real estate", "reit", "mortgage"]):
             print(f"[FILTRADO] {ticker} rejeitado por pertencer ao setor REIT/Imobiliário.")
             return None
 
@@ -116,26 +121,25 @@ def analisar_reversao_media(ticker, nome_empresa, setor):
         # Média Móvel de 9 (Alvo de Saída)
         df['EMA_9'] = df['Close'].ewm(span=9, adjust=False).mean()
         
-        # Volume Relativo (RVOL)
+        # Volume Relativo (RVOL) e ATR para o Carver
         df['SMA_20_Vol'] = df['Volume'].rolling(window=20).mean()
         df['RVOL'] = df['Volume'] / df['SMA_20_Vol']
+        df.ta.atr(length=14, append=True)
 
         sma20 = ultimo_dia['SMA_20'] if 'SMA_20' in df.columns else np.nan
         ema9 = ultimo_dia['EMA_9']
         rsi = ultimo_dia['RSI_14']
         rvol = ultimo_dia['RVOL']
+        atr = ultimo_dia.get('ATRr_14', np.nan)
         
         dist_mm20 = ((preco - sma20) / sma20) * 100 if pd.notna(sma20) else 0.0
         
         # Deteção de Absorção (Candlestick)
         abertura = ultimo_dia['Open']
-        maximo = ultimo_dia['High']
         minimo = ultimo_dia['Low']
         
         corpo = abs(abertura - preco)
         sombra_inferior = min(abertura, preco) - minimo
-        
-        # Absorção: Sombra inferior pelo menos 1.5x maior que o corpo da vela
         absorcao = sombra_inferior > (corpo * 1.5)
 
         estado = "Observar"
@@ -147,18 +151,13 @@ def analisar_reversao_media(ticker, nome_empresa, setor):
         
         # -------------------------------------------------------------
         # A MATEMÁTICA DO GATILHO DE CHOQUE
-        # 1. Distância à MM20 <= -8.0%
-        # 2. RSI < 30 (Sobrevenda)
-        # 3. RVOL >= 1.5 (Capitulação) OU Absorção visível na vela
         # -------------------------------------------------------------
         if pd.notna(dist_mm20) and dist_mm20 <= -8.0 and rsi < 30 and (rvol >= 1.5 or absorcao):
             estado = "PÂNICO EXTREMO - Oportunidade de Reversão"
             entrada = round(preco, 2)
             alvo_tp = round(ema9, 2)
-            # Stop Loss cravado a 1% abaixo do mínimo absoluto do dia de pânico
             stop_loss = round(minimo * 0.99, 2)
             
-            # Filtro de Sanidade: Risco vs Recompensa
             risco = entrada - stop_loss
             recompensa = alvo_tp - entrada
             
@@ -166,7 +165,14 @@ def analisar_reversao_media(ticker, nome_empresa, setor):
                  estado = "Rejeitado (Rácio de Risco Negativo)"
                  entrada = alvo_tp = stop_loss = "N/A"
             else:
-                 qtd_acoes = round(RISCO_MAXIMO_DOLARES / risco, 2) if risco > 0 else "N/A"
+                 # CÁLCULO DE MESTRE CARVER ADAPTADO A REVERSÃO:
+                 # Usa o ATR para dimensionar a volatilidade, garantindo o orçamento diário de risco da conta.
+                 if pd.notna(atr) and atr > 0:
+                     qtd_acoes = round(VOLATILIDADE_ALVO_DIARIA_USD / atr, 2)
+                 else:
+                     # Fallback de segurança caso o ATR falhe
+                     qtd_acoes = round(VOLATILIDADE_ALVO_DIARIA_USD / risco, 2) if risco > 0 else "N/A"
+
                  if qtd_acoes != "N/A":
                      val_calc = entrada * qtd_acoes
                      valor_investir = f"~{val_calc:.2f} USD"
@@ -175,7 +181,6 @@ def analisar_reversao_media(ticker, nome_empresa, setor):
             if pd.isna(v) or v == "N/A": return "N/A"
             return round(float(v), 2)
 
-        # Estrutura do Comboio adaptada para Reversão
         linha_comboio = (
             f"{ticker},Nome: {nome_empresa},Setor: {setor},Preço: {limpa(preco)},"
             f"Dist MM20: {limpa(dist_mm20)}%,EMA9: {limpa(ema9)},"
@@ -216,15 +221,15 @@ def executar_motor():
             ativo_info.get("setor", "Desconhecido")
         )
         
-        if res:
-            print(f"[OK] {ticker} analisado. Estado: {res['estado']}")
-            if "PÂNICO EXTREMO" in res['estado']:
-                ativos_acionados.append(res)
+        res_dict = res if isinstance(res, dict) else None
+        if res_dict:
+            print(f"[OK] {ticker} analisado. Estado: {res_dict['estado']}")
+            if "PÂNICO EXTREMO" in res_dict['estado']:
+                ativos_acionados.append(res_dict)
                 
-    # O Prompt especializado em Hit & Run
     prompt_ia = """MODO PREDADOR DE REVERSÃO (MEAN REVERSION)
 O teu mandato é auditar ações que sofreram quedas massivas e identificar fundos institucionais para ressaltos rápidos (Dead Cat Bounce). 
-Não estás à procura de tendências; estás a apanhar a correção de uma anomalia estatística.
+Não estás à procura de tendências; estás a apanhar a correção de uma anomalia estatística baseada no orçamento de volatilidade da conta.
 
 Regras de Triagem e Execução:
 1. VALIDAÇÃO DE FUNDO: Confirma a Capitulação. Um RVOL > 1.5 ou "Absorção: Sim" indicam que o dinheiro institucional começou a comprar o pânico.
@@ -250,7 +255,6 @@ Estrutura Visual Obrigatória:
         for item in ativos_acionados:
             bloco_texto_ia += item["comboio_str"] + "\n"
             
-    # Guarda o ficheiro localmente como cópia de segurança
     with open("comboio_reversao_temp.txt", "w", encoding="utf-8") as f:
         f.write(bloco_texto_ia)
         
