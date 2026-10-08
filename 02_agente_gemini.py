@@ -1,3 +1,28 @@
+# ===================================================================
+# SISTEMA DE TRADING INSTITUCIONAL - AGENTE ORQUESTRADOR IA (GEMINI)
+# ===================================================================
+# Descrição Geral:
+# Este script atua como o "Cérebro Analítico" e auditor final do sistema. 
+# O seu papel é extrair os dados processados pelo motor matemático (seja 
+# por ficheiro local ou via IMAP/Email), submetê-los a um modelo de IA de 
+# alta performance (Google Gemini) com prompts estritos de gestão de risco, 
+# e reenviar o relatório tático final pronto para leitura e tomada de decisão.
+#
+# Pilares Técnicos e Arquitetura:
+# 1. Travas de Segurança e Calendário:
+#    - Trava de Fim de Semana: Interrompe a execução aos sábados e domingos.
+# 2. Extração Inteligente com Fallback (Local + IMAP):
+#    - Deteção automática do mercado em análise (Europa vs. US) com base 
+#      nos ficheiros de texto disponíveis ou consulta direta à caixa de correio.
+# 3. Mecanismo de Alta Disponibilidade e Fallback de Modelos de IA:
+#    - Sistema de reenttentativas com espera exponencial (Backoff) para lidar 
+#      com restrições de API ou erros de indisponibilidade (503 / 429).
+#    - Mudança automática para modelos de contingência (ex: transição entre 
+#      versões do Gemini Flash) caso o modelo principal esgote a quota.
+# 4. Distribuição do Relatório Final:
+#    - Envio automatizado do relatório de auditoria tática por email, formatado 
+#      com títulos dinâmicos e bandeiras de risco de acordo com o mercado.
+# ===================================================================
 import os
 import imaplib
 import smtplib
