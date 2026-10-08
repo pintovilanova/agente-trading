@@ -1,3 +1,30 @@
+# ===================================================================
+# SISTEMA DE TRADING INSTITUCIONAL - MOTOR DE EARNINGS DRIFT (PEAD)
+# ===================================================================
+# Descrição Geral:
+# Este script opera como um "Caçador de Anomalias Pós-Resultados" (PEAD). 
+# O seu objetivo é detetar empresas da Watchlist que reportaram lucros trimestrais 
+# recentes e dispararam com volume institucional massivo, antecipando o 
+# fenómeno de desvio continuado (drift) na revisão de lucros pelos analistas.
+#
+# Pilares Técnicos e Arquitetura:
+# 1. Travas de Segurança e Calendário:
+#    - Trava de Fim de Semana: Interrompe a execução automaticamente aos 
+#      sábados e domingos para salvaguardar recursos na nuvem.
+# 2. Deteção de Catalisadores Temporais (Earnings Window):
+#    - Varredura de dados históricos de resultados (`earnings_dates`) para 
+#      identificar ativos que reportaram nos últimos 0 a 5 dias úteis.
+# 3. Filtros de Momentum e Volume Institucional:
+#    - Validação de arranque explosivo pós-earnings: Variação diária positiva 
+#      superior ou igual a 2.0% em conjugação com Volume Relativo (RVOL) >= 2.0.
+# 4. Gestão de Risco assimétrica (Rácio 2:1):
+#    - Stop Loss físico posicionado a 1% abaixo do mínimo da vela de arranque.
+#    - Take-Profit fixo projetado com um rácio de recompensa 2:1 face ao risco.
+#    - Alocação de risco controlada com limite máximo por transação.
+# 5. Integração Cloud & LLM:
+#    - Atualização automatizada da aba "Earnings Drift" no Google Sheets via Webhook.
+#    - Envio de relatório formatado ("Comboio PEAD") por email para auditoria por IA.
+# ===================================================================
 import pandas as pd
 import yfinance as yf
 import pandas_ta as ta
