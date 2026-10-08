@@ -3,7 +3,13 @@
 # ===================================================================
 # Descrição Geral:
 # Este script centraliza e executa de forma sequencial todo o ecossistema 
-# quantitativo e respetivas auditorias de IA (Gemini):
+# quantitativo da nuvem (GitHub Actions) e as respetivas auditorias IA:
+# 00 - Disjuntor Macro (SPY)
+# 01 - Motor V2 (Breakouts)
+# 03 - Motor Mean Reversion / Pânico Profundo
+# 04 - Motor Earnings Drift / PEAD
+# 05 - Motor Connors-Chan / Exaustão de Curto Prazo
+# 02 - Orquestrador IA Final (Auditoria Gemini e Envio de Relatório)
 # ===================================================================
 
 import os
@@ -35,10 +41,11 @@ def executar_pipeline_mestre():
     print("-> A auditar Breakouts com o Agente IA...")
     os.system("python 02_agente_gemini.py")
 
-    # 3. Executar Motor de Reversão à Média / Pânico (03) + Auditoria IA
+    # 3. Executar Motor de Reversão / Pânico Profundo (03) + Auditoria IA
     print("\n[PASSO 3] A executar Motor Mean Reversion (Pânico)...")
     os.system("python 03_motor_mean_reversion.py")
-    # Nota: se o motor 03 gerar um ficheiro próprio, podes chamar o agente aqui ou integrá-lo.
+    print("-> A auditar Pânico e Reversão com o Agente IA...")
+    os.system("python 02_agente_gemini.py")
 
     # 4. Executar Motor de Earnings Drift / PEAD (04) + Auditoria IA
     print("\n[PASSO 4] A executar Motor Earnings Drift...")
