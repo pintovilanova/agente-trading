@@ -26,8 +26,10 @@
 #    - Validação matemática de Rácio Risco/Recompensa (Recompensa >= Risco).
 #    - Alvo de Take-Profit fixo e cravado estritamente na EMA9 (sem trailing).
 # ===================================================================
+
 import pandas as pd
 import yfinance as yf
+import pandas_ta as ta  # <-- Importação explícita obrigatória para registar os métodos .ta
 import numpy as np
 from datetime import datetime
 from zoneinfo import ZoneInfo
