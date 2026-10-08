@@ -1,3 +1,31 @@
+# ===================================================================
+# SISTEMA DE TRADING INSTITUCIONAL - MOTOR DE BREAKOUTS (EUA)
+# ===================================================================
+# Descrição Geral:
+# Este script opera como um "Predador de Breakouts" automatizado na nuvem 
+# (via GitHub Actions). O seu objetivo é varrer a Watchlist, auditar a saúde 
+# macroeconómica, calcular posições com base na volatilidade institucional 
+# (Método Carver) e enviar um relatório estruturado por email para triagem de uma IA.
+#
+# Pilares Técnicos e Arquitetura de Execução:
+# 1. Travas de Segurança e Calendário:
+#    - Trava de Fim de Semana: Aborta automaticamente aos sábados e domingos.
+#    - Veto Macro (SPY): Cancela a execução se o SPY estiver em pânico (queda >= 1.5%) 
+#      ou se negociar abaixo da sua SMA de 200 períodos (Bear Market).
+# 2. Gestão de Risco Institucional (Target Volatility - Método Carver):
+#    - Orçamento de flutuação diária calculado sobre o capital total da conta 
+#      ($10,400.00) com um alvo de volatilidade anual conservador (5%).
+#    - Dimensionamento dinâmico baseado no ATR (Average True Range) para 
+#      nivelar o risco real por ativo, independentemente do preço nominal.
+# 3. Auditoria Macro e Lotes Defensivos:
+#    - Avaliação coletiva da Watchlist: se 70% ou mais dos ativos estiverem 
+#      estagnados ("Observar" ou "Aguardar Recuo"), o sistema decreta "Ambiente 
+#      Hostil" e corta automaticamente o lote de todas as ordens para 50%.
+#    - Redução automática de lote obrigatória às sextas-feiras.
+# 4. Integração Cloud & LLM:
+#    - Sincronização bidirecional com Google Sheets via Webhook.
+#    - Envio de prompt e dados estruturados ("Comboio") para auditoria autónoma por IA.
+# ===================================================================
 from datetime import datetime
 from zoneinfo import ZoneInfo
 import yfinance as yf
