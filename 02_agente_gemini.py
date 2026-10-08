@@ -15,7 +15,7 @@
 #    - Deteção automática do mercado em análise (Europa vs. US) com base 
 #      nos ficheiros de texto disponíveis ou consulta direta à caixa de correio.
 # 3. Mecanismo de Alta Disponibilidade e Fallback de Modelos de IA:
-#    - Sistema de reenttentativas com espera exponencial (Backoff) para lidar 
+#    - Sistema de re tentativas com espera exponencial (Backoff) para lidar 
 #      com restrições de API ou erros de indisponibilidade (503 / 429).
 #    - Mudança automática para modelos de contingência (ex: transição entre 
 #      versões do Gemini Flash) caso o modelo principal esgote a quota.
