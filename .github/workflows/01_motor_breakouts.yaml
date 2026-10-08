@@ -1,4 +1,4 @@
-name: Tático - Apenas Motor Breakouts
+name: 01 Tático - Apenas Motor Breakouts
 
 on:
   workflow_dispatch:
