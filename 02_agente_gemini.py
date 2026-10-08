@@ -39,8 +39,6 @@ import sys
 # 0.1 TRAVA DE FIM DE SEMANA (Não corre ao Sábado e Domingo)
 # ===================================================================
 dia_da_semana = datetime.now(ZoneInfo("Europe/Lisbon")).weekday()
-
-# ATIVADO: Se for sábado (5) ou domingo (6), o script para aqui.
 if dia_da_semana >= 5:
     print("[INFO] Fim de semana detetado. O mercado está fechado. O Agente vai descansar.")
     sys.exit(0)
@@ -60,19 +58,28 @@ SMTP_PORT = 587
 client = genai.Client(api_key=GEMINI_API_KEY)
 
 # ==========================================
-# 2. EXTRAÇÃO INTELIGENTE (Local + Fallback IMAP)
+# 2. EXTRAÇÃO INTELIGENTE (Local + Fallback IMAP) - ATUALIZADA
 # ==========================================
 def extrair_dados_do_market():
+    # Verifica qual o ficheiro de comboio disponível na pasta (prioridade para Europa, US Breakouts, Earnings ou Connors)
     if os.path.exists("comboio_europa.txt"):
         ficheiro = "comboio_europa.txt"
-        assunto_alvo = "tradingRelatorioIA Europa" # O que a IA vai procurar na caixa de entrada
+        assunto_alvo = "tradingRelatorioIA Europa"
         tag_mercado = "EUROPA"
+    elif os.path.exists("comboio_connors_temp.txt"):
+        ficheiro = "comboio_connors_temp.txt"
+        assunto_alvo = "tradingRelatorioIA US - CONNORS-CHAN"
+        tag_mercado = "US-CONNORS"
+    elif os.path.exists("comboio_earnings_temp.txt"):
+        ficheiro = "comboio_earnings_temp.txt"
+        assunto_alvo = "tradingRelatorioIA US - EARNINGS DRIFT"
+        tag_mercado = "US-EARNINGS"
     else:
         ficheiro = "comboio_temp.txt"
-        assunto_alvo = "tradingRelatorioIA US" # O que a IA vai procurar na caixa de entrada
+        assunto_alvo = "tradingRelatorioIA US"
         tag_mercado = "US"
 
-    print(f"A processar mercado: {tag_mercado} (Ficheiro: {ficheiro})...")
+    print(f"A processar mercado/estratégia: {tag_mercado} (Ficheiro: {ficheiro})...")
 
     if os.path.exists(ficheiro):
         print(f"A carregar os dados localmente a partir de '{ficheiro}'...")
@@ -128,16 +135,14 @@ def analisar_com_ia(dados_mercado):
     espera_base = 15
     espera_maxima = 300
 
-    # Começa com o teu modelo de eleição
     modelo_atual = 'gemini-3.6-flash'
 
     for tentativa in range(tentativas):
         try:
-            # Estratégia de Fallback: Se falhar 2 vezes seguidas, salta para o modelo de alta disponibilidade
             if tentativa == 2:
-                print(f"[AVISO] O modelo {modelo_atual} está indisponível ou sem cota (limite 20/dia).")
-                print("[TÁTICA] A mudar o motor para o Fallback 'gemini-3.8-flash' para garantir o relatório...")
-                modelo_atual = 'gemini-3.8-flash'  # Podes usar 'gemini-3.0-flash' se o 2.5 também der 404
+                print(f"[AVISO] O modelo {modelo_atual} está indisponível ou sem cota.")
+                print("[TÁTICA] A mudar o motor para o Fallback 'gemini-3.8-flash'...")
+                modelo_atual = 'gemini-3.8-flash'
 
             print(f"A tentar gerar relatório com o modelo: {modelo_atual}...")
             resposta = client.models.generate_content(
@@ -156,10 +161,8 @@ def analisar_com_ia(dados_mercado):
                     if tempo_espera > espera_maxima:
                         tempo_espera = espera_maxima
                         
-                    # Se deu erro 429 na primeira ou segunda tentativa, não vale a pena esperar muito, força o ciclo a avançar para o Fallback
                     if "429" in erro_str and tentativa < 2:
                         tempo_espera = 5
-                        print("Cota excedida no modelo VIP. A avançar rápido para o modelo de contingência...")
 
                     print(f"Bloqueio de API. A aguardar {tempo_espera} segundos...")
                     time.sleep(tempo_espera)
@@ -174,9 +177,12 @@ def analisar_com_ia(dados_mercado):
 # 4. ENVIAR O RELATÓRIO DE VOLTA POR EMAIL
 # ==========================================
 def enviar_email_resposta(relatorio_texto, tag_mercado):
-    # Aqui sim, definimos o assunto "bonito" que te vai aparecer no telemóvel/computador
     if tag_mercado == "EUROPA":
         assunto_email = "🇪🇺 IA Predador: Relatório Tático EUROPA"
+    elif tag_mercado == "US-CONNORS":
+        assunto_email = "🇺🇸 IA Predador: Relatório Connors-Chan (Reversão)"
+    elif tag_mercado == "US-EARNINGS":
+        assunto_email = "🇺🇸 IA Predador: Relatório Earnings Drift (PEAD)"
     else:
         assunto_email = "🇺🇸 IA Predador: Relatório Tático WALL STREET"
 
