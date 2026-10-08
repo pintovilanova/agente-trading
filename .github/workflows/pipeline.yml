@@ -1,12 +1,12 @@
-name: Pipeline Completo de Trading
+name: Pipeline Mestre de Trading
 
 on:
   schedule:
     - cron: '30 4 * * 1-5'
-  workflow_dispatch: # Permite execução manual a partir do GitHub
+  workflow_dispatch:
 
 jobs:
-  executar-pipeline:
+  executar-pipeline-mestre:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout do código
@@ -23,51 +23,10 @@ jobs:
           pip install yfinance pandas pandas-ta requests google-genai
           if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
 
-      # ===================================================================
-      # PASSO 0 - O DISJUNTOR MACRO (Se falhar, aborta o pipeline todo)
-      # ===================================================================
-      - name: Passo 0 - Disjuntor Macro (Regime de Mercado)
-        env:
-          EMAIL_USER: ${{ secrets.EMAIL_USER }}
-          EMAIL_PASS: ${{ secrets.EMAIL_PASS }}
-        run: python 00_motor_regime_mercado.py
-
-      # ===================================================================
-      # PASSO 1 - Ligar o Motor V2 (Breakouts)
-      # ===================================================================
-      - name: Passo 1 - Ligar o Motor V2 (Breakouts)
+      - name: Executar Pipeline Mestre
         env:
           WEBHOOK_URL: ${{ secrets.WEBHOOK_URL }}
-          EMAIL_USER: ${{ secrets.EMAIL_USER }}
-          EMAIL_PASS: ${{ secrets.EMAIL_PASS }}
-        run: python 01_extrator_dados.py
-
-      # ===================================================================
-      # PASSO 1.1 - Executar o Orquestrador IA para Breakouts
-      # ===================================================================
-      - name: Passo 1.1 - Agente IA (Breakouts)
-        env:
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
           EMAIL_USER: ${{ secrets.EMAIL_USER }}
           EMAIL_PASS: ${{ secrets.EMAIL_PASS }}
-        run: python 02_agente_gemini.py
-
-      # ===================================================================
-      # PASSO 2 - Ligar o Motor Connors-Chan (Reversão Estatística)
-      # ===================================================================
-      - name: Passo 2 - Ligar o Motor Connors-Chan
-        env:
-          WEBHOOK_URL: ${{ secrets.WEBHOOK_URL }}
-          EMAIL_USER: ${{ secrets.EMAIL_USER }}
-          EMAIL_PASS: ${{ secrets.EMAIL_PASS }}
-        run: python 05_motor_reversao_chan.py
-
-      # ===================================================================
-      # PASSO 2.1 - Executar o Orquestrador IA para Connors-Chan
-      # ===================================================================
-      - name: Passo 2.1 - Agente IA (Connors-Chan)
-        env:
-          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
-          EMAIL_USER: ${{ secrets.EMAIL_USER }}
-          EMAIL_PASS: ${{ secrets.EMAIL_PASS }}
-        run: python 02_agente_gemini.py
+        run: python 99_pipeline_master.py
