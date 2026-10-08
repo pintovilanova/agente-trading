@@ -12,16 +12,16 @@
 # 1. Travas de Segurança e Calendário:
 #    - Trava de Fim de Semana: Interrompe a execução aos sábados e domingos.
 # 2. Extração Inteligente com Fallback (Local + IMAP):
-#    - Deteção automática do mercado em análise (Europa vs. US) com base 
-#      nos ficheiros de texto disponíveis ou consulta direta à caixa de correio.
+#    - Deteção automática do mercado em análise com base nos ficheiros 
+#      de texto disponíveis (Europa, Pânico, Connors, Earnings ou Breakouts).
 # 3. Mecanismo de Alta Disponibilidade e Fallback de Modelos de IA:
-#    - Sistema de re tentativas com espera exponencial (Backoff) para lidar 
+#    - Sistema de re-tentativas com espera exponencial (Backoff) para lidar 
 #      com restrições de API ou erros de indisponibilidade (503 / 429).
 #    - Mudança automática para modelos de contingência (ex: transição entre 
 #      versões do Gemini Flash) caso o modelo principal esgote a quota.
 # 4. Distribuição do Relatório Final:
 #    - Envio automatizado do relatório de auditoria tática por email, formatado 
-#      com títulos dinâmicos e bandeiras de risco de acordo com o mercado.
+#      com títulos dinâmicos e bandeiras de risco de acordo com o mercado/estratégia.
 # ===================================================================
 import os
 import imaplib
@@ -61,11 +61,15 @@ client = genai.Client(api_key=GEMINI_API_KEY)
 # 2. EXTRAÇÃO INTELIGENTE (Local + Fallback IMAP) - ATUALIZADA
 # ==========================================
 def extrair_dados_do_market():
-    # Verifica qual o ficheiro de comboio disponível na pasta (prioridade para Europa, US Breakouts, Earnings ou Connors)
+    # Verifica qual o ficheiro de comboio disponível na pasta com prioridade exata
     if os.path.exists("comboio_europa.txt"):
         ficheiro = "comboio_europa.txt"
         assunto_alvo = "tradingRelatorioIA Europa"
         tag_mercado = "EUROPA"
+    elif os.path.exists("comboio_reversao_temp.txt"):
+        ficheiro = "comboio_reversao_temp.txt"
+        assunto_alvo = "tradingRelatorioIA US - PÂNICO E REVERSÃO"
+        tag_mercado = "US-PANICO"
     elif os.path.exists("comboio_connors_temp.txt"):
         ficheiro = "comboio_connors_temp.txt"
         assunto_alvo = "tradingRelatorioIA US - CONNORS-CHAN"
@@ -135,14 +139,14 @@ def analisar_com_ia(dados_mercado):
     espera_base = 15
     espera_maxima = 300
 
-    modelo_atual = 'gemini-3.6-flash'
+    modelo_atual = 'gemini-2.5-flash'  # Atualizado para padrão estável
 
     for tentativa in range(tentativas):
         try:
             if tentativa == 2:
                 print(f"[AVISO] O modelo {modelo_atual} está indisponível ou sem cota.")
-                print("[TÁTICA] A mudar o motor para o Fallback 'gemini-3.8-flash'...")
-                modelo_atual = 'gemini-3.8-flash'
+                print("[TÁTICA] A mudar o motor para o Fallback de contingência...")
+                modelo_atual = 'gemini-2.5-pro'
 
             print(f"A tentar gerar relatório com o modelo: {modelo_atual}...")
             resposta = client.models.generate_content(
@@ -179,6 +183,8 @@ def analisar_com_ia(dados_mercado):
 def enviar_email_resposta(relatorio_texto, tag_mercado):
     if tag_mercado == "EUROPA":
         assunto_email = "🇪🇺 IA Predador: Relatório Tático EUROPA"
+    elif tag_mercado == "US-PANICO":
+        assunto_email = "🇺🇸 IA Predador: Relatório Pânico e Reversão (Mean Reversion)"
     elif tag_mercado == "US-CONNORS":
         assunto_email = "🇺🇸 IA Predador: Relatório Connors-Chan (Reversão)"
     elif tag_mercado == "US-EARNINGS":
