@@ -117,8 +117,15 @@ try:
 except Exception as e:
     print(f"Erro na validação do SPY: {e}")
 
-# Configurações de Risco
-risco_maximo_dolares = 25.00
+# ===================================================================
+# CONFIGURAÇÕES DE RISCO INSTITUCIONAL (MÉTODO CARVER)
+# ===================================================================
+CAPITAL_TOTAL_CONTA = 5000.00  # <-- AJUSTA AQUI O VALOR DA TUA CONTA (Trading212 / XTB)
+ALVO_VOLATILIDADE_ANUAL = 0.20 # Alvo de 20% ao ano de flutuação de capital (Padrão Quant)
+
+# Calcula o orçamento diário de volatilidade (dividido pela constante 16, raiz de 256 dias úteis)
+VOLATILIDADE_ALVO_DIARIA_USD = (CAPITAL_TOTAL_CONTA * ALVO_VOLATILIDADE_ANUAL) / 16.0 
+
 multiplicador_trailing_ts = 1.5
 racio_tp_base = 1.2
 
@@ -241,7 +248,7 @@ for ativo_info in ativos_data:
         else:
             recomendacao = "Observar"
 
-        # GESTÃO DE RISCO PARA ATIVOS ACIONADOS
+        # GESTÃO DE RISCO PARA ATIVOS ACIONADOS (TARGET VOLATILITY SIZING)
         if recomendacao != "Observar" and preco_entrada != "N/A":
             preco_stop_calc = preco_entrada - (atr * multiplicador_atr)
             if preco_stop_calc > sma20 and preco > sma20:
@@ -251,12 +258,20 @@ for ativo_info in ativos_data:
             risco_por_acao = preco_entrada - preco_stop_calc
             
             if risco_por_acao > 0:
-                risco_alocado = risco_maximo_dolares
-                if rvol >= 3.00: risco_alocado += (risco_maximo_dolares * 0.5)
-                if adx >= 35.00: risco_alocado += (risco_maximo_dolares * 0.5)
+                # O risco base (orçamento) dita o impacto financeiro da volatilidade
+                vol_alocada = VOLATILIDADE_ALVO_DIARIA_USD
+                
+                # Adaptação dos teus Boosters de Convicção (+50% de orçamento de risco para configurações de elite)
+                if rvol >= 3.00: vol_alocada *= 1.5
+                if adx >= 35.00: vol_alocada *= 1.5
+                
+                # O Take-Profit mantém o rácio tático do Breakout em relação ao ponto de Stop
                 tp_calc = preco_entrada + (risco_por_acao * racio_tp_base)
                 preco_tp = round(tp_calc, 2)
-                qtd_acoes = round(risco_alocado / risco_por_acao, 2)
+                
+                # CÁLCULO DE MESTRE CARVER: O tamanho da posição foca-se na pulsação (ATR)
+                qtd_acoes = round(vol_alocada / atr, 2) if atr > 0 else "N/A"
+                
                 dist_tp = preco_tp - preco_entrada
                 preco_be = round(preco_entrada + (dist_tp / 2), 2)
                 
@@ -332,7 +347,7 @@ for d in dados_temporarios:
     if qtd_final != "N/A" and macro_hostil:
         qtd_final = round(float(qtd_final) / 2, 2)
         
-    # NOVO: Cálculo automático do Valor a Investir (Preço de Entrada x Quantidade Final)
+    # Cálculo automático do Valor a Investir
     valor_investir = "N/A - Posição Existente"
     if d['posicao_ativa'].startswith("NÃO") and d['entrada'] != "N/A" and qtd_final != "N/A":
         val_calc = float(d['entrada']) * float(qtd_final)
