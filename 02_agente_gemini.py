@@ -17,8 +17,8 @@
 # 3. Mecanismo de Alta Disponibilidade e Fallback de Modelos de IA:
 #    - Sistema de re-tentativas com espera exponencial (Backoff) para lidar 
 #      com restrições de API ou erros de indisponibilidade (503 / 429).
-#    - Mudança automática para modelos de contingência (ex: transição entre 
-#      versões do Gemini Flash) caso o modelo principal esgote a quota.
+#    - Mudança automática para modelos de contingência (gemini-3.8-flash) 
+#      caso o modelo principal esgote a quota.
 # 4. Distribuição do Relatório Final:
 #    - Envio automatizado do relatório de auditoria tática por email, formatado 
 #      com títulos dinâmicos e bandeiras de risco de acordo com o mercado/estratégia.
@@ -139,14 +139,14 @@ def analisar_com_ia(dados_mercado):
     espera_base = 15
     espera_maxima = 300
 
-    modelo_atual = 'gemini-2.5-flash'  # Atualizado para padrão estável
+    modelo_atual = 'gemini-3.6-flash'  # Corrigido para modelo suportado
 
     for tentativa in range(tentativas):
         try:
             if tentativa == 2:
                 print(f"[AVISO] O modelo {modelo_atual} está indisponível ou sem cota.")
-                print("[TÁTICA] A mudar o motor para o Fallback de contingência...")
-                modelo_atual = 'gemini-2.5-pro'
+                print("[TÁTICA] A mudar o motor para o Fallback 'gemini-3.8-flash'...")
+                modelo_atual = 'gemini-3.8-flash'
 
             print(f"A tentar gerar relatório com o modelo: {modelo_atual}...")
             resposta = client.models.generate_content(
