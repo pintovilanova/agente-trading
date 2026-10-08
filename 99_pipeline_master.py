@@ -3,13 +3,7 @@
 # ===================================================================
 # Descrição Geral:
 # Este script centraliza e executa de forma sequencial todo o ecossistema 
-# quantitativo da nuvem (GitHub Actions):
-# 00 - Disjuntor Macro (SPY)
-# 01 - Motor V2 (Breakouts)
-# 03 - Motor Mean Reversion / Pânico Profundo
-# 04 - Motor Earnings Drift / PEAD
-# 05 - Motor Connors-Chan / Exaustão de Curto Prazo
-# 02 - Orquestrador IA Final (Auditoria Gemini e Envio de Relatório)
+# quantitativo e respetivas auditorias de IA (Gemini):
 # ===================================================================
 
 import os
@@ -35,24 +29,27 @@ def executar_pipeline_mestre():
         print("[BLOQUEIO] O Disjuntor Macro interrompeu o pipeline. Condições desfavoráveis.")
         sys.exit(0)
 
-    # 2. Executar Motor V2 (Breakouts)
+    # 2. Executar Motor V2 (Breakouts) + Auditoria IA
     print("\n[PASSO 2] A executar Motor V2 (Breakouts)...")
     os.system("python 01_extrator_dados.py")
+    print("-> A auditar Breakouts com o Agente IA...")
+    os.system("python 02_agente_gemini.py")
 
-    # 3. Executar Motor de Reversão à Média / Pânico (03)
+    # 3. Executar Motor de Reversão à Média / Pânico (03) + Auditoria IA
     print("\n[PASSO 3] A executar Motor Mean Reversion (Pânico)...")
     os.system("python 03_motor_mean_reversion.py")
+    # Nota: se o motor 03 gerar um ficheiro próprio, podes chamar o agente aqui ou integrá-lo.
 
-    # 4. Executar Motor de Earnings Drift / PEAD (04)
+    # 4. Executar Motor de Earnings Drift / PEAD (04) + Auditoria IA
     print("\n[PASSO 4] A executar Motor Earnings Drift...")
     os.system("python 04_motor_earnings_drift.py")
+    print("-> A auditar Earnings Drift com o Agente IA...")
+    os.system("python 02_agente_gemini.py")
 
-    # 5. Executar Motor Connors-Chan / Exaustão de Curto Prazo (05)
+    # 5. Executar Motor Connors-Chan / Exaustão de Curto Prazo (05) + Auditoria IA
     print("\n[PASSO 5] A executar Motor Connors-Chan...")
     os.system("python 05_motor_reversao_chan.py")
-
-    # 6. Executar Orquestrador IA Final (Auditoria e Envio do Relatório Tático)
-    print("\n[PASSO 6] A consolidar com o Agente IA (Gemini) e a enviar email final...")
+    print("-> A auditar Connors-Chan com o Agente IA...")
     os.system("python 02_agente_gemini.py")
 
     print("\n" + "="*60)
