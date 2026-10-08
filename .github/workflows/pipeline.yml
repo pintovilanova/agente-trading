@@ -1,4 +1,4 @@
-name: Pipeline Tático Institucional
+name: 01 Pipeline Tático Institucional
 
 on:
   schedule:
