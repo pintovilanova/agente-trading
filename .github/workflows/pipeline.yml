@@ -1,4 +1,4 @@
-name: Pipeline Mestre de Trading
+name: Pipeline Tático Institucional
 
 on:
   schedule:
@@ -6,7 +6,7 @@ on:
   workflow_dispatch:
 
 jobs:
-  executar-pipeline-mestre:
+  executar-pipeline:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout do código
@@ -23,10 +23,79 @@ jobs:
           pip install yfinance pandas pandas-ta requests google-genai
           if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
 
-      - name: Executar Pipeline Mestre
+      # ===================================================================
+      # PASSO 0: DISJUNTOR MACRO
+      # ===================================================================
+      - name: Passo 0 - Disjuntor Macro (SPY)
+        env:
+          EMAIL_USER: ${{ secrets.EMAIL_USER }}
+          EMAIL_PASS: ${{ secrets.EMAIL_PASS }}
+        run: python 00_motor_regime_mercado.py
+
+      # ===================================================================
+      # PASSO 1: MOTOR V2 (BREAKOUTS) + ORQUESTRADOR IA
+      # ===================================================================
+      - name: Passo 1 - Motor Breakouts (Matemática)
         env:
           WEBHOOK_URL: ${{ secrets.WEBHOOK_URL }}
+          EMAIL_USER: ${{ secrets.EMAIL_USER }}
+          EMAIL_PASS: ${{ secrets.EMAIL_PASS }}
+        run: python 01_extrator_dados.py
+
+      - name: Passo 1.1 - Agente IA (Breakouts)
+        env:
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
           EMAIL_USER: ${{ secrets.EMAIL_USER }}
           EMAIL_PASS: ${{ secrets.EMAIL_PASS }}
-        run: python 99_pipeline_master.py
+        run: python 02_agente_gemini.py
+
+      # ===================================================================
+      # PASSO 2: MOTOR MEAN REVERSION (PÂNICO) + ORQUESTRADOR IA
+      # ===================================================================
+      - name: Passo 2 - Motor Mean Reversion (Matemática)
+        env:
+          WEBHOOK_URL: ${{ secrets.WEBHOOK_URL }}
+          EMAIL_USER: ${{ secrets.EMAIL_USER }}
+          EMAIL_PASS: ${{ secrets.EMAIL_PASS }}
+        run: python 03_motor_mean_reversion.py
+
+      - name: Passo 2.1 - Agente IA (Pânico)
+        env:
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          EMAIL_USER: ${{ secrets.EMAIL_USER }}
+          EMAIL_PASS: ${{ secrets.EMAIL_PASS }}
+        run: python 02_agente_gemini.py
+
+      # ===================================================================
+      # PASSO 3: MOTOR EARNINGS DRIFT (PEAD) + ORQUESTRADOR IA
+      # ===================================================================
+      - name: Passo 3 - Motor Earnings Drift (Matemática)
+        env:
+          WEBHOOK_URL: ${{ secrets.WEBHOOK_URL }}
+          EMAIL_USER: ${{ secrets.EMAIL_USER }}
+          EMAIL_PASS: ${{ secrets.EMAIL_PASS }}
+        run: python 04_motor_earnings_drift.py
+
+      - name: Passo 3.1 - Agente IA (Earnings)
+        env:
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          EMAIL_USER: ${{ secrets.EMAIL_USER }}
+          EMAIL_PASS: ${{ secrets.EMAIL_PASS }}
+        run: python 02_agente_gemini.py
+
+      # ===================================================================
+      # PASSO 4: MOTOR CONNORS-CHAN (EXAUSTÃO) + ORQUESTRADOR IA
+      # ===================================================================
+      - name: Passo 4 - Motor Connors-Chan (Matemática)
+        env:
+          WEBHOOK_URL: WEBHOOK_URL: ${{ secrets.WEBHOOK_URL }}
+          EMAIL_USER: ${{ secrets.EMAIL_USER }}
+          EMAIL_PASS: ${{ secrets.EMAIL_PASS }}
+        run: python 05_motor_reversao_chan.py
+
+      - name: Passo 4.1 - Agente IA (Connors-Chan)
+        env:
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          EMAIL_USER: ${{ secrets.EMAIL_USER }}
+          EMAIL_PASS: ${{ secrets.EMAIL_PASS }}
+        run: python 02_agente_gemini.py
