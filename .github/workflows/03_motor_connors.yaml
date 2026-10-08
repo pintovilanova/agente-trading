@@ -1,0 +1,36 @@
+name: Tático - Apenas Motor Connors-Chan
+
+on:
+  workflow_dispatch:
+
+jobs:
+  executar-connors:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout do código
+        uses: actions/checkout@v4
+
+      - name: Configurar o Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Instalar as Bibliotecas
+        run: |
+          python -m pip install --upgrade pip
+          pip install yfinance pandas pandas-ta requests google-genai
+          if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
+
+      - name: Executar Motor Connors-Chan (Matemática)
+        env:
+          WEBHOOK_URL: ${{ secrets.WEBHOOK_URL }}
+          EMAIL_USER: ${{ secrets.EMAIL_USER }}
+          EMAIL_PASS: ${{ secrets.EMAIL_PASS }}
+        run: python 05_motor_reversao_chan.py
+
+      - name: Agente IA (Connors-Chan)
+        env:
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          EMAIL_USER: ${{ secrets.EMAIL_USER }}
+          EMAIL_PASS: ${{ secrets.EMAIL_PASS }}
+        run: python 02_agente_gemini.py
