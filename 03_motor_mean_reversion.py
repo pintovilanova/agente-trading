@@ -124,8 +124,11 @@ def analisar_reversao_media(ticker, nome_empresa, setor):
         if isinstance(df.columns, pd.MultiIndex):
             df.columns = df.columns.droplevel(1)
 
-        ultimo_dia = df.iloc[-1]
-        preco = ultimo_dia['Close']
+        # Verificar se há dados suficientes
+        if len(df) < 25:
+            return None
+
+        preco = df.iloc[-1]['Close']
 
         # -------------------------------------------------------------
         # FILTROS DE SEGURANÇA ESTRUTURAL (ANTI-LIXO BOLSISTA)
@@ -156,17 +159,20 @@ def analisar_reversao_media(ticker, nome_empresa, setor):
         df['RVOL'] = df['Volume'] / df['SMA_20_Vol']
         df.ta.atr(length=14, append=True)
 
-        sma20 = ultimo_dia['SMA_20'] if 'SMA_20' in df.columns else np.nan
-        ema9 = ultimo_dia['EMA_9']
-        rsi = ultimo_dia['RSI_14']
-        rvol = ultimo_dia['RVOL']
+        # Selecionar o último dia de forma segura após o cálculo das colunas
+        ultimo_dia = df.iloc[-1]
+
+        sma20 = ultimo_dia.get('SMA_20', np.nan)
+        ema9 = ultimo_dia.get('EMA_9', preco)
+        rsi = ultimo_dia.get('RSI_14', np.nan)
+        rvol = ultimo_dia.get('RVOL', 1.0)
         atr = ultimo_dia.get('ATRr_14', np.nan)
         
-        dist_mm20 = ((preco - sma20) / sma20) * 100 if pd.notna(sma20) else 0.0
+        dist_mm20 = ((preco - sma20) / sma20) * 100 if pd.notna(sma20) and sma20 > 0 else 0.0
         
         # Deteção de Absorção (Candlestick)
-        abertura = ultimo_dia['Open']
-        minimo = ultimo_dia['Low']
+        abertura = ultimo_dia.get('Open', preco)
+        minimo = ultimo_dia.get('Low', preco)
         
         corpo = abs(abertura - preco)
         sombra_inferior = min(abertura, preco) - minimo
@@ -182,7 +188,7 @@ def analisar_reversao_media(ticker, nome_empresa, setor):
         # -------------------------------------------------------------
         # A MATEMÁTICA DO GATILHO DE CHOQUE
         # -------------------------------------------------------------
-        if pd.notna(dist_mm20) and dist_mm20 <= -8.0 and rsi < 30 and (rvol >= 1.5 or absorcao):
+        if pd.notna(dist_mm20) and dist_mm20 <= -8.0 and pd.notna(rsi) and rsi < 30 and (rvol >= 1.5 or absorcao):
             estado = "PÂNICO EXTREMO - Oportunidade de Reversão"
             entrada = round(preco, 2)
             alvo_tp = round(ema9, 2)
@@ -196,11 +202,9 @@ def analisar_reversao_media(ticker, nome_empresa, setor):
                  entrada = alvo_tp = stop_loss = "N/A"
             else:
                  # CÁLCULO DE MESTRE CARVER ADAPTADO A REVERSÃO:
-                 # Usa o ATR para dimensionar a volatilidade, garantindo o orçamento diário de risco da conta.
                  if pd.notna(atr) and atr > 0:
                      qtd_acoes = round(VOLATILIDADE_ALVO_DIARIA_USD / atr, 2)
                  else:
-                     # Fallback de segurança caso o ATR falhe
                      qtd_acoes = round(VOLATILIDADE_ALVO_DIARIA_USD / risco, 2) if risco > 0 else "N/A"
 
                  if qtd_acoes != "N/A":
