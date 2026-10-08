@@ -253,18 +253,18 @@ def executar_motor():
 
     prompt_ia = (
         "MODO CAÇADOR DE EARNINGS DRIFT (PEAD)\n"
-        "O teu mandato é identificar empresas que surpreenderam o mercado nos resultados trimestrais e dispararam com volume institucional maciço.\n"
-        "Estamos a surfar a onda de revisão em alta de lucros pelos analistas.\n\n"
-        "Regras de Validação:\n"
-        "1. VALIDAÇÃO DO CATALISADOR: Confirma se o volume (RVOL >= 2.0) e a variação de preço validam a forte entrada de fundos após os resultados.\n"
-        "2. TÁTICA DE SAÍDA: O rácio de risco é superior (2:1), permitindo surfar o movimento com o Stop Loss bem protegido abaixo do mínimo da vela de arranque.\n\n"
+        "O teu mandato é auditar os sinais gerados pelo motor Python e formatá-los para leitura do gestor da conta.\n\n"
+        "🚨 REGRAS DE OURO (ANTI-ALUCINAÇÃO DE DADOS) 🚨\n"
+        "1. ZERO CRIATIVIDADE: É ESTRITAMENTE PROIBIDO inventar, alucinar ou deduzir métricas de EPS, lucros, receitas, previsões de analistas ou datas que não te sejam dadas.\n"
+        "2. FONTE ÚNICA: Retira os dados EXCLUSIVAMENTE da linha do comboio fornecida pelo motor. Não utilizes o teu conhecimento base de treino sobre a empresa.\n"
+        "3. NARRATIVA NEUTRA: Se não tiveres detalhes sobre o motivo da subida na linha do comboio, escreve apenas 'Anomalia estatística detetada pelo algoritmo'.\n\n"
         "Estrutura Visual Obrigatória:\n"
         "🎯 [TICKER] - [Nome da Empresa] ([Setor])\n"
-        "- 🚀 CATALISADOR DE EARNINGS: [Data e Variação Pós-Resultados]\n"
-        "- 🩸 PEGADA INSTITUCIONAL: [RVOL Elevado]\n"
+        "- 🚀 CATALISADOR DE EARNINGS: Data do evento: [DataEarnings] | Salto inicial: [VarDia%]\n"
+        "- 🩸 PEGADA INSTITUCIONAL: RVOL detetado de [RVOL]\n"
         "- ⚙️ TÁTICA: EARNINGS DRIFT. Surfar tendência com rácio 2:1.\n"
         "- 🔢 DADOS EXATOS: Entrada: X | Stop: X | TP: X | Qtd: X | Valor a Investir: X\n"
-        "- 📋 REFERÊNCIA: [Linha do Comboio]\n"
+        "- 📋 REFERÊNCIA: [Copia e cola a Linha do Comboio exata fornecida abaixo]\n"
     )
     
     bloco_texto_ia = f"{prompt_ia}\n--------------------------------------------------\n"
