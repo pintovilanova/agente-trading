@@ -1,3 +1,31 @@
+# ===================================================================
+# SISTEMA DE TRADING INSTITUCIONAL - MOTOR DE REVERSÃO À MÉDIA (PÂNICO)
+# ===================================================================
+# Descrição Geral:
+# Este script opera como um "Predador de Pânico" (Mean Reversion). O seu 
+# objetivo não é caçar tendências, mas sim identificar quedas massivas e 
+# anomalias estatísticas em ativos da Watchlist, acionando entradas cirúrgicas 
+# para ressaltos rápidos ("Dead Cat Bounce" / Estratégia Hit & Run).
+#
+# Pilares Técnicos e Arquitetura:
+# 1. Filtros de Segurança Estrutural (Anti-Lixo):
+#    - Rejeição automática de Penny Stocks (Preço < 3.00 USD).
+#    - Exclusão estrita do setor imobiliário / REITs / mREITs.
+# 2. Gatilhos de Pânico Extremo (O Confluente):
+#    - Distância à SMA20 inferior ou igual a -8.0%.
+#    - RSI de 14 períodos em sobrevenda extrema (< 30).
+#    - Confirmação institucional por Volume Relativo (RVOL >= 1.5) 
+#      OU padrão devela de Absorção (Sombra inferior > 1.5x o corpo).
+# 3. Gestão de Risco Institucional (Método Carver - Target Volatility):
+#    - Orçamento de flutuação diária calculado com base na volatilidade 
+#      anual alvo (5%) sobre o capital total da conta ($10,400.00).
+#    - Dimensionamento de posições baseado no ATR (Average True Range) 
+#      para nivelar o risco real por ativo.
+# 4. Execução e Saída (Hit & Run):
+#    - Stop Loss físico cravado a 1% abaixo do mínimo do dia de pânico.
+#    - Validação matemática de Rácio Risco/Recompensa (Recompensa >= Risco).
+#    - Alvo de Take-Profit fixo e cravado estritamente na EMA9 (sem trailing).
+# ===================================================================
 import pandas as pd
 import yfinance as yf
 import numpy as np
