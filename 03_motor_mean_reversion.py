@@ -261,10 +261,10 @@ def executar_motor():
             if "PÂNICO EXTREMO" in res_dict['estado']:
                 ativos_acionados.append(res_dict)
                 
-# ==============================================================================
-# 2. PROMPT DE SISTEMA PARA A IA (Instruções Rigorosas)
-# ==============================================================================
-prompt_ia = """Atuas como o Analista Quantitativo Chefe de um fundo institucional. O teu mandato é auditar ações que sofreram quedas massivas e identificar fundos institucionais para ressaltos rápidos (Dead Cat Bounce). 
+    # ==============================================================================
+    # 2. PROMPT DE SISTEMA PARA A IA (Instruções Rigorosas)
+    # ==============================================================================
+    prompt_ia = """Atuas como o Analista Quantitativo Chefe de um fundo institucional. O teu mandato é auditar ações que sofreram quedas massivas e identificar fundos institucionais para ressaltos rápidos (Dead Cat Bounce). 
 Não estás à procura de tendências; estás a apanhar a correção de uma anomalia estatística baseada no orçamento de volatilidade da conta.
 
 REGRAS ESTRITAS (ANTI-ALUCINAÇÃO):
