@@ -182,15 +182,15 @@ def analisar_com_ia(dados_mercado):
 # ==========================================
 def enviar_email_resposta(relatorio_texto, tag_mercado):
     if tag_mercado == "EUROPA":
-        assunto_email = "🇪🇺 IA Predador: Relatório Tático EUROPA"
+        assunto_email = "🇪🇺🎯 IA Predador: Relatório Tático EUROPA 🛡️"
     elif tag_mercado == "US-PANICO":
-        assunto_email = "🇺🇸 IA Predador: Relatório Pânico e Reversão (Mean Reversion)"
+        assunto_email = "🚨 IA Predador: Relatório Pânico e Reversão ⚡"
     elif tag_mercado == "US-CONNORS":
-        assunto_email = "🇺🇸 IA Predador: Relatório Connors-Chan (Reversão)"
+        assunto_email = "🧲 IA Predador: Relatório Connors-Chan 🏹"
     elif tag_mercado == "US-EARNINGS":
-        assunto_email = "🇺🇸 IA Predador: Relatório Earnings Drift (PEAD)"
+        assunto_email = "📊 IA Predador: Relatório Earnings Drift 🚀"
     else:
-        assunto_email = "🇺🇸 IA Predador: Relatório Tático WALL STREET"
+        assunto_email = "🦅 IA Predador: Relatório Tático WALL STREET 🗽"
 
     print(f"A enviar o relatório tático final para ti (Assunto: {assunto_email})...")
     try:
