@@ -99,7 +99,7 @@ def enviar_email(conteudo):
         msg = MIMEMultipart()
         msg['From'] = EMAIL_USER
         msg['To'] = EMAIL_USER
-        msg['Subject'] = "tradingRelatorioIA US - PÂNICO E REVERSÃO"
+        msg['Subject'] = "🚨 tradingRelatorioIA US - PÂNICO E REVERSÃO ⚡"
         
         msg.attach(MIMEText(conteudo, 'plain', 'utf-8'))
         
