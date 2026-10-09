@@ -73,7 +73,6 @@ def enviar_email(conteudo):
         msg = MIMEMultipart()
         msg['From'] = EMAIL_USER
         msg['To'] = EMAIL_USER
-        # ÍCONES INJETADOS AQUI - Assunto Técnico
         msg['Subject'] = "📊 tradingRelatorioIA US - EARNINGS DRIFT 🚀"
         
         msg.attach(MIMEText(conteudo, 'plain', 'utf-8'))
@@ -268,5 +267,16 @@ def executar_motor():
         "- 📋 REFERÊNCIA: [Copia e cola a Linha do Comboio exata fornecida abaixo]\n"
     )
     
-    # ÍCONES INJETADOS AQUI - Cabeçalho do Prompt para o LLM
-    bloco_texto_ia = f"📊 RELATÓRIO DE DADOS BRUT
+    bloco_texto_ia = f"📊 RELATÓRIO DE DADOS BRUTOS - EARNINGS DRIFT 🚀\n\n{prompt_ia}\n\n--------------------------------------------------\n"
+
+    if not comboio_ia:
+        bloco_texto_ia += "[SEM OPORTUNIDADES PEAD] - Nenhum ativo registou earnings recentes com explosão de volume e preço nos parâmetros estritos.\n"
+    else:
+        bloco_texto_ia += "DADOS DOS ATIVOS ATIVADOS (COMBOIO):\n\n"
+        for linha in comboio_ia:
+            bloco_texto_ia += linha + "\n"
+
+    enviar_email(bloco_texto_ia)
+
+if __name__ == "__main__":
+    executar_motor()
