@@ -46,19 +46,24 @@ VOLATILIDADE_ALVO_DIARIA_USD = (CAPITAL_TOTAL_CONTA * ALVO_VOLATILIDADE_ANUAL) /
 def buscar_dados_completos():
     print("A carregar a Watchlist e Posições Ativas a partir do Google Sheets...")
     if not WEBHOOK_URL: 
-        print("[ERRO] WEBHOOK_URL não configurado.")
+        print("[ERRO CRÍTICO] A variável de ambiente WEBHOOK_URL não está definida no GitHub Actions!")
         return [], {}
     try:
         resp = requests.get(WEBHOOK_URL)
+        print(f"[DEBUG] Código de resposta HTTP do Webhook: {resp.status_code}")
+        print(f"[DEBUG] Conteúdo bruto recebido: {resp.text[:500]}") # Imprime os primeiros 500 caracteres para inspeção
+        
         if resp.status_code == 200:
             dados = resp.json()
             if isinstance(dados, dict):
                 return dados.get("ativos", []), dados.get("posicoesAtivas", {})
             elif isinstance(dados, list):
                 return dados, {}
+        else:
+            print(f"[ERRO] O Webhook retornou o código HTTP {resp.status_code}")
         return [], {}
     except Exception as e:
-        print(f"[ERRO CRÍTICO] Sheets: {e}")
+        print(f"[ERRO CRÍTICO] Falha ao ligar ao Webhook: {e}")
         return [], {}
 
 def enviar_email_bruto(conteudo):
