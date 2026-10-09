@@ -170,18 +170,36 @@ def monitorizar_posicao_ativa(ticker, nome_empresa, status_atual, dados_posicao)
     if not ind: return None
     
     preco, ema8, ema32, atr36 = ind['preco'], ind['ema8'], ind['ema32'], ind['atr36']
-    trailing_stop_sugerido = round(preco - (atr36 * 1.5), 2)
+    trailing_stop_calculado = round(preco - (atr36 * 1.5), 2)
     
     preco_entrada = dados_posicao.get("precoEntrada", "N/A")
     quantidade = dados_posicao.get("quantidade", "N/A")
+    stop_atual_registado = dados_posicao.get("stopAtual", None)
+    
+    # REGRA DE OURO DO TRAILING STOP: O stop nunca desce, só sobe (ou mantém-se)
+    stop_final = trailing_stop_calculado
+    nota_instrucao = "Atualizar para o novo valor."
+    
+    if stop_atual_registado is not None and str(stop_atual_registado).strip() != "":
+        try:
+            stop_atual_val = float(stop_atual_registado)
+            if stop_atual_val >= trailing_stop_calculado:
+                # O stop atual já está mais alto, mantemos o atual por segurança!
+                stop_final = stop_atual_val
+                nota_instrucao = f"MANTER o Stop atual ({stop_atual_val}) em alta (o cálculo matemático de hoje ({trailing_stop_calculado}) é inferior, aplicando-se a regra de inércia do trailing stop)."
+            else:
+                nota_instrucao = f"SUBIR o Stop do valor anterior ({stop_atual_val}) para o novo patamar ({trailing_stop_calculado})."
+        except ValueError:
+            pass
+
     diferenca_bruta = ema8 - ema32
     forecast_atual = (diferenca_bruta / atr36) * 5.0 if atr36 > 0 else 0
 
     linha_monitorizacao = (
         f"📌 [POSIÇÃO ATIVA - {status_atual}] {ticker} ({nome_empresa}) | "
         f"Qtd: {quantidade} | Entrada: {preco_entrada} | Preço Atual: {preco:.2f} | "
-        f"EMA8: {ema8:.2f} | EMA32: {ema32:.2f} | Forecast: {forecast_atual:.2f} | "
-        f"🛑 Novo Trailing Stop Sugerido: {trailing_stop_sugerido} (ATR: {atr36:.2f})"
+        f"Stop Atual Registado: {stop_atual_registado} | Novo Stop Sugerido: {stop_final} | "
+        f"Instrução: {nota_instrucao} (ATR: {atr36:.2f})"
     )
     return linha_monitorizacao
 
