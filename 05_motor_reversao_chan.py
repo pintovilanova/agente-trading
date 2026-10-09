@@ -80,7 +80,8 @@ def enviar_email(conteudo):
         msg = MIMEMultipart()
         msg['From'] = EMAIL_USER
         msg['To'] = EMAIL_USER
-        msg['Subject'] = "tradingRelatorioIA US - CONNORS-CHAN REVERSÃO"
+        # ÍCONES INJETADOS AQUI - Assunto Técnico
+        msg['Subject'] = "🧲 tradingRelatorioIA US - CONNORS-CHAN REVERSÃO 🏹"
         
         msg.attach(MIMEText(conteudo, 'plain', 'utf-8'))
         
@@ -242,7 +243,8 @@ Estrutura Visual Obrigatória:
 - 📋 REFERÊNCIA: [Linha do Comboio exata]
 """
     
-    bloco_texto_ia = f"{prompt_ia}\n\n--------------------------------------------------\n"
+    # ÍCONES INJETADOS AQUI - Cabeçalho do Prompt para o LLM
+    bloco_texto_ia = f"🧲 RELATÓRIO DE DADOS BRUTOS - CONNORS-CHAN REVERSÃO 🏹\n\n{prompt_ia}\n\n--------------------------------------------------\n"
     
     if not ativos_acionados:
         bloco_texto_ia += "[SEM SINAIS CONNORS-CHAN] - Nenhuma ação da Watchlist cumpre os critérios de exaustão estatística hoje.\n"
