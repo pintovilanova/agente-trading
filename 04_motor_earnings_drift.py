@@ -1,6 +1,30 @@
 # ===================================================================
 # SISTEMA DE TRADING INSTITUCIONAL - MOTOR DE EARNINGS DRIFT (PEAD)
 # ===================================================================
+# Descrição Geral:
+# Este script opera como um "Caçador de Earnings Drift" (PEAD - Post-Earnings 
+# Announcement Drift) automatizado na nuvem via GitHub Actions. O seu 
+# objetivo é varrer a Watchlist em busca de empresas que tenham reportado 
+# resultados recentemente (últimos 5 dias), filtrando aquelas que apresentem 
+# uma explosão de preço e volume (salto inicial >= 2.0% e RVOL >= 2.0), 
+# calculando o dimensionamento de risco institucional (Método Carver) e 
+# enviando um relatório estruturado por email para triagem de uma IA.
+#
+# Pilares Técnicos e Arquitetura de Execução:
+# 1. Travas de Segurança e Calendário:
+#    - Trava de Fim de Semana: Aborta automaticamente aos sábados e domingos.
+# 2. Gestão de Risco Institucional (Target Volatility - Método Carver):
+#    - Orçamento de flutuação diária calculado sobre o capital total da conta 
+#      ($10,400.00) com um alvo de volatilidade anual conservador (5%).
+#    - Dimensionamento dinâmico baseado no ATR para nivelar o risco real.
+# 3. Anomalia e Filtro PEAD:
+#    - Validação de datas de resultados recentes via yfinance.
+#    - Confirmação de momento de continuação por volume institucional (RVOL).
+# 4. Integração Cloud & LLM:
+#    - Sincronização bidirecional com Google Sheets via Webhook (Aba: Earnings Drift).
+#    - Gravação local ("comboio_earnings_temp.txt") e envio de email com prompt 
+#      anti-alucinação para auditoria autónoma por IA.
+# ===================================================================
 
 import pandas as pd
 import yfinance as yf
@@ -73,7 +97,6 @@ def enviar_email(conteudo):
         msg = MIMEMultipart()
         msg['From'] = EMAIL_USER
         msg['To'] = EMAIL_USER
-        # Assunto correspondente ao esperado pelo Orquestrador (US - EARNINGS DRIFT)
         msg['Subject'] = "tradingRelatorioIA US - EARNINGS DRIFT"
         
         msg.attach(MIMEText(conteudo, 'plain', 'utf-8'))
@@ -277,7 +300,7 @@ def executar_motor():
         for linha in comboio_ia:
             bloco_texto_ia += linha + "\n"
 
-    # Gravação local com o nome exato esperado pelo Orquestrador IA
+    # Gravação local correta para o Orquestrador IA
     with open("comboio_earnings_temp.txt", "w", encoding="utf-8") as f:
         f.write(bloco_texto_ia)
 
