@@ -1,13 +1,13 @@
-name: 06 Motor Fast Trend Carver (Aceleração)
+name: 06 Motor Fast Trend Carver + IA Predador
 
 on:
   schedule:
     # Corre de segunda a sexta às 14:00 UTC (Aproximadamente 15:00 em Lisboa)
     - cron: '0 14 * * 1-5'
-  workflow_dispatch: # Este comando permite-te ir ao GitHub e clicar no botão "Run workflow" para forçar uma execução manual a qualquer momento!
+  workflow_dispatch: # Permite execução manual a qualquer momento no GitHub
 
 jobs:
-  executar_motor_carver:
+  executar_fluxo_carver:
     runs-on: ubuntu-latest
 
     steps:
@@ -19,15 +19,24 @@ jobs:
       with:
         python-version: '3.10'
 
-    - name: Instalar Dependências Matemáticas e de Rede
+    - name: Instalar Dependências (Python e Google GenAI)
       run: |
         python -m pip install --upgrade pip
-        pip install pandas yfinance pandas_ta numpy requests
+        pip install pandas yfinance pandas_ta numpy requests google-genai
 
-    - name: Disparar o Caçador Carver (06_motor_fast_trend_carver.py)
+    - name: 1. Executar o Motor Matemático Carver (06_motor_fast_trend_carver.py)
       env:
         WEBHOOK_URL: ${{ secrets.WEBHOOK_URL }}
         EMAIL_USER: ${{ secrets.EMAIL_USER }}
         EMAIL_PASS: ${{ secrets.EMAIL_PASS }}
       run: |
         python 06_motor_fast_trend_carver.py
+
+    - name: 2. Executar o Agente Orquestrador IA (Gemini Audit)
+      env:
+        GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+        EMAIL_USER: ${{ secrets.EMAIL_USER }}
+        EMAIL_PASS: ${{ secrets.EMAIL_PASS }}
+      run: |
+        # Substitui '00_orquestrador_ia.py' pelo nome exato do teu script do Agente AI se for diferente
+        python 02_agente_gemini.py
