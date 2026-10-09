@@ -44,7 +44,7 @@ VOLATILIDADE_ALVO_DIARIA_USD = (CAPITAL_TOTAL_CONTA * ALVO_VOLATILIDADE_ANUAL) /
 # 2. FUNÇÕES DE REDE
 # ===================================================================
 def buscar_watchlist():
-    print("A carregar a Watchlist a partir do Google Sheets...")
+    print("A carregar a Watchlist e Estados a partir do Google Sheets...")
     if not WEBHOOK_URL: 
         print("[ERRO] WEBHOOK_URL não configurado.")
         return []
@@ -80,9 +80,9 @@ def enviar_email_bruto(conteudo):
         print(f"[ERRO] Falha ao enviar email: {e}")
 
 # ===================================================================
-# 3. MOTOR MATEMÁTICO: CÁLCULO NATIVO (SEM DEPENDÊNCIAS EXTERNAS)
+# 3. MOTOR MATEMÁTICO: CÁLCULO NATIVO
 # ===================================================================
-def analisar_tendencia_carver(ticker, nome_empresa, setor):
+def calcular_indicadores_tecnicos(ticker):
     try:
         df = yf.download(ticker, period="1y", interval="1d", progress=False)
         if df.empty or len(df) < 50:
@@ -91,11 +91,9 @@ def analisar_tendencia_carver(ticker, nome_empresa, setor):
         if isinstance(df.columns, pd.MultiIndex):
             df.columns = df.columns.droplevel(1)
 
-        # Cálculo nativo de EMAs
         df['EMA_8'] = df['Close'].ewm(span=8, adjust=False).mean()
         df['EMA_32'] = df['Close'].ewm(span=32, adjust=False).mean()
 
-        # Cálculo nativo do ATR (Average True Range de 36 períodos)
         high = df['High']
         low = df['Low']
         close = df['Close']
@@ -107,56 +105,76 @@ def analisar_tendencia_carver(ticker, nome_empresa, setor):
         tr = pd.concat([tr1, tr2, tr3], axis=1).max(axis=1)
         df['ATR_36'] = tr.rolling(window=36).mean()
 
-        ultimo_dia = df.iloc[-1]
-        preco = float(ultimo_dia['Close'])
-        ema8 = float(ultimo_dia['EMA_8'])
-        ema32 = float(ultimo_dia['EMA_32'])
-        atr36 = float(ultimo_dia['ATR_36'])
-
-        if pd.isna(ema8) or pd.isna(ema32) or pd.isna(atr36) or atr36 == 0:
-            return None
-
-        # -------------------------------------------------------------
-        # MATEMÁTICA DA CONVICÇÃO (CARVER)
-        # -------------------------------------------------------------
-        diferenca_bruta = ema8 - ema32
-        forecast_carver = (diferenca_bruta / atr36) * 5.0
-        
-        if forecast_carver < 10.0:
-            return None
-
-        multiplicador = min(forecast_carver / 10.0, 2.0)
-        estado = "FAST TREND - Carver Momentum"
-        entrada = round(preco, 2)
-        stop_loss = round(entrada - (atr36 * 1.5), 2)
-        alvo_tp = round(entrada + ((entrada - stop_loss) * 2.5), 2)
-        
-        qtd_bruta = (VOLATILIDADE_ALVO_DIARIA_USD / atr36) * multiplicador
-        qtd_acoes = round(qtd_bruta, 2)
-        val_calc = entrada * qtd_acoes
-        valor_investir = f"~{val_calc:.2f} USD"
-
-        def limpa(v):
-            return round(float(v), 2)
-
-        linha_comboio = (
-            f"{ticker},Nome: {nome_empresa},Setor: {setor},Preço: {limpa(preco)},"
-            f"EMA8: {limpa(ema8)},EMA32: {limpa(ema32)},ATR36: {limpa(atr36)},"
-            f"Forecast: {limpa(forecast_carver)},Multiplicador: x{limpa(multiplicador)},"
-            f"Estado: {estado},Entrada: {limpa(entrada)},Stop: {limpa(stop_loss)},"
-            f"Take-Profit: {limpa(alvo_tp)},Qtd: {qtd_acoes},ValorInvestir: {valor_investir},"
-            f"Data: {datetime.now(ZoneInfo('Europe/Lisbon')).strftime('%d/%m/%Y %H:%M:%S')}"
-        )
-
+        ultimo = df.iloc[-1]
         return {
-            "ticker": ticker,
-            "forecast": forecast_carver,
-            "comboio_str": linha_comboio
+            "preco": float(ultimo['Close']),
+            "ema8": float(ultimo['EMA_8']),
+            "ema32": float(ultimo['EMA_32']),
+            "atr36": float(ultimo['ATR_36'])
         }
-
     except Exception as e:
-        print(f"[ERRO] Falha ao processar {ticker}: {e}")
+        print(f"[ERRO] Falha ao descarregar dados para {ticker}: {e}")
         return None
+
+def analisar_tendencia_carver(ticker, nome_empresa, setor):
+    ind = calcular_indicadores_tecnicos(ticker)
+    if not ind: return None
+    
+    preco, ema8, ema32, atr36 = ind['preco'], ind['ema8'], ind['ema32'], ind['atr36']
+    if pd.isna(ema8) or pd.isna(ema32) or pd.isna(atr36) or atr36 == 0:
+        return None
+
+    diferenca_bruta = ema8 - ema32
+    forecast_carver = (diferenca_bruta / atr36) * 5.0
+    
+    if forecast_carver < 10.0:
+        return None
+
+    multiplicador = min(forecast_carver / 10.0, 2.0)
+    estado_str = "FAST TREND - Carver Momentum"
+    entrada = round(preco, 2)
+    stop_loss = round(entrada - (atr36 * 1.5), 2)
+    alvo_tp = round(entrada + ((entrada - stop_loss) * 2.5), 2)
+    
+    qtd_bruta = (VOLATILIDADE_ALVO_DIARIA_USD / atr36) * multiplicador
+    qtd_acoes = round(qtd_bruta, 2)
+    val_calc = entrada * qtd_acoes
+    valor_investir = f"~{val_calc:.2f} USD"
+
+    def limpa(v): return round(float(v), 2)
+
+    linha_comboio = (
+        f"{ticker},Nome: {nome_empresa},Setor: {setor},Preço: {limpa(preco)},"
+        f"EMA8: {limpa(ema8)},EMA32: {limpa(ema32)},ATR36: {limpa(atr36)},"
+        f"Forecast: {limpa(forecast_carver)},Multiplicador: x{limpa(multiplicador)},"
+        f"Estado: {estado_str},Entrada: {limpa(entrada)},Stop: {limpa(stop_loss)},"
+        f"Take-Profit: {limpa(alvo_tp)},Qtd: {qtd_acoes},ValorInvestir: {valor_investir},"
+        f"Data: {datetime.now(ZoneInfo('Europe/Lisbon')).strftime('%d/%m/%Y %H:%M:%S')}"
+    )
+
+    return {
+        "ticker": ticker,
+        "forecast": forecast_carver,
+        "comboio_str": linha_comboio
+    }
+
+def monitorizar_posicao_ativa(ticker, nome_empresa, status_atual):
+    ind = calcular_indicadores_tecnicos(ticker)
+    if not ind: return None
+    
+    preco, ema8, ema32, atr36 = ind['preco'], ind['ema8'], ind['ema32'], ind['atr36']
+    
+    # Cálculo dinâmico do Trailing Stop sugerido baseado na volatilidade atual (1.5 * ATR abaixo do preço atual)
+    trailing_stop_sugerido = round(preco - (atr36 * 1.5), 2)
+    diferenca_bruta = ema8 - ema32
+    forecast_atual = (diferenca_bruta / atr36) * 5.0 if atr36 > 0 else 0
+
+    linha_monitorizacao = (
+        f"📌 [POSIÇÃO ATIVA - {status_atual}] {ticker} ({nome_empresa}) | "
+        f"Preço Atual: {preco:.2f} | EMA8: {ema8:.2f} | EMA32: {ema32:.2f} | "
+        f"Forecast Atual: {forecast_atual:.2f} | 🛑 Novo Trailing Stop Sugerido: {trailing_stop_sugerido} (ATR: {atr36:.2f})"
+    )
+    return linha_monitorizacao
 
 # ===================================================================
 # 4. EXECUÇÃO PRINCIPAL
@@ -167,16 +185,25 @@ def executar_motor():
         sys.exit(1)
         
     ativos_acionados = []
+    posicoes_em_gestao = []
+
     for ativo_info in ativos:
         ticker = ativo_info.get("ticker")
         if not ticker or ticker == "#N/A": continue
         
-        res = analisar_tendencia_carver(
-            ticker, 
-            ativo_info.get("nome", "N/A"), 
-            ativo_info.get("setor", "Desconhecido")
-        )
-        
+        status = str(ativo_info.get("status", "")).strip().upper()
+        nome = ativo_info.get("nome", "N/A")
+        setor = ativo_info.get("setor", "Desconhecido")
+
+        # SE JÁ ESTIVER ATIVO (ATIVA ou ATIVA_FAST), IGNORA PARA NOVOS SINAIS E MONITORIZA O TRAILING
+        if status in ["ATIVA", "ATIVA_FAST"]:
+            monitorizacao = monitorizar_posicao_ativa(ticker, nome, status)
+            if monitorizacao:
+                posicoes_em_gestao.append(monitorizacao)
+            continue
+
+        # CASO CONTRÁRIO, ANALISA PARA NOVO SINAL DE ENTRADA
+        res = analisar_tendencia_carver(ticker, nome, setor)
         if res:
             ativos_acionados.append(res)
             
@@ -184,25 +211,21 @@ def executar_motor():
 
     prompt_ia = (
         "MODO ACELERADOR ESTATÍSTICO (CARVER FAST TREND)\n"
-        "O teu mandato é auditar as entradas geradas pelo sistema dinâmico de Robert Carver. "
-        "A matemática já validou que estes ativos estão a expandir-se mais rápido do que a sua volatilidade base.\n\n"
-        "🚨 REGRAS DE OURO (ANTI-ALUCINAÇÃO) 🚨\n"
-        "1. ZERO CRIATIVIDADE: Não inventes razões fundamentais para a subida.\n"
-        "2. A AUDITORIA: Verifica se o Forecast reportado é superior a 10. Quanto mais alto, mais agressivo é o multiplicador de risco aplicado.\n\n"
-        "Estrutura Visual Obrigatória:\n"
-        "🎯 [TICKER] - [Nome da Empresa] ([Setor])\n"
-        "- 🏄‍♂️ ÍMPETO TENDENCIAL: [Lê o campo 'Forecast' e 'Multiplicador'].\n"
-        "- ⚙️ TÁTICA: CARVER FAST TREND. Deixar o mercado ditar a saída pelo Trailing Stop.\n"
-        "- 🔢 DADOS EXATOS: Entrada: X | Stop: X | TP: X | Qtd: X | Valor a Investir: X\n"
-        "- 📋 REFERÊNCIA: [Linha do Comboio exata]\n"
+        "O teu mandato é auditar as entradas geradas e monitorizar as posições ativas do portefólio.\n"
     )
     
     bloco_texto_ia = f"📊 RELATÓRIO DE DADOS BRUTOS - FAST TREND CARVER 🏄‍♂️\n\n{prompt_ia}\n\n--------------------------------------------------\n"
 
+    if posicoes_em_gestao:
+        bloco_texto_ia += "GESTÃO DE POSIÇÕES ATIVAS (TRAILING STOP SUGERIDO):\n\n"
+        for pos in posicoes_em_gestao:
+            bloco_texto_ia += pos + "\n"
+        bloco_texto_ia += "\n--------------------------------------------------\n"
+
     if not ativos_acionados:
-        bloco_texto_ia += "[MERCADO LENTO] - Nenhum ativo apresenta aceleração matemática (Forecast > 10) superior ao ruído base.\n"
+        bloco_texto_ia += "[MERCADO LENTO] - Nenhum novo ativo apresenta aceleração matemática (Forecast > 10).\n"
     else:
-        bloco_texto_ia += "DADOS DOS ATIVOS ATIVADOS (COMBOIO):\n\n"
+        bloco_texto_ia += "NOVOS DADOS DE ENTRADA (COMBOIO):\n\n"
         for item in ativos_acionados:
             bloco_texto_ia += item["comboio_str"] + "\n"
 
