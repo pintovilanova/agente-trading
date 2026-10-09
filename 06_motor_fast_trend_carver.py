@@ -191,7 +191,7 @@ def executar_motor():
     ativos_acionados = []
     posicoes_em_gestao = []
 
-    # 1. Analisa novos sinais (ignorando ativos que já estão nas posições ativas)
+    # 1. Analisa novos sinais (ignora qualquer ativo que já esteja no dicionário de posições ativas)
     for ativo_info in ativos:
         ticker = ativo_info.get("ticker")
         if not ticker or ticker == "#N/A": continue
@@ -206,9 +206,13 @@ def executar_motor():
         if res:
             ativos_acionados.append(res)
             
-    # 2. Processa posições ativas para monitorização de trailing stop
+    # 2. Processa posições ativas APENAS se o estado for ATIVA_FAST (ignora as 'ATIVA' de outros scripts)
     for ticker, dados_pos in posicoes_ativas_dict.items():
-        status_atual = dados_pos.get("status", "ATIVA")
+        status_atual = dados_pos.get("status", "").strip().upper()
+        
+        if status_atual != "ATIVA_FAST":
+            continue
+            
         nome = dados_pos.get("nome", ticker)
         monitorizacao = monitorizar_posicao_ativa(ticker, nome, status_atual, dados_pos)
         if monitorizacao:
