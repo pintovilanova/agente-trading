@@ -46,24 +46,19 @@ VOLATILIDADE_ALVO_DIARIA_USD = (CAPITAL_TOTAL_CONTA * ALVO_VOLATILIDADE_ANUAL) /
 def buscar_dados_completos():
     print("A carregar a Watchlist e Posições Ativas a partir do Google Sheets...")
     if not WEBHOOK_URL: 
-        print("[ERRO CRÍTICO] A variável de ambiente WEBHOOK_URL não está definida no GitHub Actions!")
+        print("[ERRO] WEBHOOK_URL não configurado.")
         return [], {}
     try:
         resp = requests.get(WEBHOOK_URL)
-        print(f"[DEBUG] Código de resposta HTTP do Webhook: {resp.status_code}")
-        print(f"[DEBUG] Conteúdo bruto recebido: {resp.text[:500]}") # Imprime os primeiros 500 caracteres para inspeção
-        
         if resp.status_code == 200:
             dados = resp.json()
             if isinstance(dados, dict):
                 return dados.get("ativos", []), dados.get("posicoesAtivas", {})
             elif isinstance(dados, list):
                 return dados, {}
-        else:
-            print(f"[ERRO] O Webhook retornou o código HTTP {resp.status_code}")
         return [], {}
     except Exception as e:
-        print(f"[ERRO CRÍTICO] Falha ao ligar ao Webhook: {e}")
+        print(f"[ERRO CRÍTICO] Sheets: {e}")
         return [], {}
 
 def enviar_email_bruto(conteudo):
@@ -176,19 +171,18 @@ def monitorizar_posicao_ativa(ticker, nome_empresa, status_atual, dados_posicao)
     quantidade = dados_posicao.get("quantidade", "N/A")
     stop_atual_registado = dados_posicao.get("stopAtual", None)
     
-    # REGRA DE OURO DO TRAILING STOP: O stop nunca desce, só sobe (ou mantém-se)
+    # REGRA DE OURO BLINDADA: O stop nunca desce, só sobe ou mantém-se
     stop_final = trailing_stop_calculado
-    nota_instrucao = "Atualizar para o novo valor."
+    instrucao_risco = f"Atualizar stop para {trailing_stop_calculado}"
     
     if stop_atual_registado is not None and str(stop_atual_registado).strip() != "":
         try:
             stop_atual_val = float(stop_atual_registado)
             if stop_atual_val >= trailing_stop_calculado:
-                # O stop atual já está mais alto, mantemos o atual por segurança!
                 stop_final = stop_atual_val
-                nota_instrucao = f"MANTER o Stop atual ({stop_atual_val}) em alta (o cálculo matemático de hoje ({trailing_stop_calculado}) é inferior, aplicando-se a regra de inércia do trailing stop)."
+                instrucao_risco = f"MANTER o Stop atual em {stop_atual_val} (o cálculo matemático de hoje ({trailing_stop_calculado}) é inferior, aplicando-se a regra de inércia do trailing stop)."
             else:
-                nota_instrucao = f"SUBIR o Stop do valor anterior ({stop_atual_val}) para o novo patamar ({trailing_stop_calculado})."
+                instrucao_risco = f"SUBIR o Stop do valor anterior ({stop_atual_val}) para o novo patamar ({trailing_stop_calculado})."
         except ValueError:
             pass
 
@@ -198,8 +192,9 @@ def monitorizar_posicao_ativa(ticker, nome_empresa, status_atual, dados_posicao)
     linha_monitorizacao = (
         f"📌 [POSIÇÃO ATIVA - {status_atual}] {ticker} ({nome_empresa}) | "
         f"Qtd: {quantidade} | Entrada: {preco_entrada} | Preço Atual: {preco:.2f} | "
-        f"Stop Atual Registado: {stop_atual_registado} | Novo Stop Sugerido: {stop_final} | "
-        f"Instrução: {nota_instrucao} (ATR: {atr36:.2f})"
+        f"EMA8: {ema8:.2f} | EMA32: {ema32:.2f} | Forecast: {forecast_atual:.2f} | "
+        f"Stop Atual: {stop_atual_registado} | Novo Stop Sugerido: {stop_final} | "
+        f"🛑 AÇÃO: {instrucao_risco} (ATR: {atr36:.2f})"
     )
     return linha_monitorizacao
 
@@ -246,6 +241,8 @@ def executar_motor():
     prompt_ia = (
         "MODO ACELERADOR ESTATÍSTICO (CARVER FAST TREND)\n"
         "O teu mandato é auditar as entradas geradas e monitorizar as posições ativas do portefólio.\n"
+        "ATENÇÃO À GESTÃO DE RISCO: Respeita estritamente a regra de inércia do trailing stop nas posições ativas "
+        "(o stop nunca desce, se o stop atual registado já for superior ao novo cálculo sugerido, a instrução deve ser obrigatoriamente manter o valor atual).\n"
     )
     
     bloco_texto_ia = f"📊 RELATÓRIO DE DADOS BRUTOS - FAST TREND CARVER 🏄‍♂️\n\n{prompt_ia}\n\n--------------------------------------------------\n"
