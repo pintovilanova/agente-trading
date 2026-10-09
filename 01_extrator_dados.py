@@ -410,7 +410,7 @@ Contexto: O teu mandato principal é a PRESERVAÇÃO DE CAPITAL e a gestão de r
 Regras Operacionais Estritas de Triagem, Carteira e Ataque:
 
 1. AVALIAÇÃO MACRO E ADAPTAÇÃO DE RISCO: Olha primeiro para a lista completa. Se a esmagadora maioria dos ativos estiver em 'Aguardar Recuo' (ADX < 25 e baixo RVOL), o panorama geral é considerado de Alto Risco. 
-   - Se o panorama for de Alto Risco E NÃO houver ativos em alerta, inicia o e-mail com [MERCADO ESTAGNADO - POSTURA DEFENSIVA] e salta para o passo 7.
+   - Se o panorama for de Alto Risco E NÃO houver ativos em alerta, inicia o e-mail com [MERCADO ESTAGNADO - POSTURA DEFENSIVA], mas passa obrigatoriamente pelo Passo 6 para auditar a carteira ativa, e só depois conclui.
    - Se o panorama for de Alto Risco, MAS existirem ativos em 'Forca Consolidada', 'Ignicao EMA9' ou 'Alerta Iminente', analisa-os, mas emite obrigatoriamente a bandeira 🚩 [AMBIENTE MACRO HOSTIL - EXIGIDO LOTE REDUZIDO A 50%].
 
 2. OS ALVOS (3 PRINCIPAIS + 2 SUPLENTES): Seleciona o Top 3 absoluto das melhores oportunidades para ataque. Se existirem mais configurações de elite, podes adicionar até 2 ativos extra classificados estritamente como 'SUPLENTE' para o caso de os principais abortarem na abertura. Se um ativo detetar EARNINGS = PERIGO, ele é sumariamente desclassificado.
