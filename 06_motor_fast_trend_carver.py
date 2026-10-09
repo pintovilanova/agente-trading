@@ -43,21 +43,23 @@ VOLATILIDADE_ALVO_DIARIA_USD = (CAPITAL_TOTAL_CONTA * ALVO_VOLATILIDADE_ANUAL) /
 # ===================================================================
 # 2. FUNÇÕES DE REDE
 # ===================================================================
-def buscar_watchlist():
-    print("A carregar a Watchlist e Estados a partir do Google Sheets...")
+def buscar_dados_completos():
+    print("A carregar a Watchlist e Posições Ativas a partir do Google Sheets...")
     if not WEBHOOK_URL: 
         print("[ERRO] WEBHOOK_URL não configurado.")
-        return []
+        return [], {}
     try:
         resp = requests.get(WEBHOOK_URL)
         if resp.status_code == 200:
             dados = resp.json()
-            return dados.get("ativos", []) if isinstance(dados, dict) else dados
-        else:
-            return []
+            if isinstance(dados, dict):
+                return dados.get("ativos", []), dados.get("posicoesAtivas", {})
+            elif isinstance(dados, list):
+                return dados, {}
+        return [], {}
     except Exception as e:
         print(f"[ERRO CRÍTICO] Sheets: {e}")
-        return []
+        return [], {}
 
 def enviar_email_bruto(conteudo):
     print("\nA enviar o relatório de dados brutos do Carver para o Agente IA via email...")
@@ -158,21 +160,23 @@ def analisar_tendencia_carver(ticker, nome_empresa, setor):
         "comboio_str": linha_comboio
     }
 
-def monitorizar_posicao_ativa(ticker, nome_empresa, status_atual):
+def monitorizar_posicao_ativa(ticker, nome_empresa, status_atual, dados_posicao):
     ind = calcular_indicadores_tecnicos(ticker)
     if not ind: return None
     
     preco, ema8, ema32, atr36 = ind['preco'], ind['ema8'], ind['ema32'], ind['atr36']
-    
-    # Cálculo dinâmico do Trailing Stop sugerido baseado na volatilidade atual (1.5 * ATR abaixo do preço atual)
     trailing_stop_sugerido = round(preco - (atr36 * 1.5), 2)
+    
+    preco_entrada = dados_posicao.get("precoEntrada", "N/A")
+    quantidade = dados_posicao.get("quantidade", "N/A")
     diferenca_bruta = ema8 - ema32
     forecast_atual = (diferenca_bruta / atr36) * 5.0 if atr36 > 0 else 0
 
     linha_monitorizacao = (
         f"📌 [POSIÇÃO ATIVA - {status_atual}] {ticker} ({nome_empresa}) | "
-        f"Preço Atual: {preco:.2f} | EMA8: {ema8:.2f} | EMA32: {ema32:.2f} | "
-        f"Forecast Atual: {forecast_atual:.2f} | 🛑 Novo Trailing Stop Sugerido: {trailing_stop_sugerido} (ATR: {atr36:.2f})"
+        f"Qtd: {quantidade} | Entrada: {preco_entrada} | Preço Atual: {preco:.2f} | "
+        f"EMA8: {ema8:.2f} | EMA32: {ema32:.2f} | Forecast: {forecast_atual:.2f} | "
+        f"🛑 Novo Trailing Stop Sugerido: {trailing_stop_sugerido} (ATR: {atr36:.2f})"
     )
     return linha_monitorizacao
 
@@ -180,33 +184,36 @@ def monitorizar_posicao_ativa(ticker, nome_empresa, status_atual):
 # 4. EXECUÇÃO PRINCIPAL
 # ===================================================================
 def executar_motor():
-    ativos = buscar_watchlist()
-    if not ativos:
+    ativos, posicoes_ativas_dict = buscar_dados_completos()
+    if not ativos and not posicoes_ativas_dict:
         sys.exit(1)
         
     ativos_acionados = []
     posicoes_em_gestao = []
 
+    # 1. Analisa novos sinais (ignorando ativos que já estão nas posições ativas)
     for ativo_info in ativos:
         ticker = ativo_info.get("ticker")
         if not ticker or ticker == "#N/A": continue
         
-        status = str(ativo_info.get("status", "")).strip().upper()
         nome = ativo_info.get("nome", "N/A")
         setor = ativo_info.get("setor", "Desconhecido")
 
-        # SE JÁ ESTIVER ATIVO (ATIVA ou ATIVA_FAST), IGNORA PARA NOVOS SINAIS E MONITORIZA O TRAILING
-        if status in ["ATIVA", "ATIVA_FAST"]:
-            monitorizacao = monitorizar_posicao_ativa(ticker, nome, status)
-            if monitorizacao:
-                posicoes_em_gestao.append(monitorizacao)
+        if ticker in posicoes_ativas_dict:
             continue
 
-        # CASO CONTRÁRIO, ANALISA PARA NOVO SINAL DE ENTRADA
         res = analisar_tendencia_carver(ticker, nome, setor)
         if res:
             ativos_acionados.append(res)
             
+    # 2. Processa posições ativas para monitorização de trailing stop
+    for ticker, dados_pos in posicoes_ativas_dict.items():
+        status_atual = dados_pos.get("status", "ATIVA")
+        nome = dados_pos.get("nome", ticker)
+        monitorizacao = monitorizar_posicao_ativa(ticker, nome, status_atual, dados_pos)
+        if monitorizacao:
+            posicoes_em_gestao.append(monitorizacao)
+
     ativos_acionados = sorted(ativos_acionados, key=lambda k: k['forecast'], reverse=True)
 
     prompt_ia = (
@@ -217,7 +224,7 @@ def executar_motor():
     bloco_texto_ia = f"📊 RELATÓRIO DE DADOS BRUTOS - FAST TREND CARVER 🏄‍♂️\n\n{prompt_ia}\n\n--------------------------------------------------\n"
 
     if posicoes_em_gestao:
-        bloco_texto_ia += "GESTÃO DE POSIÇÕES ATIVAS (TRAILING STOP SUGERIDO):\n\n"
+        bloco_texto_ia += "GESTÃO DE POSIÇÕES ATIVAS (TRAILING STOP SUGERIDO & QUANTIDADES):\n\n"
         for pos in posicoes_em_gestao:
             bloco_texto_ia += pos + "\n"
         bloco_texto_ia += "\n--------------------------------------------------\n"
