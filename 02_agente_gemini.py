@@ -78,10 +78,15 @@ def extrair_dados_do_market():
         ficheiro = "comboio_earnings_temp.txt"
         assunto_alvo = "tradingRelatorioIA US - EARNINGS DRIFT"
         tag_mercado = "US-EARNINGS"
+    elif os.path.exists("comboio_carver_temp.txt"):
+        ficheiro = "comboio_carver_temp.txt"
+        assunto_alvo = "tradingRelatorioIA US - FAST TREND CARVER"
+        tag_mercado = "US-CARVER"
     else:
         ficheiro = "comboio_temp.txt"
         assunto_alvo = "tradingRelatorioIA US"
         tag_mercado = "US"
+    
 
     print(f"A processar mercado/estratégia: {tag_mercado} (Ficheiro: {ficheiro})...")
 
@@ -189,6 +194,8 @@ def enviar_email_resposta(relatorio_texto, tag_mercado):
         assunto_email = "🧲 IA Predador: Relatório Connors-Chan 🏹"
     elif tag_mercado == "US-EARNINGS":
         assunto_email = "📊 IA Predador: Relatório Earnings Drift 🚀"
+    elif tag_mercado == "US-CARVER":
+        assunto_email = "🏄‍♂️ IA Predador: Relatório Carver Fast Trend 🚀"
     else:
         assunto_email = "🦅 IA Predador: Relatório Tático WALL STREET 🗽"
 
