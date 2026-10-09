@@ -73,7 +73,8 @@ def enviar_email(conteudo):
         msg = MIMEMultipart()
         msg['From'] = EMAIL_USER
         msg['To'] = EMAIL_USER
-        msg['Subject'] = "📊 tradingRelatorioIA US - EARNINGS DRIFT 🚀"
+        # Assunto correspondente ao esperado pelo Orquestrador (US - EARNINGS DRIFT)
+        msg['Subject'] = "tradingRelatorioIA US - EARNINGS DRIFT"
         
         msg.attach(MIMEText(conteudo, 'plain', 'utf-8'))
         
@@ -275,6 +276,10 @@ def executar_motor():
         bloco_texto_ia += "DADOS DOS ATIVOS ATIVADOS (COMBOIO):\n\n"
         for linha in comboio_ia:
             bloco_texto_ia += linha + "\n"
+
+    # Gravação local com o nome exato esperado pelo Orquestrador IA
+    with open("comboio_earnings_temp.txt", "w", encoding="utf-8") as f:
+        f.write(bloco_texto_ia)
 
     enviar_email(bloco_texto_ia)
 
