@@ -19,11 +19,6 @@ jobs:
       with:
         python-version: '3.10'
 
-    - name: Instalar Dependências (Python e Google GenAI)
-      run: |
-        python -m pip install --upgrade pip
-        pip install pandas yfinance pandas_ta numpy requests google-genai
-
     - name: Instalar Dependências Matemáticas e de Rede
       run: |
         python -m pip install --upgrade pip
@@ -44,5 +39,4 @@ jobs:
         EMAIL_USER: ${{ secrets.EMAIL_USER }}
         EMAIL_PASS: ${{ secrets.EMAIL_PASS }}
       run: |
-        # Substitui '00_orquestrador_ia.py' pelo nome exato do teu script do Agente AI se for diferente
         python 02_agente_gemini.py
