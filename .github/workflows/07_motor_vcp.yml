@@ -1,0 +1,37 @@
+name: 07 - 🚀 Motor VCP Breakout (Squeeze)
+
+on:
+  # 1. Permite executar o script manualmente a qualquer momento (Botão "Run workflow")
+  workflow_dispatch:
+
+  # 2. Execução Automática (Cron Job): 
+  # Executa de Segunda (1) a Sexta (5) às 22:30 UTC.
+  # Em Lisboa será às 22h30 (Inverno) ou 23h30 (Verão) - perfeito para dados pós-fecho.
+  schedule:
+    - cron: '30 22 * * 1-5'
+
+jobs:
+  run-vcp-engine:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: 📥 Fazer o Checkout do Código
+        uses: actions/checkout@v4
+
+      - name: 🐍 Configurar o Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.10'
+
+      - name: 📦 Instalar Dependências
+        run: |
+          python -m pip install --upgrade pip
+          pip install pandas yfinance requests
+
+      - name: ⚙️ Executar Motor VCP Breakout
+        env:
+          # Estas variáveis têm de estar configuradas nos Secrets do GitHub
+          WEBHOOK_URL: ${{ secrets.WEBHOOK_URL }}
+          EMAIL_USER: ${{ secrets.EMAIL_USER }}
+          EMAIL_PASS: ${{ secrets.EMAIL_PASS }}
+        run: python 07_motor_vcp_breakout.py
