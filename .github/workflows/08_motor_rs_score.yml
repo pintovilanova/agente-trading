@@ -32,7 +32,7 @@ jobs:
           WEBHOOK_URL: ${{ secrets.WEBHOOK_URL }}
           EMAIL_USER: ${{ secrets.EMAIL_USER }}
           EMAIL_PASS: ${{ secrets.EMAIL_PASS }}
-        run: python 09_motor_rs_score.py
+        run: python 08_motor_rs_score.py
 
       - name: 🤖 Executar Agente IA (Relatório CIO de Liderança)
         env:
