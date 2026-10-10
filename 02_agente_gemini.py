@@ -86,6 +86,10 @@ def extrair_dados_do_market():
         ficheiro = "comboio_vcp_temp.txt"
         assunto_alvo = "tradingRelatorioIA US - VCP BREAKOUT SQUEEZE"
         tag_mercado = "US-VCP"
+    elif os.path.exists("comboio_rs_temp.txt"):
+        ficheiro = "comboio_rs_temp.txt"
+        assunto_alvo = "tradingRelatorioIA US - RS SCORE"
+        tag_mercado = "US-RS-SCORE"
     else:
         ficheiro = "comboio_temp.txt"
         assunto_alvo = "tradingRelatorioIA US"
@@ -201,6 +205,8 @@ def enviar_email_resposta(relatorio_texto, tag_mercado):
         assunto_email = "🏄‍♂️ IA Predador: Relatório Carver Fast Trend 🚀"
     elif tag_mercado == "US-VCP":
         assunto_email = "🗜️ IA Predador: Relatório VCP Breakout Squeeze 🎯"
+    elif tag_mercado == "US-RS-SCORE":
+        assunto_email = "🧭 IA Predador: Relatório de Força Relativa e Setores (RS Score) 👑"    
     else:
         assunto_email = "🦅 IA Predador: Relatório Tático WALL STREET 🗽"
 
