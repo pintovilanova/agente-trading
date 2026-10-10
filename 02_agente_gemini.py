@@ -13,7 +13,7 @@
 #    - Trava de Fim de Semana: Interrompe a execução aos sábados e domingos.
 # 2. Extração Inteligente com Fallback (Local + IMAP):
 #    - Deteção automática do mercado em análise com base nos ficheiros 
-#      de texto disponíveis (Europa, Pânico, Connors, Earnings ou Breakouts).
+#      de texto disponíveis (Europa, Pânico, Connors, Earnings, Carver ou VCP Breakouts).
 # 3. Mecanismo de Alta Disponibilidade e Fallback de Modelos de IA:
 #    - Sistema de re-tentativas com espera exponencial (Backoff) para lidar 
 #      com restrições de API ou erros de indisponibilidade (503 / 429).
@@ -82,12 +82,15 @@ def extrair_dados_do_market():
         ficheiro = "comboio_carver_temp.txt"
         assunto_alvo = "tradingRelatorioIA US - FAST TREND CARVER"
         tag_mercado = "US-CARVER"
+    elif os.path.exists("comboio_vcp_temp.txt"):
+        ficheiro = "comboio_vcp_temp.txt"
+        assunto_alvo = "tradingRelatorioIA US - VCP BREAKOUT SQUEEZE"
+        tag_mercado = "US-VCP"
     else:
         ficheiro = "comboio_temp.txt"
         assunto_alvo = "tradingRelatorioIA US"
         tag_mercado = "US"
     
-
     print(f"A processar mercado/estratégia: {tag_mercado} (Ficheiro: {ficheiro})...")
 
     if os.path.exists(ficheiro):
@@ -144,7 +147,7 @@ def analisar_com_ia(dados_mercado):
     espera_base = 15
     espera_maxima = 300
 
-    modelo_atual = 'gemini-3.6-flash'  # Corrigido para modelo suportado
+    modelo_atual = 'gemini-3.6-flash'
 
     for tentativa in range(tentativas):
         try:
@@ -196,6 +199,8 @@ def enviar_email_resposta(relatorio_texto, tag_mercado):
         assunto_email = "📊 IA Predador: Relatório Earnings Drift 🚀"
     elif tag_mercado == "US-CARVER":
         assunto_email = "🏄‍♂️ IA Predador: Relatório Carver Fast Trend 🚀"
+    elif tag_mercado == "US-VCP":
+        assunto_email = "🗜️ IA Predador: Relatório VCP Breakout Squeeze 🎯"
     else:
         assunto_email = "🦅 IA Predador: Relatório Tático WALL STREET 🗽"
 
