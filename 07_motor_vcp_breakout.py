@@ -223,7 +223,7 @@ def executar_motor():
 
     prompt_ia = """Atuas como Analista Quantitativo de Breakouts (Modelo Mark Minervini). O teu mandato é auditar ativos em fase de Squeeze (Contração de Volatilidade) preparados para explosão direcional.
 
-REGRAS ESTritas:
+REGRAS ESTRITAS:
 1. O ativo não deve ser comprado a mercado. Recomenda SEMPRE ordens pendentes "Buy Stop" no Gatilho de Compra estipulado.
 2. Destaca o facto do risco ser mínimo, dado que o Stop Loss está cravado na base da consolidação (caixote de 5 dias).
 3. Avalia o Rácio Risco/Recompensa.
@@ -231,9 +231,10 @@ REGRAS ESTritas:
 ESTRUTURA OBRIGATÓRIA:
 🎯 [TICKER] - [Nome da Empresa] ([Setor])
 - 🗜️ NÍVEL DE COMPRESSÃO: BBW a [X]% (Mola comprimida com seca de volume).
-- ⚙️ TÁTICA DE EXECUÇÃO: Colocar ordem Buy Stop em [Gatilho] para apanhar o breakout.
-- 🛡️ RISCO MICRO: Stop Físico em [Stop] (Abaixo da base de 5 dias).
+- ⚙️ TÁTICA DE EXECUÇÃO: Colocar ordem pendente Buy Stop em [Gatilho] para apanhar o breakout.
+- 🛡️ RISCO MICRO: Stop Físico cravado em [Stop] (Abaixo da base de 5 dias).
 - 🔢 DADOS: Alvo: [TP] | Qtd: [X] | Alocação: [Valor] USD.
+- 🔄 PASSAGEM DE TESTEMUNHO: Adiciona explicitamente o texto: "⚠️ ATENÇÃO: Assim que esta ordem for executada na corretora, altera imediatamente o estado no Google Sheets para 'ATIVA_FAST'. O Motor Carver assumirá automaticamente a gestão do Trailing Stop a partir daí."
 """
     
     bloco_texto_ia = f"📊 RELATÓRIO VCP BREAKOUT / SQUEEZE 🗜️\n\n{prompt_ia}\n\n--------------------------------------------------\n"
