@@ -1,12 +1,11 @@
 name: 07 - 🚀 Motor VCP Breakout (Squeeze)
 
 on:
-  # 1. Permite executar o script manualmente a qualquer momento (Botão "Run workflow")
+  # 1. Permite executar o script manualmente a qualquer momento
   workflow_dispatch:
 
   # 2. Execução Automática (Cron Job): 
-  # Executa de Segunda (1) a Sexta (5) às 22:30 UTC.
-  # Em Lisboa será às 22h30 (Inverno) ou 23h30 (Verão) - perfeito para dados pós-fecho.
+  # Executa de Segunda a Sexta às 22:30 UTC.
   schedule:
     - cron: '30 22 * * 1-5'
 
@@ -24,14 +23,22 @@ jobs:
           python-version: '3.10'
 
       - name: 📦 Instalar Dependências
+        # Adiciona a biblioteca do Google Gemini (ou openai, consoante o que usas no script 02)
         run: |
           python -m pip install --upgrade pip
-          pip install pandas yfinance requests
+          pip install pandas yfinance requests google-generativeai
 
-      - name: ⚙️ Executar Motor VCP Breakout
+      - name: ⚙️ Executar Motor VCP Breakout (Matemática)
         env:
-          # Estas variáveis têm de estar configuradas nos Secrets do GitHub
           WEBHOOK_URL: ${{ secrets.WEBHOOK_URL }}
           EMAIL_USER: ${{ secrets.EMAIL_USER }}
           EMAIL_PASS: ${{ secrets.EMAIL_PASS }}
         run: python 07_motor_vcp_breakout.py
+
+      - name: 🤖 Executar Agente IA (Relatório Final)
+        env:
+          # É fundamental passares a API Key para o Agente IA conseguir comunicar com o modelo
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }} 
+          EMAIL_USER: ${{ secrets.EMAIL_USER }}
+          EMAIL_PASS: ${{ secrets.EMAIL_PASS }}
+        run: python 02_agente_gemini.py
