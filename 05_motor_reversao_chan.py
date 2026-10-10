@@ -97,8 +97,13 @@ def enviar_email(conteudo):
 # ===================================================================
 # 3. MOTOR MATEMÁTICO: CONNORS-CHAN (RSI(2) + BANDAS DE BOLLINGER)
 # ===================================================================
-def analisar_connors_chan(ticker, nome_empresa, setor):
+def analisar_connors_chan(ativo_info):
     try:
+        ticker = ativo_info.get("ticker")
+        nome_empresa = ativo_info.get("nome", "N/A")
+        setor = ativo_info.get("setor", "Desconhecido")
+        rs_score = ativo_info.get("rs_score", "N/A")
+
         df = yf.download(ticker, period="1y", interval="1d", progress=False)
         if df.empty:
             return None
@@ -177,8 +182,21 @@ def analisar_connors_chan(ticker, nome_empresa, setor):
             if pd.isna(v) or v == "N/A": return "N/A"
             return round(float(v), 2)
 
+        # Análise contextual do RS Score (Coluna O)
+        try:
+            val_rs = float(rs_score)
+            if val_rs >= 80:
+                status_rs = "🔥 ELITE (RS >= 80 - Vento a Favor)"
+            elif val_rs >= 50:
+                status_rs = "⚖️ NEUTRO (RS 50-79 - Acompanha o Mercado)"
+            else:
+                status_rs = "⚠️ FRACO / LAGGARD (RS < 50 - Vento Contra)"
+        except ValueError:
+            status_rs = "❓ SEM DADO DE RS"
+
         linha_comboio = (
             f"{ticker},Nome: {nome_empresa},Setor: {setor},Preço: {limpa(preco)},"
+            f"RS Score: {rs_score} ({status_rs}),"
             f"BBLower: {limpa(bbl_inferior)},RSI2: {limpa(rsi_2)},"
             f"Estado: {estado},Entrada: {limpa(entrada)},"
             f"Stop: {limpa(stop_loss)},Take-Profit: {limpa(alvo_tp)},"
@@ -193,7 +211,7 @@ def analisar_connors_chan(ticker, nome_empresa, setor):
         }
 
     except Exception as e:
-        print(f"[ERRO] Falha ao processar {ticker}: {e}")
+        print(f"[ERRO] Falha ao processar ativo: {e}")
         return None
 
 # ===================================================================
@@ -210,11 +228,7 @@ def executar_motor():
         ticker = ativo_info.get("ticker")
         if not ticker or ticker == "#N/A": continue
         
-        res = analisar_connors_chan(
-            ticker, 
-            ativo_info.get("nome", "N/A"), 
-            ativo_info.get("setor", "Desconhecido")
-        )
+        res = analisar_connors_chan(ativo_info)
         
         if res:
             print(f"[OK] {ticker} analisado. Estado: {res['estado']}")
@@ -234,10 +248,12 @@ Regras de Triagem e Execução:
 2. VETO FUNDAMENTAL: Emite veto obrigatório caso exista um rácio de risco negativo.
 3. TÁTICA DE SAÍDA: O alvo de Take-Profit é cravado na Banda Central de Bollinger (SMA20).
 4. TÁTICA DE ENTRADA: Execução com alocação rígida baseada em volatilidade (Carver).
+5. CONTEXTO INSTITUCIONAL: Presta especial atenção ao RS Score e estado de força relativa reportados.
 
 Estrutura Visual Obrigatória:
 🎯 [TICKER] - [Nome da Empresa] ([Setor])
 - 🚨 SINAL CONNORS-CHAN: [Destacar BBLower e RSI(2) extremo]
+- 📊 CONTEXTO INSTITUCIONAL: RS Score e respetivo estado de Força Relativa.
 - ⚙️ TÁTICA: SWING REVERSION. Alvo na SMA20 / Banda Média.
 - 🔢 DADOS EXATOS: Entrada: X | Stop: X | TP (SMA20): X | Qtd: X | Valor a Investir: X
 - 📋 REFERÊNCIA: [Linha do Comboio exata]
