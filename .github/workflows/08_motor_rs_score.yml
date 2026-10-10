@@ -1,0 +1,43 @@
+name: 08 - 🧭 Motor RS Score (Radar Setorial & Co)
+
+on:
+  # 1. Permite testar e executar manualmente a qualquer momento no GitHub
+  workflow_dispatch:
+
+  # 2. Execução Automática Semanal: Todas as Sextas-feiras às 22:30 UTC (Pós-fecho Semanal)
+  schedule:
+    - cron: '30 22 * * 5'
+
+jobs:
+  run-rs-score-engine:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: 📥 Fazer o Checkout do Código
+        uses: actions/checkout@v4
+
+      - name: 🐍 Configurar o Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.10'
+
+      - name: 📦 Instalar Dependências
+        run: |
+          python -m pip install --upgrade pip
+          pip install pandas yfinance requests google-genai
+
+      - name: ⚙️ Executar Motor RS Score (Atualiza a Coluna O no Sheets)
+        env:
+          # Credenciais seguras guardadas no GitHub Secrets
+          WEBHOOK_URL: ${{ secrets.WEBHOOK_URL }}
+          EMAIL_USER: ${{ secrets.EMAIL_USER }}
+          EMAIL_PASS: ${{ secrets.EMAIL_PASS }}
+        run: python 08_motor_rs_score.py
+
+      - name: 🤖 Executar Agente IA (Relatório CIO de Liderança)
+        env:
+          # O Agente IA lê o ficheiro comboio_rs_temp.txt e envia o resumo executivo
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }} 
+          EMAIL_USER: ${{ secrets.EMAIL_USER }}
+          EMAIL_PASS: ${{ secrets.EMAIL_PASS }}
+        run: python 02_agente_gemini.py
