@@ -19,7 +19,7 @@ from email.mime.multipart import MIMEMultipart
 dia_da_semana = datetime.now(ZoneInfo("Europe/Lisbon")).weekday()
 if dia_da_semana >= 5:
     print("[INFO] Fim de semana detetado. O Motor RS Score vai descansar.")
-    sys.exit(0)
+    #sys.exit(0)
 
 # ===================================================================
 # 1. CONFIGURAÇÕES E CREDENCIAIS
