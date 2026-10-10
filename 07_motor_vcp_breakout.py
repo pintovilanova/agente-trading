@@ -96,8 +96,15 @@ def enviar_email(conteudo):
 # ===================================================================
 # 3. MOTOR MATEMÁTICO: COMPRESSÃO DE VOLATILIDADE
 # ===================================================================
-def analisar_compressao_vcp(ticker, nome_empresa, setor):
+def analisar_compressao_vcp(ativo_info):
     try:
+        ticker = ativo_info.get("ticker")
+        nome_empresa = ativo_info.get("nome", "N/A")
+        setor = ativo_info.get("setor", "Desconhecido")
+        
+        # Recolher o RS Score da Coluna O enviado pelo Sheets
+        rs_score = ativo_info.get("rs_score", "N/A")
+
         df = yf.download(ticker, period="1y", interval="1d", progress=False)
         if df.empty or len(df) < 200:
             return None
@@ -181,8 +188,21 @@ def analisar_compressao_vcp(ticker, nome_empresa, setor):
             
             def limpa(v): return round(float(v), 2)
             
+            # Análise contextual do RS Score (Coluna O) sem bloqueios rígidos
+            try:
+                val_rs = float(rs_score)
+                if val_rs >= 80:
+                    status_rs = "🔥 ELITE (RS >= 80 - Vento a Favor)"
+                elif val_rs >= 50:
+                    status_rs = "⚖️ NEUTRO (RS 50-79 - Acompanha o Mercado)"
+                else:
+                    status_rs = "⚠️ FRACO / LAGGARD (RS < 50 - Vento Contra)"
+            except ValueError:
+                status_rs = "❓ SEM DADO DE RS"
+            
             linha_comboio = (
                 f"{ticker},Nome: {nome_empresa},Setor: {setor},Preço: {limpa(preco)},"
+                f"RS Score: {rs_score} ({status_rs}),"
                 f"BBW Atual: {limpa(bbw_atual)}%,Volume 3D: Seco (-40%+),"
                 f"Gatilho Compra (Buy Stop): {limpa(entrada_gatilho)},"
                 f"Stop Físico (Min 5D): {limpa(stop_loss)},Alvo TP: {limpa(alvo_tp)},"
@@ -198,7 +218,7 @@ def analisar_compressao_vcp(ticker, nome_empresa, setor):
             
         return None
     except Exception as e:
-        print(f"[ERRO] Falha ao processar {ticker}: {e}")
+        print(f"[ERRO] Falha ao processar ativo: {e}")
         return None
 
 # ===================================================================
@@ -214,7 +234,7 @@ def executar_motor():
         ticker = ativo_info.get("ticker")
         if not ticker or ticker == "#N/A": continue
         
-        res = analisar_compressao_vcp(ticker, ativo_info.get("nome", "N/A"), ativo_info.get("setor", "Desconhecido"))
+        res = analisar_compressao_vcp(ativo_info)
         if res:
             ativos_acionados.append(res)
             
@@ -226,11 +246,12 @@ def executar_motor():
 REGRAS ESTRITAS:
 1. O ativo não deve ser comprado a mercado. Recomenda SEMPRE ordens pendentes "Buy Stop" no Gatilho de Compra estipulado.
 2. Destaca o facto do risco ser mínimo, dado que o Stop Loss está cravado na base da consolidação (caixote de 5 dias).
-3. Avalia o Rácio Risco/Recompensa.
+3. Avalia o Rácio Risco/Recompensa e presta especial atenção ao RS Score institucional anexado aos dados.
 
 ESTRUTURA OBRIGATÓRIA:
 🎯 [TICKER] - [Nome da Empresa] ([Setor])
 - 🗜️ NÍVEL DE COMPRESSÃO: BBW a [X]% (Mola comprimida com seca de volume).
+- 📊 CONTEXTO INSTITUCIONAL: RS Score e respetivo estado de Força Relativa.
 - ⚙️ TÁTICA DE EXECUÇÃO: Colocar ordem pendente Buy Stop em [Gatilho] para apanhar o breakout.
 - 🛡️ RISCO MICRO: Stop Físico cravado em [Stop] (Abaixo da base de 5 dias).
 - 🔢 DADOS: Alvo: [TP] | Qtd: [X] | Alocação: [Valor] USD.
