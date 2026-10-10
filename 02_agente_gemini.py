@@ -72,7 +72,7 @@ def extrair_dados_do_market():
         tag_mercado = "US-PANICO"
     elif os.path.exists("comboio_connors_temp.txt"):
         ficheiro = "comboio_connors_temp.txt"
-        assunto_alvo = "tradingRelatorioIA US - CONNORS-CHAN"
+        assunto_alvo = "tradingRelatorioIA US - CONNORS-CHAN REVERSÃO"
         tag_mercado = "US-CONNORS"
     elif os.path.exists("comboio_earnings_temp.txt"):
         ficheiro = "comboio_earnings_temp.txt"
@@ -194,52 +194,4 @@ def analisar_com_ia(dados_mercado):
 # ==========================================
 def enviar_email_resposta(relatorio_texto, tag_mercado):
     if tag_mercado == "EUROPA":
-        assunto_email = "🇪🇺🎯 IA Predador: Relatório Tático EUROPA 🛡️"
-    elif tag_mercado == "US-PANICO":
-        assunto_email = "🚨 IA Predador: Relatório Pânico e Reversão ⚡"
-    elif tag_mercado == "US-CONNORS":
-        assunto_email = "🧲 IA Predador: Relatório Connors-Chan 🏹"
-    elif tag_mercado == "US-EARNINGS":
-        assunto_email = "📊 IA Predador: Relatório Earnings Drift 🚀"
-    elif tag_mercado == "US-CARVER":
-        assunto_email = "🏄‍♂️ IA Predador: Relatório Carver Fast Trend 🚀"
-    elif tag_mercado == "US-VCP":
-        assunto_email = "🗜️ IA Predador: Relatório VCP Breakout Squeeze 🎯"
-    elif tag_mercado == "US-RS-SCORE":
-        assunto_email = "🧭 IA Predador: Relatório de Força Relativa e Setores (RS Score) 👑"    
-    else:
-        assunto_email = "🦅 IA Predador: Relatório Tático WALL STREET 🗽"
-
-    print(f"A enviar o relatório tático final para ti (Assunto: {assunto_email})...")
-    try:
-        msg = MIMEMultipart()
-        msg['From'] = EMAIL_USER
-        msg['To'] = EMAIL_USER
-        msg['Subject'] = assunto_email
-        
-        msg.attach(MIMEText(relatorio_texto, 'plain', 'utf-8'))
-        
-        server = smtplib.SMTP(SMTP_SERVER, SMTP_PORT)
-        server.starttls()
-        server.login(EMAIL_USER, EMAIL_PASS)
-        server.sendmail(EMAIL_USER, EMAIL_USER, msg.as_string())
-        server.quit()
-        print("Email de resposta enviado com sucesso!")
-    except Exception as e:
-        print(f"Erro ao enviar o email de resposta: {e}")
-
-# ==========================================
-# 5. EXECUÇÃO DO AGENTE
-# ==========================================
-if __name__ == "__main__":
-    conteudo_dados, tag_mercado = extrair_dados_do_market()
-    
-    if conteudo_dados:
-        analise_final = analisar_com_ia(conteudo_dados)
-        
-        print("\n" + "="*50)
-        print(f"RELATÓRIO TÁTICO DIÁRIO - PREDADOR ({tag_mercado})")
-        print("="*50)
-        print(analise_final)
-        
-        enviar_email_resposta(analise_final, tag_mercado)
+        assunto_
