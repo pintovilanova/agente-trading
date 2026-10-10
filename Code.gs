@@ -1968,18 +1968,18 @@ function dispararAgenteGitHubViaAPI() {
 // MOTOR HÍBRIDO (WEBHOOK PARA O GITHUB: US + EUROPA)
 // ==========================================
 
-// 1. O Python chama o GET para ler a Watchlist
+// 1. O Python chama o GET para ler a Watchlist e as Posições Ativas
 function doGet(e) {
   var ss = SpreadsheetApp.getActiveSpreadsheet();
   
   // Se o Python enviar o nome da aba (ex: ?aba=Europa), usa essa. 
-  // Se não enviar nada (que é o caso do teu script US atual), usa "Analise Compra" por defeito.
+  // Se não enviar nada, usa "Analise Compra" por defeito.
   var nomeAba = (e.parameter && e.parameter.aba) ? e.parameter.aba : "Analise Compra";
   var sheet = ss.getSheetByName(nomeAba);
   
   if (!sheet) {
     return ContentService.createTextOutput(JSON.stringify({"erro": "Aba '" + nomeAba + "' nao encontrada"}))
-                         .setMimeType(ContentService.MimeType.JSON);
+            .setMimeType(ContentService.MimeType.JSON);
   }
   
   var ultimaLinha = sheet.getLastRow();
@@ -2001,38 +2001,117 @@ function doGet(e) {
     }
   }
   
-  return ContentService.createTextOutput(JSON.stringify(ativos))
-                       .setMimeType(ContentService.MimeType.JSON);
+  // ------------------------------------------
+  // LEITURA DA ABA "Diário de Bordo" (Posições Ativas)
+  // Coluna B (2) = Ticker, Coluna W (23) = Status, Coluna X (24) = Entrada, Coluna Y (25) = Stop, Coluna AA (27) = Qtd
+  // ------------------------------------------
+  var posicoesAtivas = {};
+  var sheetDiario = ss.getSheetByName("Diário de Bordo");
+  
+  if (sheetDiario) {
+    var ultimaLinhaDiario = sheetDiario.getLastRow();
+    if (ultimaLinhaDiario >= 2) {
+      var dadosDiario = sheetDiario.getRange(2, 1, ultimaLinhaDiario - 1, 27).getValues();
+      
+      for (var j = 0; j < dadosDiario.length; j++) {
+        var linha = dadosDiario[j];
+        var tickerDiario = linha[1];   // Coluna B (índice 1)
+        var statusDiario = linha[22];  // Coluna W (índice 22)
+        
+        // CORREÇÃO: Aceita tanto ATIVA como ATIVA_FAST
+        if (tickerDiario && statusDiario) {
+          var statusUpper = statusDiario.toString().trim().toUpperCase();
+          if (statusUpper === "ATIVA" || statusUpper === "ATIVA_FAST") {
+            var tClean = tickerDiario.toString().trim();
+            posicoesAtivas[tClean] = {
+              "status": statusUpper,
+              "precoEntrada": linha[23], // Coluna X (índice 23)
+              "stopAtual": linha[24],    // Coluna Y (índice 24)
+              "quantidade": linha[26]    // Coluna AA (índice 26)
+            };
+          }
+        }
+      }
+    }
+  }
+  
+  // Empacota tudo num objeto JSON estruturado
+  var respostaCompleta = {
+    "ativos": ativos,
+    "posicoesAtivas": posicoesAtivas
+  };
+  
+  return ContentService.createTextOutput(JSON.stringify(respostaCompleta))
+                     .setMimeType(ContentService.MimeType.JSON);
 }
 
 // 2. O Python envia os resultados via POST
 function doPost(e) {
   var ss = SpreadsheetApp.getActiveSpreadsheet();
   var payload = JSON.parse(e.postData.contents);
+  var nomeAba = payload.aba || "Analise Compra"; 
+  var sheet = ss.getSheetByName(nomeAba);
   
+  if (!sheet) {
+    return ContentService.createTextOutput(JSON.stringify({"status": "erro", "mensagem": "Aba '" + nomeAba + "' nao encontrada"}))
+                         .setMimeType(ContentService.MimeType.JSON);
+  }
+  
+  var dados = payload.dados;
+
   // ==========================================================
-  // LÓGICA UNIFICADA: ATUALIZAÇÃO POR COLUNAS NA ABA INDICADA
+  // LÓGICA ESPECIAL PARA EARNINGS DRIFT (Limpa e insere do zero)
   // ==========================================================
-  if (payload.acao === "atualizar_colunas_todas") {
-    // Recebe o nome da aba enviada pelo Python (ex: "Analise Compra" para os EUA ou "Analise Compra EU" para a Europa)
-    var nomeAba = payload.aba || "Analise Compra"; 
-    var sheet = ss.getSheetByName(nomeAba);
-    
-    if (!sheet) {
-      return ContentService.createTextOutput(JSON.stringify({"status": "erro", "mensagem": "Aba '" + nomeAba + "' nao encontrada"}))
-                           .setMimeType(ContentService.MimeType.JSON);
+  if (payload.acao === "atualizar_earnings_drift") {
+    // 1. Limpa todo o conteúdo anterior da aba (exceto o cabeçalho, se quiseres manter a linha 1)
+    var ultimaLinha = sheet.getLastRow();
+    if (ultimaLinha > 1) {
+      sheet.getRange(2, 1, ultimaLinha - 1, sheet.getLastColumn()).clearContent();
     }
     
-    var dados = payload.dados;
+    // 2. Se houver dados novos para hoje, insere-os linha a linha
+    if (dados && dados.length > 0) {
+      var linhasParaInserir = [];
+      for (var i = 0; i < dados.length; i++) {
+        var d = dados[i];
+        // Podes organizar a ordem das colunas conforme definimos para o Earnings Drift:
+        // Exemplo: [Ticker, Preço, Data Earnings, Var%, RVOL, Estado, Entrada, Stop, TP, Qtd, Valor Investir, Data, Comboio]
+        linhasParaInserir.push([
+          d.ticker,
+          d.preco,
+          d.data_earnings,
+          d.var_perc,
+          d.rvol,
+          d.estado,
+          d.entrada,
+          d.stop,
+          d.tp,
+          d.qtd,
+          d.valor_investir,
+          d.time,
+          d.comboio
+        ]);
+      }
+      
+      // Escreve tudo de uma vez a partir da linha 2
+      sheet.getRange(2, 1, linhasParaInserir.length, linhasParaInserir[0].setValues ? linhasParaInserir[0].length : linhasParaInserir[0].length).setValues(linhasParaInserir);
+    }
+    
+    return ContentService.createTextOutput(JSON.stringify({"status": "sucesso"}))
+                         .setMimeType(ContentService.MimeType.JSON);
+  }
+  
+  // ==========================================================
+  // LÓGICA UNIFICADA ANTERIOR (Para a Analise Compra)
+  // ==========================================================
+  if (payload.acao === "atualizar_colunas_todas") {
     var dataRange = sheet.getDataRange();
     var values = dataRange.getValues();
     
     for (var i = 0; i < dados.length; i++) {
       var d = dados[i];
-      // Procura o Ticker na Coluna E (índice 4)
       for (var row = 1; row < values.length; row++) {
         if (values[row][4] === d.ticker) {
-          // Grava valores nas respetivas colunas (G=7, K=11, L=12, M=13, N=14, Q=17, S=19)
           sheet.getRange(row + 1, 7).setValue(d.preco);
           sheet.getRange(row + 1, 11).setValue(d.momentum);
           sheet.getRange(row + 1, 12).setValue(d.rsi);
@@ -2048,7 +2127,6 @@ function doPost(e) {
                          .setMimeType(ContentService.MimeType.JSON);
   }
   
-  // Caso venha num formato antigo descontinuado
   return ContentService.createTextOutput(JSON.stringify({"status": "erro", "mensagem": "Ação desconhecida"}))
                        .setMimeType(ContentService.MimeType.JSON);
 }
