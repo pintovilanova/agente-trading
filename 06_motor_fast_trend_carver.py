@@ -276,7 +276,7 @@ def executar_motor():
         "REGRAS ESTRITAS:\n"
         "- 🔄 GESTÃO DE ESTADOS NO SHEETS (LEMBRETE OBRIGATÓRIO): Termina o teu relatório com uma secção de 'Lembrete Operacional' contendo exatamente estas duas notas:\n"
         "  1. \"🟢 NOVAS ENTRADAS: Assim que abrires uma nova posição sugerida neste relatório, altera o seu estado no Google Sheets para 'ATIVA_FAST' para que eu inicie o cálculo diário do Trailing Stop.\"\n"
-        "  2. \"🔴 SAÍDAS/STOPS: Se alguma das posições ativas atingir o Trailing Stop hoje, altera o seu estado no Google Sheets para 'FECHADA' (ou limpa a célula) para libertar o capital e eu deixar de a monitorizar.\"\n"
+        "  2. \"🔴 SAÍDAS/STOPS: Se uma posição ativa atingir o Trailing Stop, altera o estado no Sheets para 'WIN' (se a trade fechou com lucro) ou 'LOSS' (se fechou com prejuízo) para as tuas estatísticas. Ao mudares o estado, eu deixarei de a monitorizar automaticamente.\"\n"
     )
     
     bloco_texto_ia = f"📊 RELATÓRIO DE DADOS BRUTOS - FAST TREND CARVER 🏄‍♂️\n\n{prompt_ia}\n\n--------------------------------------------------\n"
