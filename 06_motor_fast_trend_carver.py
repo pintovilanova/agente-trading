@@ -1,38 +1,36 @@
-"""
-===================================================================================
-SISTEMA DE TRADING INSTITUCIONAL - MOTOR FAST TREND (ROBERT CARVER)
-===================================================================================
-Documentação e Arquitetura do Módulo:
-1. OBJETIVO:
-   Automatizar a deteção de sinais de momentum de alta frequência com base nos 
-   princípios quantitativos de Robert Carver (Systematic Trading).
-
-2. INDICADORES TÉCNICOS & CÁLCULOS:
-   - Médias Móveis Exponenciais (EMA): EMA 8 (rápida) e EMA 32 (lenta).
-   - Average True Range (ATR): Janela de 36 períodos para medição de volatilidade.
-   - Forecast (Previsão de Tendência): Calculado como ((EMA8 - EMA32) / ATR36) * 5.0.
-     * Acionamento de novos sinais: Requer Forecast >= 10.0.
-
-3. GESTÃO DE RISCO E DIMENSIONAMENTO (VOLATILITY PARITY):
-   - Alvo de Volatilidade Diária calculado com base no capital total da conta.
-   - Dimensionamento (Multiplicador): Proporcional à força do forecast (capado a x2.0).
-   - Stop Loss Inicial: 1.5x ATR abaixo do preço de entrada.
-   - Take-Profit: 2.5x a distância do Stop Loss.
-
-4. GESTÃO DE ESTADOS E POSIÇÕES ATIVAS:
-   - Separação estricta entre posições 'ATIVA' (geridas por outros scripts, filtradas 
-     de novos sinais e excluídas do trailing do Carver) e 'ATIVA_FAST' (geridas por 
-     este motor com monitorização diária de Trailing Stop por ATR).
-   - Regra de Inércia do Trailing Stop: O stop é unidirecional (só sobe ou mantém-se).
-     Se o stop atual registado na folha for superior ao novo cálculo matemático, 
-     o sistema força a manutenção do patamar mais alto (proteção de inércia).
-
-5. FLUXO DE EXECUÇÃO:
-   - Validação de fim de semana (descanso do motor).
-   - Comunicação via Webhook com o Google Sheets (Watchlist + Diário de Bordo).
-   - Envio automático de relatório bruto por email para o Agente IA realizar a auditoria.
-===================================================================================
-"""
+# ===================================================================================
+# SISTEMA DE TRADING INSTITUCIONAL - MOTOR FAST TREND (ROBERT CARVER)
+# ===================================================================================
+# Documentação e Arquitetura do Módulo:
+# 1. OBJETIVO:
+#    Automatizar a deteção de sinais de momentum de alta frequência com base nos 
+#    princípios quantitativos de Robert Carver (Systematic Trading).
+#
+# 2. INDICADORES TÉCNICOS & CÁLCULOS:
+#    - Médias Móveis Exponenciais (EMA): EMA 8 (rápida) e EMA 32 (lenta).
+#    - Average True Range (ATR): Janela de 36 períodos para medição de volatilidade.
+#    - Forecast (Previsão de Tendência): Calculado como ((EMA8 - EMA32) / ATR36) * 5.0.
+#      * Acionamento de novos sinais: Requer Forecast >= 10.0.
+#
+# 3. GESTÃO DE RISCO E DIMENSIONAMENTO (VOLATILITY PARITY):
+#    - Alvo de Volatilidade Diária calculado com base no capital total da conta.
+#    - Dimensionamento (Multiplicador): Proporcional à força do forecast (capado a x2.0).
+#    - Stop Loss Inicial: 1.5x ATR abaixo do preço de entrada.
+#    - Take-Profit: 2.5x a distância do Stop Loss.
+#
+# 4. GESTÃO DE ESTADOS E POSIÇÕES ATIVAS:
+#    - Separação estricta entre posições 'ATIVA' (geridas por outros scripts, filtradas 
+#      de novos sinais e excluídas do trailing do Carver) e 'ATIVA_FAST' (geridas por 
+#      este motor com monitorização diária de Trailing Stop por ATR).
+#    - Regra de Inércia do Trailing Stop: O stop é unidirecional (só sobe ou mantém-se).
+#      Se o stop atual registado na folha for superior ao novo cálculo matemático, 
+#      o sistema força a manutenção do patamar mais alto (proteção de inércia).
+#
+# 5. FLUXO DE EXECUÇÃO:
+#    - Validação de fim de semana (descanso do motor).
+#    - Comunicação via Webhook com o Google Sheets (Watchlist + Diário de Bordo).
+#    - Envio automático de relatório bruto por email para o Agente IA realizar a auditoria.
+# ===================================================================================
 
 import pandas as pd
 import yfinance as yf
@@ -274,7 +272,11 @@ def executar_motor():
         "MODO ACELERADOR ESTATÍSTICO (CARVER FAST TREND)\n"
         "O teu mandato é auditar as entradas geradas e monitorizar as posições ativas do portefólio.\n"
         "ATENÇÃO À GESTÃO DE RISCO: Respeita estritamente a regra de inércia do trailing stop nas posições ativas "
-        "(o stop nunca desce, se o stop atual registado já for superior ao novo cálculo sugerido, a instrução deve ser obrigatoriamente manter o valor atual).\n"
+        "(o stop nunca desce, se o stop atual registado já for superior ao novo cálculo sugerido, a instrução deve ser obrigatoriamente manter o valor atual).\n\n"
+        "REGRAS ESTRITAS:\n"
+        "- 🔄 GESTÃO DE ESTADOS NO SHEETS (LEMBRETE OBRIGATÓRIO): Termina o teu relatório com uma secção de 'Lembrete Operacional' contendo exatamente estas duas notas:\n"
+        "  1. \"🟢 NOVAS ENTRADAS: Assim que abrires uma nova posição sugerida neste relatório, altera o seu estado no Google Sheets para 'ATIVA_FAST' para que eu inicie o cálculo diário do Trailing Stop.\"\n"
+        "  2. \"🔴 SAÍDAS/STOPS: Se alguma das posições ativas atingir o Trailing Stop hoje, altera o seu estado no Google Sheets para 'FECHADA' (ou limpa a célula) para libertar o capital e eu deixar de a monitorizar.\"\n"
     )
     
     bloco_texto_ia = f"📊 RELATÓRIO DE DADOS BRUTOS - FAST TREND CARVER 🏄‍♂️\n\n{prompt_ia}\n\n--------------------------------------------------\n"
