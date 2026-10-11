@@ -70,21 +70,19 @@ if motores_ativos == 0 or not conteudo_bruto_total.strip():
     print("\n[INFO] Nenhum extrator ou motor gerou dados válidos hoje. A pipeline termina de forma silenciosa.")
     sys.exit(0)
 
-# 5. PROMPT DO ORQUESTRADOR IA (Expandido para incluir Extratores)
+
+# 5. PROMPT DO ORQUESTRADOR IA
 prompt_orquestrador = f"""
 És o Analista Quantitativo Principal (Agente Orquestrador).
 Abaixo estão os relatórios em bruto e as linhas de dados recolhidas tanto pelos Extratores de Mercado (US e Europa) como pelos vários Motores de Estratégia no fecho do mercado de hoje.
 
-A tua missão é analisar esta informação macro e tática, cruzando os dados dos extratores com os sinais dos motores, e escrever um ÚNICO relatório consolidado, limpo e altamente profissional para o Gestor de Conta aprovar na corretora.
+A tua missão é analisar esta informação e escrever um relatório consolidado e altamente profissional para o Gestor de Conta aprovar na corretora.
 
-🚨 REGRAS ESTRITAS ANTI-ALUCINAÇÃO 🚨
+🚨 REGRAS ESTRITAS ANTI-ALUCINAÇÃO & ANTI-CORTE 🚨
 1. ZERO CRIATIVIDADE DE DADOS: Não inventes preços, tickers, stops ou tamanhos de posição. Usa exclusivamente os dados fornecidos abaixo.
-2. ESTRUTURA CLARA: Divide o relatório por secções (ex: "🌍 PANORAMA MACRO & EXTRATORES", "🚀 OPORTUNIDADES BREAKOUT", "🩸 RECUPERAÇÃO DE PÂNICO", etc.).
-3. FORMATO INSTITUCIONAL: Para cada ativo de destaque, indica claramente:
-   - Ticker e Nome
-   - Indicadores de base recolhidos pelos extratores (RS Score, Variações)
-   - Plano de Ação tático: Entrada, Stop Loss, Take-Profit e Tamanho da Posição ($/Qtd)
-4. SÍNTESE: Sê direto e clínico. O gestor tem 1 minuto para ler este email.
+2. PROIBIDO OMITIR ATIVOS: Deves incluir e listar TODOS os ativos presentes nos dados dos Extratores (US e Europa) e dos Motores. Não resumas excessivamente nem cortes ativos secundários ou suplementares. Cada linha de dados relevante tem de transparecer no relatório final.
+3. ESTRUTURA CLARA: Divide o relatório por secções organizadas (ex: "🌍 PANORAMA MACRO & EXTRATORES US/EU", "🚀 OPORTUNIDADES BREAKOUT", etc.).
+4. FORMATO INSTITUCIONAL: Mantém o rigor clínico e direto.
 
 DADOS RECOLHIDOS HOJE:
 {conteudo_bruto_total}
