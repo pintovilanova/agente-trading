@@ -272,9 +272,14 @@ for ativo_info in ativos_data:
 
         data_atual = datetime.now(ZoneInfo("Europe/Lisbon")).strftime('%d/%m/%Y %H:%M:%S')
 
+        # GESTÃO DE POSIÇÃO ATIVA COM FILTRAGEM DE ATIVA_FAST
         if ticker in posicoes_ativas:
             pos_info = posicoes_ativas[ticker]
-            info_carteira = f"SIM (Entrada: {pos_info['precoEntrada']}, StopAtual: {pos_info['stopAtual']}, Qtd: {pos_info['quantidade']})"
+            status_pos = pos_info.get('status', 'ATIVA')
+            if status_pos == 'ATIVA_FAST':
+                info_carteira = f"NÃO (Gerido pelo modelo FAST - ATIVA_FAST)"
+            else:
+                info_carteira = f"SIM (Entrada: {pos_info['precoEntrada']}, StopAtual: {pos_info['stopAtual']}, Qtd: {pos_info['quantidade']})"
         else:
             info_carteira = "NÃO"
 
@@ -452,7 +457,7 @@ Regras Operacionais Estritas de Triagem, Carteira e Ataque:
 
 6. GESTÃO DE POSIÇÕES ATIVAS E ESTRUTURA VISUAL OBRIGATÓRIA (CRÍTICO):
    - Verifica o campo 'PosicaoAtiva' em cada linha do comboio.
-   - **REGRA DE OURO:** Se a PosicaoAtiva indicar **SIM**, é **estritamente proibido** sugerir nova entrada ou alocação de capital. O foco é 100% a gestão da posição existente.
+   - **REGRA DE OURO:** Se a PosicaoAtiva indicar **SIM**, é **estritamente proibido** sugerir nova entrada ou alocação de capital. O foco é 100% a gestão da posição existente. (Nota: Se indicar 'Gerido pelo modelo FAST', desconsidera para efeitos de gestão de Breakouts).
    - **GESTÃO DO STOP LOSS:** Compara o 'StopAtual' com o 'Trailing'. Se o 'Trailing' for superior, recomenda subir o Stop. Se for igual ou inferior, indica manutenção.
    - Usa obrigatoriamente este template exato:
 
