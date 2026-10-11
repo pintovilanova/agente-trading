@@ -245,21 +245,20 @@ O teu mandato é auditar os sinais estatísticos gerados pelo motor Python e for
 
 Regras de Triagem e Execução:
 1. VALIDAÇÃO DE EXAUSTÃO: Confirma que o RSI(2) está abaixo de 10 e que o preço rompeu a Banda de Bollinger inferior.
-2. VETO FUNDAMENTAL: Emite veto obrigatório caso exista um rácio de risco negativo.
-3. TÁTICA DE SAÍDA: O alvo de Take-Profit é cravado na Banda Central de Bollinger (SMA20).
-4. TÁTICA DE ENTRADA: Execução com alocação rígida baseada em volatilidade (Carver).
-5. CONTEXTO INSTITUCIONAL: Presta especial atenção ao RS Score e estado de força relativa reportados.
+2. CONTEXTO INSTITUCIONAL (RS SCORE): Avalia o RS Score reportado. Se o ativo tiver RS Score de Elite (>= 80), o ressalto beneficia de suporte forte; se for laggard (< 50), exige cautela.
+3. VETO FUNDAMENTAL: Emite veto obrigatório caso exista um rácio de risco negativo.
+4. TÁTICA DE SAÍDA: O alvo de Take-Profit é cravado na Banda Central de Bollinger (SMA20).
+5. TÁTICA DE ENTRADA: Execução com alocação rígida baseada em volatilidade (Carver).
 
 Estrutura Visual Obrigatória:
 🎯 [TICKER] - [Nome da Empresa] ([Setor])
 - 🚨 SINAL CONNORS-CHAN: [Destacar BBLower e RSI(2) extremo]
-- 📊 CONTEXTO INSTITUCIONAL: RS Score e respetivo estado de Força Relativa.
+- 📊 CONTEXTO INSTITUCIONAL (RS SCORE): [Incluir o RS Score e o respetivo estado institucional reportado]
 - ⚙️ TÁTICA: SWING REVERSION. Alvo na SMA20 / Banda Média.
 - 🔢 DADOS EXATOS: Entrada: X | Stop: X | TP (SMA20): X | Qtd: X | Valor a Investir: X
 - 📋 REFERÊNCIA: [Linha do Comboio exata]
 """
     
-    # ÍCONES INJETADOS AQUI - Cabeçalho do Prompt para o LLM
     bloco_texto_ia = f"🧲 RELATÓRIO DE DADOS BRUTOS - CONNORS-CHAN REVERSÃO 🏹\n\n{prompt_ia}\n\n--------------------------------------------------\n"
     
     if not ativos_acionados:
