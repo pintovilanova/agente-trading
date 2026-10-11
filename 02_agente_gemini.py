@@ -151,14 +151,14 @@ def analisar_com_ia(dados_mercado):
     espera_base = 15
     espera_maxima = 300
 
-    modelo_atual = 'gemini-2.5-flash'  # Podes ajustar para o modelo preferido
+    modelo_atual = 'gemini-3.6-flash'
 
     for tentativa in range(tentativas):
         try:
             if tentativa == 2:
                 print(f"[AVISO] O modelo {modelo_atual} está indisponível ou sem cota.")
-                print("[TÁTICA] A mudar o motor para o Fallback 'gemini-2.5-flash'...")
-                modelo_atual = 'gemini-2.5-flash'
+                print("[TÁTICA] A mudar o motor para o Fallback 'gemini-3.8-flash'...")
+                modelo_atual = 'gemini-3.8-flash'
 
             print(f"A tentar gerar relatório com o modelo: {modelo_atual}...")
             resposta = client.models.generate_content(
