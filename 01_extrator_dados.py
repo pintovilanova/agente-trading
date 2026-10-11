@@ -21,7 +21,7 @@ from email.mime.multipart import MIMEMultipart
 dia_da_semana = datetime.now(ZoneInfo("Europe/Lisbon")).weekday()
 if dia_da_semana >= 5:
     print("[INFO] Fim de semana detetado. O mercado está fechado. O Agente vai descansar.")
-    sys.exit(0)
+    #sys.exit(0)
 
 hoje_e_sexta = "SIM" if dia_da_semana == 4 else "NÃO"
 
