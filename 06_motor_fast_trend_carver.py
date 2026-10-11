@@ -48,14 +48,25 @@ def buscar_dados_completos():
         print("[ERRO] WEBHOOK_URL não configurado.")
         return [], {}
     try:
-        resp = requests.get(WEBHOOK_URL)
+        # Garante que apanha a aba correta se necessário, ou usa a raiz
+        url_alvo = WEBHOOK_URL if "?" in WEBHOOK_URL else f"{WEBHOOK_URL}?aba=Analise Compra"
+        resp = requests.get(url_alvo)
+        
         if resp.status_code == 200:
-            dados = resp.json()
+            try:
+                dados = resp.json()
+            except json.JSONDecodeError:
+                print(f"[ERRO] O Webhook não retornou um JSON válido. Resposta: {resp.text[:200]}")
+                return [], {}
+
             if isinstance(dados, dict):
-                return dados.get("ativos", []), dados.get("posicoesAtivas", {})
+                ativos = dados.get("ativos", [])
+                posicoes = dados.get("posicoesAtivas", {})
+                return ativos, posicoes
             elif isinstance(dados, list):
                 return dados, {}
-        print(f"[AVISO] Webhook retornou status {resp.status_code} ou formato inesperado.")
+                
+        print(f"[AVISO] Webhook retornou status {resp.status_code}. Resposta: {resp.text[:200]}")
         return [], {}
     except Exception as e:
         print(f"[ERRO CRÍTICO] Sheets: {e}")
