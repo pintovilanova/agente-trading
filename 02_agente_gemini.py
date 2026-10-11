@@ -151,14 +151,14 @@ def analisar_com_ia(dados_mercado):
     espera_base = 15
     espera_maxima = 300
 
-    modelo_atual = 'gemini-3.6-flash'
+    modelo_atual = 'gemini-2.5-flash'  # Podes ajustar para o modelo preferido
 
     for tentativa in range(tentativas):
         try:
             if tentativa == 2:
                 print(f"[AVISO] O modelo {modelo_atual} está indisponível ou sem cota.")
-                print("[TÁTICA] A mudar o motor para o Fallback 'gemini-3.8-flash'...")
-                modelo_atual = 'gemini-3.8-flash'
+                print("[TÁTICA] A mudar o motor para o Fallback 'gemini-2.5-flash'...")
+                modelo_atual = 'gemini-2.5-flash'
 
             print(f"A tentar gerar relatório com o modelo: {modelo_atual}...")
             resposta = client.models.generate_content(
@@ -194,4 +194,59 @@ def analisar_com_ia(dados_mercado):
 # ==========================================
 def enviar_email_resposta(relatorio_texto, tag_mercado):
     if tag_mercado == "EUROPA":
-        assunto_
+        assunto = "🇪🇺 tradingRelatorioIA - Auditoria Tática Europa"
+    elif tag_mercado == "US-PANICO":
+        assunto = "🚨 tradingRelatorioIA US - Pânico e Reversão Auditado"
+    elif tag_mercado == "US-CONNORS":
+        assunto = "🧲 tradingRelatorioIA US - Connors-Chan Auditado"
+    elif tag_mercado == "US-EARNINGS":
+        assunto = "💼 tradingRelatorioIA US - Earnings Drift Auditado"
+    elif tag_mercado == "US-CARVER":
+        assunto = "🏎️ tradingRelatorioIA US - Fast Trend Carver Auditado"
+    elif tag_mercado == "US-VCP":
+        assunto = "🚀 tradingRelatorioIA US - VCP Breakout Squeeze Auditado"
+    elif tag_mercado == "US-RS-SCORE":
+        assunto = "🧭 tradingRelatorioIA US - RS Score Auditado"
+    else:
+        assunto = "🦅 tradingRelatorioIA US - Auditoria Tática Breakouts"
+
+    print(f"\nA enviar relatório final por email (Assunto: '{assunto}')...")
+    if not EMAIL_USER or not EMAIL_PASS:
+        print("[AVISO] Credenciais de email em falta. A saltar envio.")
+        return
+
+    try:
+        msg = MIMEMultipart()
+        msg['From'] = EMAIL_USER
+        msg['To'] = EMAIL_USER
+        msg['Subject'] = assunto
+        
+        msg.attach(MIMEText(relatorio_texto, 'plain', 'utf-8'))
+        
+        server = smtplib.SMTP(SMTP_SERVER, SMTP_PORT)
+        server.starttls()
+        server.login(EMAIL_USER, EMAIL_PASS)
+        server.sendmail(EMAIL_USER, EMAIL_USER, msg.as_string())
+        server.quit()
+        print("[SUCESSO] Relatório tático final enviado por email com sucesso!")
+    except Exception as e:
+        print(f"[ERRO] Falha ao enviar o email de resposta: {e}")
+
+# ==========================================
+# 5. EXECUÇÃO PRINCIPAL DO ORQUESTRADOR
+# ==========================================
+if __name__ == "__main__":
+    print("A iniciar o Agente Orquestrador IA (Gemini)...")
+    dados, tag = extrair_dados_do_market()
+    
+    if not dados:
+        print("[ERRO] Nenhum dado encontrado para análise. A abortar.")
+        sys.exit(1)
+        
+    relatorio_auditado = analisar_com_ia(dados)
+    
+    if relatorio_auditado:
+        enviar_email_resposta(relatorio_auditado, tag)
+    else:
+        print("[ERRO] A IA não retornou nenhum relatório.")
+        sys.exit(1)
