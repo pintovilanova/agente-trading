@@ -1,4 +1,4 @@
-name: 05 Tático - Apenas Motor Connors-Chan
+name: 05 🧲 Motor Connors-Chan (Reversão) (Íman que puxa o preço de volta à média)
 
 on:
   workflow_dispatch:
