@@ -38,6 +38,7 @@ import os
 import requests
 import json
 import smtplib
+import time
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 
@@ -90,27 +91,45 @@ def buscar_watchlist():
         print(f"[ERRO CRÍTICO] Falha de comunicação com Sheets: {e}")
         return []
 
+# ===================================================================
+# 2. FUNÇÕES DE REDE
+# ===================================================================
+# ... (deixa a função buscar_watchlist() exatamente como está) ...
+
 def enviar_email(conteudo):
     print("\nA enviar email de Reversão para o Agente IA...")
     if not EMAIL_USER or not EMAIL_PASS:
         print("[AVISO] Credenciais de email em falta. A saltar envio.")
         return
-    try:
-        msg = MIMEMultipart()
-        msg['From'] = EMAIL_USER
-        msg['To'] = EMAIL_USER
-        msg['Subject'] = "🚨 tradingRelatorioIA US - PÂNICO E REVERSÃO ⚡"
-        
-        msg.attach(MIMEText(conteudo, 'plain', 'utf-8'))
-        
-        server = smtplib.SMTP(SMTP_SERVER, SMTP_PORT)
-        server.starttls()
-        server.login(EMAIL_USER, EMAIL_PASS)
-        server.sendmail(EMAIL_USER, EMAIL_USER, msg.as_string())
-        server.quit()
-        print("[SUCESSO] Email enviado! O Agente IA tem novos alvos para triagem.")
-    except Exception as e:
-        print(f"[ERRO] Falha ao enviar email: {e}")
+
+    msg = MIMEMultipart()
+    msg['From'] = EMAIL_USER
+    msg['To'] = EMAIL_USER
+    msg['Subject'] = "🚨 tradingRelatorioIA US - PÂNICO E REVERSÃO ⚡"
+    
+    msg.attach(MIMEText(conteudo, 'plain', 'utf-8'))
+    
+    # Sistema de Tolerância a Falhas (Retry) com Timeout
+    max_tentativas = 3
+    for tentativa in range(max_tentativas):
+        try:
+            # Adicionado timeout de 15 segundos para evitar timeouts do servidor
+            server = smtplib.SMTP(SMTP_SERVER, SMTP_PORT, timeout=15)
+            server.starttls()
+            server.login(EMAIL_USER, EMAIL_PASS)
+            server.sendmail(EMAIL_USER, EMAIL_USER, msg.as_string())
+            server.quit()
+            
+            print(f"[SUCESSO] Email enviado na tentativa {tentativa + 1}! O Agente IA tem novos alvos para triagem.")
+            break  # Sai do loop após sucesso
+            
+        except Exception as e:
+            print(f"[ERRO] Falha ao enviar email (tentativa {tentativa + 1} de {max_tentativas}): {e}")
+            if tentativa < max_tentativas - 1:
+                print("A aguardar 5 segundos antes de tentar novamente...")
+                time.sleep(5)
+            else:
+                print("[ERRO CRÍTICO] Falha definitiva na ligação ao servidor de email. Gravado apenas no comboio local.")
 
 # ===================================================================
 # 3. MOTOR MATEMÁTICO: REVERSÃO À MÉDIA (COM TARGET VOLATILITY)
