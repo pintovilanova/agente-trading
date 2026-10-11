@@ -420,9 +420,10 @@ if resultados_para_sheets and WEBHOOK_URL:
 # ===================================================================
 print("\nA construir o bloco unificado (Prompt + Comboio) para o email...")
 
+# Mantém ativos com posições ativas (incluindo ATIVA_FAST) ou que cumpram os requisitos de estado
 ativos_acionados = [
     item for item in comboio_ia 
-    if item["estado"] != "Observar" or not item["posicao_ativa"].startswith("NÃO")
+    if item["estado"] != "Observar" or item["posicao_ativa"] != "NÃO"
 ]
 
 prompt_sistema_embutido = f"""MODO DIÁRIO ATIVO - PREDADOR DE BREAKOUTS: Avalia os seguintes ativos da minha watchlist.
@@ -457,7 +458,7 @@ Regras Operacionais Estritas de Triagem, Carteira e Ataque:
 
 6. GESTÃO DE POSIÇÕES ATIVAS E ESTRUTURA VISUAL OBRIGATÓRIA (CRÍTICO):
    - Verifica o campo 'PosicaoAtiva' em cada linha do comboio.
-   - **REGRA DE OURO:** Se a PosicaoAtiva indicar **SIM**, é **estritamente proibido** sugerir nova entrada ou alocação de capital. O foco é 100% a gestão da posição existente. (Nota: Se indicar 'Gerido pelo modelo FAST', desconsidera para efeitos de gestão de Breakouts).
+   - **REGRA DE OURO:** Se a PosicaoAtiva indicar **SIM**, é **estritamente proibido** sugerir nova entrada ou alocação de capital. O foco é 100% a gestão da posição existente. (Nota: Se indicar 'Gerido pelo modelo FAST', desconsidera para efeitos de gestão de Breakouts e mantém apenas a nota informativa).
    - **GESTÃO DO STOP LOSS:** Compara o 'StopAtual' com o 'Trailing'. Se o 'Trailing' for superior, recomenda subir o Stop. Se for igual ou inferior, indica manutenção.
    - Usa obrigatoriamente este template exato:
 
