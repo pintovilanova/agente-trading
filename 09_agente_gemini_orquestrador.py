@@ -12,9 +12,8 @@ from zoneinfo import ZoneInfo
 # SISTEMA DE TRADING INSTITUCIONAL - AGENTE IA ORQUESTRADOR (PIPELINE)
 # ===================================================================
 # Descrição:
-# Este script corre no final da pipeline diária. A sua missão é varrer
-# o disco da máquina virtual em busca dos ficheiros "comboio" gerados
-# por TODOS os motores quantitativos que correram antes dele.
+# Este script corre no final da pipeline diária. Varre o disco da máquina 
+# virtual em busca de TODOS os ficheiros "comboio" (Extratores US/EU e Motores).
 # Junta a informação, audita via Gemini LLM e envia um Email Unificado.
 # ===================================================================
 
@@ -34,62 +33,64 @@ genai.configure(api_key=GEMINI_API_KEY)
 # Usa o modelo Gemini configurado
 modelo_ia = genai.GenerativeModel('gemini-3.6-flash')
 
-# 2. DEFINIR OS FICHEIROS GERADOS PELOS TEUS MOTORES
+# 2. DEFINIR OS FICHEIROS GERADOS PELOS EXTRATORES E MOTORES
 ficheiros_alvo = [
-    "comboio_breakout_temp.txt",     # Ficheiro do Motor 07
-    "comboio_reversao_temp.txt",     # Ficheiro do Motor 03 (Pânico)
-    "comboio_earnings_temp.txt",     # Ficheiro do Motor 04 (PEAD)
-    "comboio_fast_trend_temp.txt"    # Ficheiro do Motor 06
+    "comboio_temp.txt",     # Ficheiro do Extrator US
+    "comboio_europa.txt", # Ficheiro do Extrator Europa
+    "comboio_vcp_temp.txt",             # Ficheiro do Motor 07 (VCP Breakout)
+    "comboio_reversao_temp.txt",        # Ficheiro do Motor 03 (Pânico)
+    "comboio_earnings_temp.txt",        # Ficheiro do Motor 04 (PEAD)
+    "comboio_connors_temp.txt",        # Ficheiro do Motor 05 (REVERSAO)
+    "comboio_carver_temp.txt"           # Ficheiro do Motor 06 (Fast Trend Carver)
 ]
 
 conteudo_bruto_total = ""
 motores_ativos = 0
 
-print("A procurar relatórios dos motores na máquina virtual...")
+print("A procurar relatórios dos extratores e motores na máquina virtual...")
 
 # 3. RECOLHER DADOS DE TODOS OS FICHEIROS DISPONÍVEIS
 for ficheiro in ficheiros_alvo:
     if os.path.exists(ficheiro):
         with open(ficheiro, "r", encoding="utf-8") as f:
             dados = f.read().strip()
-            # Só adiciona se o ficheiro tiver conteúdo útil
             if dados and "Nenhum ativo" not in dados and "[SEM OPORTUNIDADES]" not in dados:
                 conteudo_bruto_total += f"\n\n==================================\n"
                 conteudo_bruto_total += f"📁 FONTE: {ficheiro}\n"
                 conteudo_bruto_total += f"==================================\n{dados}\n"
                 motores_ativos += 1
-                print(f"[ENCONTRADO] Oportunidades detetadas no {ficheiro}.")
+                print(f"[ENCONTRADO] Dados detetados no {ficheiro}.")
             else:
-                print(f"[VAZIO] {ficheiro} lido, mas não contém oportunidades para hoje.")
+                print(f"[VAZIO] {ficheiro} lido, mas sem conteúdo relevante para hoje.")
     else:
-        print(f"[FALTA] {ficheiro} não encontrado (o motor pode ter falhado ou não correu).")
+        print(f"[FALTA] {ficheiro} não encontrado.")
 
 # 4. VALIDAÇÃO DE SEGURANÇA
 if motores_ativos == 0 or not conteudo_bruto_total.strip():
-    print("\n[INFO] Nenhum dos motores gerou oportunidades válidas hoje. A pipeline termina aqui de forma silenciosa.")
+    print("\n[INFO] Nenhum extrator ou motor gerou dados válidos hoje. A pipeline termina de forma silenciosa.")
     sys.exit(0)
 
-# 5. PROMPT DO ORQUESTRADOR IA
+# 5. PROMPT DO ORQUESTRADOR IA (Expandido para incluir Extratores)
 prompt_orquestrador = f"""
 És o Analista Quantitativo Principal (Agente Orquestrador).
-Abaixo estão os relatórios em bruto e as linhas de comboio geradas pelos nossos múltiplos Motores de Trading (Breakouts, Mean Reversion, Earnings Drift, etc.) no fecho do mercado de hoje.
+Abaixo estão os relatórios em bruto e as linhas de dados recolhidas tanto pelos Extratores de Mercado (US e Europa) como pelos vários Motores de Estratégia no fecho do mercado de hoje.
 
-A tua missão é analisar estes dados e escrever um ÚNICO relatório consolidado, limpo e altamente profissional para o Gestor de Conta aprovar a execução na corretora.
+A tua missão é analisar esta informação macro e tática, cruzando os dados dos extratores com os sinais dos motores, e escrever um ÚNICO relatório consolidado, limpo e altamente profissional para o Gestor de Conta aprovar na corretora.
 
 🚨 REGRAS ESTRITAS ANTI-ALUCINAÇÃO 🚨
 1. ZERO CRIATIVIDADE DE DADOS: Não inventes preços, tickers, stops ou tamanhos de posição. Usa exclusivamente os dados fornecidos abaixo.
-2. ESTRUTURA CLARA: Divide o relatório por ESTRATÉGIA (ex: "🚀 OPORTUNIDADES BREAKOUT", "🩸 RECUPERAÇÃO DE PÂNICO", etc.).
-3. FORMATO INSTITUCIONAL: Para cada ativo, indica claramente:
+2. ESTRUTURA CLARA: Divide o relatório por secções (ex: "🌍 PANORAMA MACRO & EXTRATORES", "🚀 OPORTUNIDADES BREAKOUT", "🩸 RECUPERAÇÃO DE PÂNICO", etc.).
+3. FORMATO INSTITUCIONAL: Para cada ativo de destaque, indica claramente:
    - Ticker e Nome
-   - Motivo (RS Score, RVOL, Variação)
-   - Plano de Ação: Entrada, Stop Loss, Take-Profit e Tamanho da Posição ($/Qtd)
+   - Indicadores de base recolhidos pelos extratores (RS Score, Variações)
+   - Plano de Ação tático: Entrada, Stop Loss, Take-Profit e Tamanho da Posição ($/Qtd)
 4. SÍNTESE: Sê direto e clínico. O gestor tem 1 minuto para ler este email.
 
 DADOS RECOLHIDOS HOJE:
 {conteudo_bruto_total}
 """
 
-print("\nA enviar dados consolidados para o Gemini Auditar...")
+print("\nA enviar dados consolidados (Extratores + Motores) para o Gemini Auditar...")
 try:
     resposta = modelo_ia.generate_content(prompt_orquestrador)
     relatorio_final = resposta.text
@@ -108,22 +109,19 @@ for tentativa in range(max_tentativas):
         msg['From'] = EMAIL_USER
         msg['To'] = EMAIL_USER
         
-        # Assunto dinâmico com a data
         data_hoje = datetime.now(ZoneInfo('Europe/Lisbon')).strftime('%d/%m/%Y')
-        msg['Subject'] = f"tradingRelatorioIA US - 🤖 RELATÓRIO MESTRE ({data_hoje})"
+        msg['Subject'] = f"tradingRelatorioIA Global - 🤖 RELATÓRIO MESTRE ({data_hoje})"
         
-        # Adicionar o relatório gerado pela IA
         msg.attach(MIMEText(relatorio_final, 'plain', 'utf-8'))
         
-        # Sistema de socket com timeout de 15 segundos
         server = smtplib.SMTP(SMTP_SERVER, SMTP_PORT, timeout=15)
         server.starttls()
         server.login(EMAIL_USER, EMAIL_PASS)
         server.sendmail(EMAIL_USER, EMAIL_USER, msg.as_string())
         server.quit()
         
-        print(f"[SUCESSO] Email Mestre Orquestrado enviado com sucesso na tentativa {tentativa + 1}!")
-        break  # Sai do loop após sucesso
+        print(f"[SUCESSO] Email Mestre Global enviado com sucesso na tentativa {tentativa + 1}!")
+        break
         
     except Exception as e:
         print(f"[ERRO] Falha ao enviar email mestre (tentativa {tentativa + 1} de {max_tentativas}): {e}")
@@ -131,4 +129,4 @@ for tentativa in range(max_tentativas):
             print("A aguardar 5 segundos antes de tentar novamente...")
             time.sleep(5)
         else:
-            print("[ERRO CRÍTICO] O servidor Gmail fechou a ligação definitivamente. Falha no envio do relatório mestre.")
+            print("[ERRO CRÍTICO] O servidor Gmail fechou a ligação definitivamente.")
