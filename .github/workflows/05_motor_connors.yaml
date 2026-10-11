@@ -1,4 +1,4 @@
-name: 05 🧲 Motor Connors-Chan (Reversão) (Íman que puxa o preço de volta à média)
+name: 05 - 🧲 Motor Connors-Chan (Reversão) (Íman que puxa o preço de volta à média)
 
 on:
   workflow_dispatch:
