@@ -86,4 +86,4 @@ jobs:
           EMAIL_USER: ${{ secrets.EMAIL_USER }}
           EMAIL_PASS: ${{ secrets.EMAIL_PASS }}
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }} 
-        run: python 02_agente_gemini.py
+        run: python 09_agente_gemini_orquestrador.py
