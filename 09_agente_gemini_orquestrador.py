@@ -21,6 +21,8 @@ from zoneinfo import ZoneInfo
 EMAIL_USER = os.environ.get("EMAIL_USER")
 EMAIL_PASS = os.environ.get("EMAIL_PASS")
 GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY")
+SMTP_SERVER = "smtp.gmail.com"
+SMTP_PORT = 587
 
 if not GEMINI_API_KEY:
     print("[ERRO] GEMINI_API_KEY não encontrada nas variáveis de ambiente.")
