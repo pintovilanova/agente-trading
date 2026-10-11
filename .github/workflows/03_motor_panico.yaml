@@ -1,4 +1,4 @@
-name: 03 Tático - Apenas Motor Pânico
+name: 03 🚨 Motor Pânico (Mean Reversion) (Sinal de emergência / Sobrevenda extrema)
 
 on:
   workflow_dispatch: # Permite disparar este motor manualmente a qualquer momento
