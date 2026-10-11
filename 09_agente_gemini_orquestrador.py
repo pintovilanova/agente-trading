@@ -13,8 +13,8 @@ from zoneinfo import ZoneInfo
 # ===================================================================
 # Descrição:
 # Este script corre no final da pipeline diária. Varre o disco da máquina 
-# virtual em busca de TODOS os ficheiros "comboio" (Extratores US/EU e Motores).
-# Junta a informação, audita via Gemini LLM e envia um Email Unificado.
+# virtual em busca de TODOS os ficheiros "comboio" gerados pelos motores.
+# Lê dinamicamente o conteúdo, audita via Gemini e envia o Relatório Mestre.
 # ===================================================================
 
 # 1. CREDENCIAIS (GitHub Secrets)
@@ -33,14 +33,14 @@ genai.configure(api_key=GEMINI_API_KEY)
 # Usa o modelo Gemini configurado
 modelo_ia = genai.GenerativeModel('gemini-3.6-flash')
 
-# 2. DEFINIR OS FICHEIROS GERADOS PELOS EXTRATORES E MOTORES
+# 2. DEFINIR TODOS OS FICHEIROS GERADOS PELOS EXTRATORES E MOTORES
 ficheiros_alvo = [
-    "comboio_temp.txt",     # Ficheiro do Extrator US
-    "comboio_europa.txt", # Ficheiro do Extrator Europa
+    "comboio_temp.txt",                 # Ficheiro do Extrator US
+    "comboio_europa.txt",               # Ficheiro do Extrator Europa
     "comboio_vcp_temp.txt",             # Ficheiro do Motor 07 (VCP Breakout)
     "comboio_reversao_temp.txt",        # Ficheiro do Motor 03 (Pânico)
     "comboio_earnings_temp.txt",        # Ficheiro do Motor 04 (PEAD)
-    "comboio_connors_temp.txt",        # Ficheiro do Motor 05 (REVERSAO)
+    "comboio_connors_temp.txt",         # Ficheiro do Motor 05 (REVERSAO)
     "comboio_carver_temp.txt"           # Ficheiro do Motor 06 (Fast Trend Carver)
 ]
 
@@ -70,25 +70,24 @@ if motores_ativos == 0 or not conteudo_bruto_total.strip():
     print("\n[INFO] Nenhum extrator ou motor gerou dados válidos hoje. A pipeline termina de forma silenciosa.")
     sys.exit(0)
 
-
-# 5. PROMPT DO ORQUESTRADOR IA
+# 5. PROMPT DO ORQUESTRADOR IA (Dinâmico e Contextualizado por Estratégia)
 prompt_orquestrador = f"""
 És o Analista Quantitativo Principal (Agente Orquestrador).
-Abaixo estão os relatórios em bruto e as linhas de dados recolhidas tanto pelos Extratores de Mercado (US e Europa) como pelos vários Motores de Estratégia no fecho do mercado de hoje.
+Abaixo estão os relatórios em bruto e os dados gerados dinamicamente pelos Extratores de Mercado (US e Europa) e pelos vários Motores de Estratégia no fecho do mercado de hoje.
 
-A tua missão é analisar esta informação e escrever um relatório consolidado e altamente profissional para o Gestor de Conta aprovar na corretora.
+A tua missão é ler integralmente este conteúdo, processar todos os ativos que aparecem nas fontes e compilar um ÚNICO relatório consolidado, limpo, detalhado e altamente profissional para o Gestor de Conta aprovar na corretora.
 
-🚨 REGRAS ESTRITAS ANTI-ALUCINAÇÃO & ANTI-CORTE 🚨
-1. ZERO CRIATIVIDADE DE DADOS: Não inventes preços, tickers, stops ou tamanhos de posição. Usa exclusivamente os dados fornecidos abaixo.
-2. PROIBIDO OMITIR ATIVOS: Deves incluir e listar TODOS os ativos presentes nos dados dos Extratores (US e Europa) e dos Motores. Não resumas excessivamente nem cortes ativos secundários ou suplementares. Cada linha de dados relevante tem de transparecer no relatório final.
-3. ESTRUTURA CLARA: Divide o relatório por secções organizadas (ex: "🌍 PANORAMA MACRO & EXTRATORES US/EU", "🚀 OPORTUNIDADES BREAKOUT", etc.).
-4. FORMATO INSTITUCIONAL: Mantém o rigor clínico e direto.
+🚨 REGRAS ESTRITAS ANTI-ALUCINAÇÃO & CONTEXTO DE GESTÃO 🚨
+1. ZERO CRIATIVIDADE DE DADOS: Não inventes preços, tickers, stops ou tamanhos de posição. Utiliza unicamente e na íntegra os dados fornecidos nos ficheiros abaixo.
+2. LEITURA INTEGRAL (PROIBIDO OMITIR ATIVOS): Deves incluir todos os ativos, posições ativas, alertas macro e sinais de entrada que constem nas fontes fornecidas.
+3. ESTRUTURA INSTITUCIONAL DINÂMICA: Organiza o relatório por secções lógicas com base nas fontes lidas.
+4. RESTRIÇÃO DE NOTAS OPERACIONAIS: O lembrete operacional referente à alteração do estado no Google Sheets para 'ATIVA_FAST' e à gestão de Trailing Stop diário deve ser posicionado **estritamente e de forma exclusiva** na secção afeta ao **Fast Trend Carver**. Nunca mistures esta regra com outras estratégias (como Breakouts clássicos, Pânico ou PEAD), uma vez que a mecânica 'ATIVA_FAST' é exclusiva desse modelo.
 
-DADOS RECOLHIDOS HOJE:
+DADOS RECOLHIDOS HOJE NOS FICHEIROS:
 {conteudo_bruto_total}
 """
 
-print("\nA enviar dados consolidados (Extratores + Motores) para o Gemini Auditar...")
+print("\nA enviar dados consolidados para o Gemini Auditar...")
 try:
     resposta = modelo_ia.generate_content(prompt_orquestrador)
     relatorio_final = resposta.text
