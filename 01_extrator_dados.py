@@ -139,6 +139,7 @@ dados_temporarios = []
 for ativo_info in ativos_data:
     ticker = ativo_info.get("ticker")
     nome_empresa = ativo_info.get("nome", "N/A")
+    rs_score = ativo_info.get("rs_score", "N/A")
     
     if not ticker or ticker == "#N/A":
         continue
@@ -286,10 +287,24 @@ for ativo_info in ativos_data:
             except:
                 return "N/A"
 
+        # Análise contextual do RS Score (Coluna O)
+        try:
+            val_rs = float(rs_score)
+            if val_rs >= 80:
+                status_rs = "🔥 ELITE (RS >= 80 - Vento a Favor)"
+            elif val_rs >= 50:
+                status_rs = "⚖️ NEUTRO (RS 50-79 - Acompanha o Mercado)"
+            else:
+                status_rs = "⚠️ FRACO / LAGGARD (RS < 50 - Vento Contra)"
+        except ValueError:
+            status_rs = "❓ SEM DADO DE RS"
+
         dados_temporarios.append({
             "ticker": ticker,
             "nome": nome_empresa,
             "setor": setor,
+            "rs_score": rs_score,
+            "status_rs": status_rs,
             "preco": limpa(preco),
             "dist_mm20": limpa(dist_mm20),
             "ema9": limpa(ema9),
@@ -348,6 +363,7 @@ for d in dados_temporarios:
     
     linha_comboio = (
         f"{d['ticker']},Nome: {d['nome']},Setor: {d['setor']},Preço: {d['preco']},"
+        f"RS Score: {d['rs_score']} ({d['status_rs']}),"
         f"Dist MM20: {d['dist_mm20']}%,EMA9: {d['ema9']},Momentum: {d['momentum']},"
         f"RSI: {d['rsi']},ADX: {d['adx']},ATR: {d['atr']} (Vol: {d['atr_perc']}%),"
         f"RVOL: {d['rvol']},Estado: {d['estado']},Entrada: {entrada_str},"
@@ -359,6 +375,7 @@ for d in dados_temporarios:
     resultados_para_sheets.append({
         "ticker": d['ticker'],
         "preco": d['preco'],
+        "rs_score": d['rs_score'],
         "momentum": d['momentum'],
         "rsi": d['rsi'],
         "adx": d['adx'],
@@ -418,6 +435,7 @@ Regras Operacionais Estritas de Triagem, Carteira e Ataque:
 3. ANÁLISE DE VULNERABILIDADE E POTENCIAL (CRÍTICO):
    Cruza os dados e aplica as seguintes bandeiras táticas:
    - REGRA DA MOLA (MM20): Se 'Dist MM20' > 2.5%, alerta [AVISO: PREÇO ESTICADO - Risco de Pullback].
+   - CONTEXTO INSTITUCIONAL (RS SCORE): Presta especial atenção ao RS Score e estado de força relativa reportados em cada ativo para filtrar se o mercado apoia o arranque.
    - ANTECIPAÇÃO (EMA9): Se o estado for 'Ignicao EMA9', o motor está a tentar apanhar o movimento no início. Valida se o RVOL > 1.0 e se o Momentum apoia. Se sim, marca 🚀 [IGNIÇÃO EMA9 - Ponto de Entrada Antecipado].
    - COMPRESSÃO (ATR vs RVOL): Se o RVOL > 1.5 e Momentum sólido, marca [POTENCIAL DE COMPRESSÃO] (alta prioridade).
    - EXAUSTÃO: Se RSI > 70 mas Momentum < 1.0 ou RVOL < 1.3, alerta [AVISO DE EXAUSTÃO - Sem Combustível].
@@ -440,6 +458,7 @@ Regras Operacionais Estritas de Triagem, Carteira e Ataque:
 
    🎯 [TICKER] - [Nome da Empresa] ([Setor]) [Adicionar tag (SUPLENTE) se aplicável]
    - 🚩 BANDEIRAS: (Avisos ou "Limpo")
+   - 📊 CONTEXTO INSTITUCIONAL: RS Score e respetivo estado de Força Relativa.
    - ⚠️ ESTADO NA CARTEIRA: [POSIÇÃO ATIVA... ou Nenhuma posição aberta]
    - ⚙️ EXECUÇÃO / DEFESA: (Regra dos Gaps e Gestão de Stop)
    - 🛡️ TAMANHO DA POSIÇÃO: Lê o campo 'Lote' da linha de referência e transcreve (Ex: 'Lote Reduzido a 50%' ou 'Lote Completo').
