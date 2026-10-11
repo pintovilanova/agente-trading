@@ -1,8 +1,8 @@
-name: 00 - 🛑 Motor de Regime de Mercado (Macro)
+name: 🛡️⚡ 00 - Motor de Regime de Mercado (Macro)
 
 on:
   schedule:
-    # Executa de segunda a sexta-feira às 21:00 UTC (ajusta conforme preferires)
+    # Executa de segunda a sexta-feira às 21:00 UTC
     - cron: '0 21 * * 1-5'
   workflow_dispatch: # Permite executar manualmente a partir do botão no GitHub
 
@@ -23,7 +23,7 @@ jobs:
       - name: Instalar Dependências
         run: |
           python -m pip install --upgrade pip
-          pip install yfinance pandas requests
+          pip install yfinance pandas pandas-ta requests
 
       - name: Executar Disjuntor Macro
         env:
