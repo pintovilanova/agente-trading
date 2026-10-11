@@ -41,12 +41,16 @@ jobs:
         continue-on-error: true
         env:
           WEBHOOK_URL: ${{ secrets.WEBHOOK_URL }}
+          EMAIL_USER: ${{ secrets.EMAIL_USER }}  # <-- ADICIONAR ISTO
+          EMAIL_PASS: ${{ secrets.EMAIL_PASS }}  # <-- ADICIONAR ISTO
         run: python 01_extrator_dados.py
 
       - name: 📥 01 - Executar Extrator Europa
         continue-on-error: true
         env:
           WEBHOOK_URL: ${{ secrets.WEBHOOK_URL }}
+          EMAIL_USER: ${{ secrets.EMAIL_USER }}  # <-- ADICIONAR ISTO
+          EMAIL_PASS: ${{ secrets.EMAIL_PASS }}  # <-- ADICIONAR ISTO
         run: python 01_extrator_europa.py
 
       # ==========================================================
