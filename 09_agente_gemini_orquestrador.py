@@ -45,7 +45,6 @@ ficheiros_alvo = [
 ]
 
 conteudo_bruto_total = ""
-motores_ativos = 0
 
 print("A procurar relatórios dos extratores e motores na máquina virtual...")
 
@@ -54,20 +53,31 @@ for ficheiro in ficheiros_alvo:
     if os.path.exists(ficheiro):
         with open(ficheiro, "r", encoding="utf-8") as f:
             dados = f.read().strip()
+            
+            conteudo_bruto_total += f"\n\n==================================\n"
+            conteudo_bruto_total += f"📁 FONTE: {ficheiro}\n"
+            conteudo_bruto_total += f"==================================\n"
+            
+            # Se tiver conteúdo válido de ativos
             if dados and "Nenhum ativo" not in dados and "[SEM OPORTUNIDADES]" not in dados:
-                conteudo_bruto_total += f"\n\n==================================\n"
-                conteudo_bruto_total += f"📁 FONTE: {ficheiro}\n"
-                conteudo_bruto_total += f"==================================\n{dados}\n"
-                motores_ativos += 1
+                conteudo_bruto_total += f"{dados}\n"
                 print(f"[ENCONTRADO] Dados detetados no {ficheiro}.")
             else:
-                print(f"[VAZIO] {ficheiro} lido, mas sem conteúdo relevante para hoje.")
+                # SE ESTIVER VAZIO, AVISA A IA EM VEZ DE OMITIR!
+                conteudo_bruto_total += "[SEM SINAIS OU OPORTUNIDADES PARA ESTA ESTRATÉGIA HOJE]\n"
+                print(f"[VAZIO] {ficheiro} lido, adicionado como sem sinais ao relatório.")
     else:
+        conteudo_bruto_total += f"\n\n==================================\n"
+        conteudo_bruto_total += f"📁 FONTE: {ficheiro}\n"
+        conteudo_bruto_total += f"==================================\n"
+        conteudo_bruto_total += "[ERRO: FICHEIRO NÃO ENCONTRADO - MOTOR PODE TER FALHADO]\n"
         print(f"[FALTA] {ficheiro} não encontrado.")
 
 # 4. VALIDAÇÃO DE SEGURANÇA
-if motores_ativos == 0 or not conteudo_bruto_total.strip():
-    print("\n[INFO] Nenhum extrator ou motor gerou dados válidos hoje. A pipeline termina de forma silenciosa.")
+# Retirada a trava de "motores_ativos == 0" para garantir que, mesmo num dia de mercado 
+# completamente morto em que nenhum motor dá sinal, recebes um relatório a atestar isso.
+if not conteudo_bruto_total.strip():
+    print("\n[INFO] Nenhum dado gerado. A pipeline termina de forma silenciosa.")
     sys.exit(0)
 
 # 5. PROMPT DO ORQUESTRADOR IA (Dinâmico e Contextualizado por Estratégia)
@@ -79,7 +89,7 @@ A tua missão é ler integralmente este conteúdo, processar todos os ativos que
 
 🚨 REGRAS ESTRITAS ANTI-ALUCINAÇÃO & CONTEXTO DE GESTÃO 🚨
 1. ZERO CRIATIVIDADE DE DADOS: Não inventes preços, tickers, stops ou tamanhos de posição. Utiliza unicamente e na íntegra os dados fornecidos nos ficheiros abaixo.
-2. LEITURA INTEGRAL (PROIBIDO OMITIR ATIVOS): Deves incluir todos os ativos, posições ativas, alertas macro e sinais de entrada que constem nas fontes fornecidas.
+2. LEITURA INTEGRAL (PROIBIDO OMITIR ATIVOS OU ESTRATÉGIAS): Deves incluir todos os ativos, posições ativas, alertas macro e sinais de entrada. Se uma fonte indicar "[SEM SINAIS OU OPORTUNIDADES PARA ESTA ESTRATÉGIA HOJE]", DEVES criar a secção respetiva baseada no nome do ficheiro fonte (ex: EARNINGS DRIFT, VCP BREAKOUT, etc.) e escrever explicitamente que não há sinais hoje. Não omitas NENHUMA estratégia.
 3. ESTRUTURA INSTITUCIONAL DINÂMICA: Organiza o relatório por secções lógicas com base nas fontes lidas.
 4. RESTRIÇÃO DE NOTAS OPERACIONAIS: O lembrete operacional referente à alteração do estado no Google Sheets para 'ATIVA_FAST' e à gestão de Trailing Stop diário deve ser posicionado **estritamente e de forma exclusiva** na secção afeta ao **Fast Trend Carver**. Nunca mistures esta regra com outras estratégias (como Breakouts clássicos, Pânico ou PEAD), uma vez que a mecânica 'ATIVA_FAST' é exclusiva desse modelo.
 
