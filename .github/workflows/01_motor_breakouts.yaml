@@ -1,4 +1,4 @@
-name: 01 Tático - Apenas Motor Breakouts
+name: 01 - 🗽 Extrator de Dados (EUA) (Extração do mercado americano)
 
 on:
   workflow_dispatch:
