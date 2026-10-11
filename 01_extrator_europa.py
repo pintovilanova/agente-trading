@@ -12,6 +12,7 @@ import sys
 import smtplib
 import json
 import numpy as np
+import time
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 
@@ -37,26 +38,44 @@ SMTP_SERVER = "smtp.gmail.com"
 SMTP_PORT = 587
 
 # ===================================================================
-# 1. FUNÇÃO DE ENVIO DE EMAIL
+# 1. FUNÇÃO DE ENVIO DE EMAIL (Com Sistema Anti-Falhas)
 # ===================================================================
 def enviar_email_para_agente_ia(relatorio_texto, assunto="🇪🇺🎯 tradingRelatorioIA Europa 🛡️"):
     print(f"\nA enviar email para o Agente IA (Assunto: '{assunto}')...")
-    try:
-        msg = MIMEMultipart()
-        msg['From'] = EMAIL_USER
-        msg['To'] = EMAIL_USER
-        msg['Subject'] = assunto
-        
-        msg.attach(MIMEText(relatorio_texto, 'plain', 'utf-8'))
-        
-        server = smtplib.SMTP(SMTP_SERVER, SMTP_PORT)
-        server.starttls()
-        server.login(EMAIL_USER, EMAIL_PASS)
-        server.sendmail(EMAIL_USER, EMAIL_USER, msg.as_string())
-        server.quit()
-        print(f"[SUCESSO] Email enviado! O teu Agente IA já pode ler a caixa de entrada.")
-    except Exception as e:
-        print(f"[ERRO] Falha ao enviar o email para o Agente IA: {e}")
+    
+    # Validação de segurança das credenciais
+    if not EMAIL_USER or not EMAIL_PASS:
+        print("[AVISO] Credenciais de email em falta. A saltar envio.")
+        return
+
+    msg = MIMEMultipart()
+    msg['From'] = EMAIL_USER
+    msg['To'] = EMAIL_USER
+    msg['Subject'] = assunto
+    
+    msg.attach(MIMEText(relatorio_texto, 'plain', 'utf-8'))
+    
+    # Sistema de Tolerância a Falhas (Retry) com Timeout
+    max_tentativas = 3
+    for tentativa in range(max_tentativas):
+        try:
+            # Adicionado timeout=15 para evitar que a ligação encrave
+            server = smtplib.SMTP(SMTP_SERVER, SMTP_PORT, timeout=15)
+            server.starttls()
+            server.login(EMAIL_USER, EMAIL_PASS)
+            server.sendmail(EMAIL_USER, EMAIL_USER, msg.as_string())
+            server.quit()
+            
+            print(f"[SUCESSO] Email enviado na tentativa {tentativa + 1}! O teu Agente IA já pode ler a caixa de entrada.")
+            break  # Se enviou com sucesso, quebra o loop e avança
+            
+        except Exception as e:
+            print(f"[ERRO] Falha ao enviar o email (tentativa {tentativa + 1} de {max_tentativas}): {e}")
+            if tentativa < max_tentativas - 1:
+                print("A aguardar 5 segundos antes de tentar novamente...")
+                time.sleep(5)
+            else:
+                print("[ERRO CRÍTICO] O servidor Gmail fechou a ligação definitivamente. Falha no envio.")
 
 # ===================================================================
 # 2. BUSCAR A WATCHLIST E POSIÇÕES ATIVAS (Google Sheets via Webhook)
