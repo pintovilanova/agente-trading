@@ -20,6 +20,7 @@
 # 3. Anomalia e Filtro PEAD:
 #    - Validação de datas de resultados recentes via yfinance.
 #    - Confirmação de momento de continuação por volume institucional (RVOL).
+#    - Integração do RS Score institucional (Coluna O) para contexto de força.
 # 4. Integração Cloud & LLM:
 #    - Sincronização bidirecional com Google Sheets via Webhook (Aba: Earnings Drift).
 #    - Gravação local ("comboio_earnings_temp.txt") e envio de email com prompt 
@@ -113,7 +114,12 @@ def enviar_email(conteudo):
 # ===================================================================
 # 3. MOTOR MATEMÁTICO: EARNINGS DRIFT (PEAD)
 # ===================================================================
-def analisar_earnings_drift(ticker, nome_empresa, setor):
+def analisar_earnings_drift(ativo_info):
+    ticker = ativo_info.get("ticker")
+    nome_empresa = ativo_info.get("nome", "N/A")
+    setor = ativo_info.get("setor", "Desconhecido")
+    rs_score = ativo_info.get("rs_score", "N/A")
+
     try:
         ticker_obj = yf.Ticker(ticker)
         
@@ -191,8 +197,21 @@ def analisar_earnings_drift(ticker, nome_empresa, setor):
             if pd.isna(v) or v == "N/A": return "N/A"
             return round(float(v), 2)
 
+        # Análise contextual do RS Score (Coluna O)
+        try:
+            val_rs = float(rs_score)
+            if val_rs >= 80:
+                status_rs = "🔥 ELITE (RS >= 80 - Vento a Favor)"
+            elif val_rs >= 50:
+                status_rs = "⚖️ NEUTRO (RS 50-79 - Acompanha o Mercado)"
+            else:
+                status_rs = "⚠️ FRACO / LAGGARD (RS < 50 - Vento Contra)"
+        except ValueError:
+            status_rs = "❓ SEM DADO DE RS"
+
         linha_comboio = (
             f"{ticker},Nome: {nome_empresa},Setor: {setor},Preço: {limpa(preco)},"
+            f"RS Score: {rs_score} ({status_rs}),"
             f"DataEarnings: {data_earnings_str},VarDia: {limpa(var_perc)}%,RVOL: {limpa(rvol)},"
             f"Estado: {estado},Entrada: {limpa(entrada)},Stop: {limpa(stop_loss)},"
             f"Take-Profit: {limpa(alvo_tp)},Qtd: {qtd_acoes},ValorInvestir: {valor_investir},"
@@ -202,6 +221,8 @@ def analisar_earnings_drift(ticker, nome_empresa, setor):
         return {
             "ticker": ticker,
             "preco": limpa(preco),
+            "rs_score": rs_score,
+            "status_rs": status_rs,
             "data_earnings": data_earnings_str,
             "var_perc": f"{limpa(var_perc)}%",
             "rvol": limpa(rvol),
@@ -233,17 +254,14 @@ def executar_motor():
         ticker = ativo_info.get("ticker")
         if not ticker or ticker == "#N/A": continue
         
-        res = analisar_earnings_drift(
-            ticker, 
-            ativo_info.get("nome", "N/A"), 
-            ativo_info.get("setor", "Desconhecido")
-        )
+        res = analisar_earnings_drift(ativo_info)
         
         if res:
             print(f"[SUCESSO] {ticker} ativado no motor PEAD!")
             resultados_para_sheets.append({
                 "ticker": res['ticker'],
                 "preco": res['preco'],
+                "rs_score": res['rs_score'],
                 "data_earnings": res['data_earnings'],
                 "var_perc": res['var_perc'],
                 "rvol": res['rvol'],
@@ -285,6 +303,7 @@ def executar_motor():
         "Estrutura Visual Obrigatória:\n"
         "🎯 [TICKER] - [Nome da Empresa] ([Setor])\n"
         "- 🚀 CATALISADOR DE EARNINGS: Data do evento: [DataEarnings] | Salto inicial: [VarDia%]\n"
+        "- 📊 CONTEXTO INSTITUCIONAL (RS SCORE): [Incluir o RS Score e o respetivo estado institucional reportado]\n"
         "- 🩸 PEGADA INSTITUCIONAL: RVOL detetado de [RVOL]\n"
         "- ⚙️ TÁTICA: EARNINGS DRIFT. Surfar tendência com rácio 2:1.\n"
         "- 🔢 DADOS EXATOS: Entrada: X | Stop: X | TP: X | Qtd: X | Valor a Investir: X\n"
