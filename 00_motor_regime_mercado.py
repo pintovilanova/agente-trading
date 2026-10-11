@@ -112,6 +112,11 @@ try:
 
     else:
         print("\n[OK] Mercado Saudável. Disjuntor Macro em verde. Pipeline autorizado a prosseguir.")
+        
+        # Envia o email de "Tudo Verde"
+        corpo_verde = "✅ [DISJUNTOR MACRO VERDE] - MERCADO SAUDÁVEL\n\nO Motor Macro confirmou que o SPY e o VIX estão em níveis normais. A pipeline de trading está autorizada a prosseguir."
+        enviar_alerta_macro("tradingRelatorioIA US - ✅ MERCADO SAUDÁVEL", corpo_verde)
+        
         sys.exit(0)  # Sucesso limpo
 
 except Exception as e:
