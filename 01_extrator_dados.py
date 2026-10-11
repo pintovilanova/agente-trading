@@ -139,7 +139,7 @@ dados_temporarios = []
 for ativo_info in ativos_data:
     ticker = ativo_info.get("ticker")
     nome_empresa = ativo_info.get("nome", "N/A")
-    rs_score = ativo_info.get("rs_score", "N/A")
+    rs_score = ativo_info.get("RS Score", "N/A")
     
     if not ticker or ticker == "#N/A":
         continue
