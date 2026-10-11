@@ -30,6 +30,7 @@ import sys
 import os
 import requests
 import smtplib
+import time
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 
@@ -73,25 +74,44 @@ def buscar_watchlist():
         print(f"[ERRO CRÍTICO] Sheets: {e}")
         return []
 
+# ===================================================================
+# FUNÇÃO DE ENVIO DE EMAIL (Com Sistema Anti-Falhas)
+# ===================================================================
 def enviar_email(conteudo):
     print("\nA enviar email VCP/Squeeze para o Agente IA...")
+    
     if not EMAIL_USER or not EMAIL_PASS:
+        print("[AVISO] Credenciais de email em falta. A saltar envio.")
         return
-    try:
-        msg = MIMEMultipart()
-        msg['From'] = EMAIL_USER
-        msg['To'] = EMAIL_USER
-        msg['Subject'] = "🎯 tradingRelatorioIA US - VCP BREAKOUT SQUEEZE"
-        msg.attach(MIMEText(conteudo, 'plain', 'utf-8'))
-        
-        server = smtplib.SMTP(SMTP_SERVER, SMTP_PORT)
-        server.starttls()
-        server.login(EMAIL_USER, EMAIL_PASS)
-        server.sendmail(EMAIL_USER, EMAIL_USER, msg.as_string())
-        server.quit()
-        print("[SUCESSO] Email enviado!")
-    except Exception as e:
-        print(f"[ERRO] Falha ao enviar email: {e}")
+
+    msg = MIMEMultipart()
+    msg['From'] = EMAIL_USER
+    msg['To'] = EMAIL_USER
+    msg['Subject'] = "🎯 tradingRelatorioIA US - VCP BREAKOUT SQUEEZE"
+    
+    msg.attach(MIMEText(conteudo, 'plain', 'utf-8'))
+    
+    # Sistema de Tolerância a Falhas (Retry) com Timeout
+    max_tentativas = 3
+    for tentativa in range(max_tentativas):
+        try:
+            # Adicionado timeout de 15 segundos para proteger contra bloqueios do Gmail
+            server = smtplib.SMTP(SMTP_SERVER, SMTP_PORT, timeout=15)
+            server.starttls()
+            server.login(EMAIL_USER, EMAIL_PASS)
+            server.sendmail(EMAIL_USER, EMAIL_USER, msg.as_string())
+            server.quit()
+            
+            print(f"[SUCESSO] Email VCP enviado na tentativa {tentativa + 1}!")
+            break  # Sai do loop por sucesso
+            
+        except Exception as e:
+            print(f"[ERRO] Falha ao enviar o email (tentativa {tentativa + 1} de {max_tentativas}): {e}")
+            if tentativa < max_tentativas - 1:
+                print("A aguardar 5 segundos antes de tentar novamente...")
+                time.sleep(5)
+            else:
+                print("[ERRO CRÍTICO] O servidor Gmail fechou a ligação definitivamente. Falha no envio.")
 
 # ===================================================================
 # 3. MOTOR MATEMÁTICO: COMPRESSÃO DE VOLATILIDADE
