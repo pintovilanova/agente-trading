@@ -1,5 +1,3 @@
-from datetime import datetime
-from zoneinfo import ZoneInfo
 import yfinance as yf
 import pandas as pd
 import os
@@ -7,6 +5,8 @@ import sys
 import smtplib
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
+from datetime import datetime
+from zoneinfo import ZoneInfo
 
 # ===================================================================
 # 0. TRAVA DE FIM DE SEMANA
@@ -14,7 +14,7 @@ from email.mime.multipart import MIMEMultipart
 dia_da_semana = datetime.now(ZoneInfo("Europe/Lisbon")).weekday()
 if dia_da_semana >= 5:
     print("[INFO] Fim de semana detetado. O mercado está fechado. O Disjuntor Macro vai descansar.")
-    #sys.exit(0)
+    # sys.exit(0) # Se quiseres que ele pare de correr ao fim de semana, tira o # desta linha.
 
 # ===================================================================
 # 1. CONFIGURAÇÕES E CREDENCIAIS (GitHub Secrets)
@@ -66,7 +66,7 @@ try:
     if isinstance(df_vix.columns, pd.MultiIndex):
         df_vix.columns = df_vix.columns.droplevel(1)
 
-    # Calcular SMA 200 explicitamente com pandas para evitar falhas do pandas_ta
+    # Calcular SMA 200 explicitamente com pandas para evitar falhas
     df_spy['SMA_200'] = df_spy['Close'].rolling(window=200).mean()
 
     spy_hoje = df_spy.iloc[-1]
@@ -107,17 +107,24 @@ try:
         corpo_email += f"\nData/Hora: {datetime.now(ZoneInfo('Europe/Lisbon')).strftime('%d/%m/%Y %H:%M:%S')}"
         
         enviar_alerta_macro("tradingRelatorioIA US - 🚨 BLOQUEIO MACRO (DISJUNTOR ATIVO)", corpo_email)
-        print(f"\n[BLOQUEIO] Condições macro hostil detetadas. A abortar pipeline.")
-        sys.exit(1)  # Retorna código de erro para parar o workflow do GitHub Actions
+        print(f"\n[BLOQUEIO] Condições macro hostis detetadas. A abortar pipeline.")
+        sys.exit(1)  
 
     else:
         print("\n[OK] Mercado Saudável. Disjuntor Macro em verde. Pipeline autorizado a prosseguir.")
         
-        # Envia o email de "Tudo Verde"
-        corpo_verde = "✅ [DISJUNTOR MACRO VERDE] - MERCADO SAUDÁVEL\n\nO Motor Macro confirmou que o SPY e o VIX estão em níveis normais. A pipeline de trading está autorizada a prosseguir."
+        # Bloco atualizado para enviar o sinal de vida com os dados
+        corpo_verde = "✅ [DISJUNTOR MACRO VERDE] - MERCADO SAUDÁVEL\n\n"
+        corpo_verde += "O Motor Macro confirmou que as condições do mercado norte-americano estão saudáveis e sem anomalias sistémicas. A pipeline de trading está autorizada a prosseguir.\n\n"
+        corpo_verde += f"📊 DADOS MACRO DO DIA:\n"
+        corpo_verde += f"-> SPY Fecho: {preco_spy:.2f} USD (Variação: {queda_spy:.2f}%)\n"
+        corpo_verde += f"-> SPY SMA200: {sma200_spy:.2f} USD\n"
+        corpo_verde += f"-> VIX Atual: {vix_hoje:.2f}\n\n"
+        corpo_verde += f"Data/Hora de Execução: {datetime.now(ZoneInfo('Europe/Lisbon')).strftime('%d/%m/%Y %H:%M:%S')}"
+        
         enviar_alerta_macro("tradingRelatorioIA US - ✅ MERCADO SAUDÁVEL", corpo_verde)
         
-        sys.exit(0)  # Sucesso limpo
+        sys.exit(0)  
 
 except Exception as e:
     print(f"[ERRO CRÍTICO] Falha na auditoria macro: {e}")
