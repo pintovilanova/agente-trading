@@ -1,4 +1,4 @@
-name: 01 - 🇪🇺 Extrator Europa (Extração do mercado europeu)
+name: 01 - 💶 Extrator Europa (Extração do mercado europeu)
 
 on:
   workflow_dispatch: # Permite executar manualmente no GitHub
