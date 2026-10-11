@@ -38,7 +38,7 @@ jobs:
       # 2. EXTRATORES (Com tolerância a falhas)
       # ==========================================================
       - name: 📥 01 - Executar Extrator US
-        continue-on-error: true  # Se falhar, avança para o próximo!
+        continue-on-error: true
         env:
           WEBHOOK_URL: ${{ secrets.WEBHOOK_URL }}
         run: python 01_extrator_dados.py
@@ -64,6 +64,12 @@ jobs:
           WEBHOOK_URL: ${{ secrets.WEBHOOK_URL }}
         run: python 03_motor_mean_reversion.py
 
+      - name: 📉 05 - Executar Motor Reversão Chan
+        continue-on-error: true
+        env:
+          WEBHOOK_URL: ${{ secrets.WEBHOOK_URL }}
+        run: python 05_motor_reversao_chan.py
+
       - name: 📈 04 - Executar Motor Earnings Drift (PEAD)
         continue-on-error: true
         env:
@@ -79,8 +85,7 @@ jobs:
       # ==========================================================
       # 4. AUDITORIA FINAL IA (Corre e envia o que foi recolhido)
       # ==========================================================
-      - name: 🤖 02 - Executar Agente IA
-        # A IA não tem continue-on-error para sabermos se o envio do email falhou
+      - name: 🤖 09 - Executar Agente IA Orquestrador
         env:
           WEBHOOK_URL: ${{ secrets.WEBHOOK_URL }}
           EMAIL_USER: ${{ secrets.EMAIL_USER }}
