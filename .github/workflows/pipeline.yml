@@ -1,4 +1,4 @@
-name: 00 - 🚀 Pipeline Diária de Trading Institucional
+name: 🚀 Pipeline Diária de Trading Institucional
 
 on:
   schedule:
@@ -56,30 +56,40 @@ jobs:
         continue-on-error: true
         env:
           WEBHOOK_URL: ${{ secrets.WEBHOOK_URL }}
+          EMAIL_USER: ${{ secrets.EMAIL_USER }}
+          EMAIL_PASS: ${{ secrets.EMAIL_PASS }}
         run: python 07_motor_vcp_breakout.py
 
       - name: 🩸 03 - Executar Motor Mean Reversion (Pânico)
         continue-on-error: true
         env:
           WEBHOOK_URL: ${{ secrets.WEBHOOK_URL }}
+          EMAIL_USER: ${{ secrets.EMAIL_USER }}
+          EMAIL_PASS: ${{ secrets.EMAIL_PASS }}
         run: python 03_motor_mean_reversion.py
 
       - name: 📉 05 - Executar Motor Reversão Chan
         continue-on-error: true
         env:
           WEBHOOK_URL: ${{ secrets.WEBHOOK_URL }}
+          EMAIL_USER: ${{ secrets.EMAIL_USER }}
+          EMAIL_PASS: ${{ secrets.EMAIL_PASS }}
         run: python 05_motor_reversao_chan.py
 
       - name: 📈 04 - Executar Motor Earnings Drift (PEAD)
         continue-on-error: true
         env:
           WEBHOOK_URL: ${{ secrets.WEBHOOK_URL }}
+          EMAIL_USER: ${{ secrets.EMAIL_USER }}
+          EMAIL_PASS: ${{ secrets.EMAIL_PASS }}
         run: python 04_motor_earnings_drift.py
 
       - name: ⚡ 06 - Executar Motor Fast Trend Carver
         continue-on-error: true
         env:
           WEBHOOK_URL: ${{ secrets.WEBHOOK_URL }}
+          EMAIL_USER: ${{ secrets.EMAIL_USER }}
+          EMAIL_PASS: ${{ secrets.EMAIL_PASS }}
         run: python 06_motor_fast_trend_carver.py
 
       # ==========================================================
