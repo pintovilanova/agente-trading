@@ -29,7 +29,7 @@ if not GEMINI_API_KEY:
 genai.configure(api_key=GEMINI_API_KEY)
 
 # Usa o modelo Gemini mais capaz para texto
-modelo_ia = genai.GenerativeModel('gemini-1.5-pro')
+modelo_ia = genai.GenerativeModel('gemini-3.6-flash')
 
 # 2. DEFINIR OS FICHEIROS GERADOS PELOS TEUS MOTORES
 # Ajusta estes nomes para os nomes exatos dos ficheiros TXT que os teus 
