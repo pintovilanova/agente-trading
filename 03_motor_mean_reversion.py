@@ -15,7 +15,7 @@
 #    - Distância à SMA20 inferior ou igual a -8.0%.
 #    - RSI de 14 períodos em sobrevenda extrema (< 30).
 #    - Confirmação institucional por Volume Relativo (RVOL >= 1.5) 
-#      OU padrão devela de Absorção (Sombra inferior > 1.5x o corpo).
+#      OU padrão de vela de Absorção (Sombra inferior > 1.5x o corpo).
 # 3. Gestão de Risco Institucional (Método Carver - Target Volatility):
 #    - Orçamento de flutuação diária calculado com base na volatilidade 
 #      anual alvo (5%) sobre o capital total da conta ($10,400.00).
@@ -115,7 +115,12 @@ def enviar_email(conteudo):
 # ===================================================================
 # 3. MOTOR MATEMÁTICO: REVERSÃO À MÉDIA (COM TARGET VOLATILITY)
 # ===================================================================
-def analisar_reversao_media(ticker, nome_empresa, setor):
+def analisar_reversao_media(ativo_info):
+    ticker = ativo_info.get("ticker")
+    nome_empresa = ativo_info.get("nome", "N/A")
+    setor = ativo_info.get("setor", "Desconhecido")
+    rs_score = ativo_info.get("rs_score", "N/A")
+
     try:
         df = yf.download(ticker, period="1y", interval="1d", progress=False)
         if df.empty:
@@ -215,8 +220,21 @@ def analisar_reversao_media(ticker, nome_empresa, setor):
             if pd.isna(v) or v == "N/A": return "N/A"
             return round(float(v), 2)
 
+        # Análise contextual do RS Score (Coluna O)
+        try:
+            val_rs = float(rs_score)
+            if val_rs >= 80:
+                status_rs = "🔥 ELITE (RS >= 80 - Vento a Favor)"
+            elif val_rs >= 50:
+                status_rs = "⚖️ NEUTRO (RS 50-79 - Acompanha o Mercado)"
+            else:
+                status_rs = "⚠️ FRACO / LAGGARD (RS < 50 - Vento Contra)"
+        except ValueError:
+            status_rs = "❓ SEM DADO DE RS"
+
         linha_comboio = (
             f"{ticker},Nome: {nome_empresa},Setor: {setor},Preço: {limpa(preco)},"
+            f"RS Score: {rs_score} ({status_rs}),"
             f"Dist MM20: {limpa(dist_mm20)}%,EMA9: {limpa(ema9)},"
             f"RSI: {limpa(rsi)},RVOL: {limpa(rvol)},Absorção: {'Sim' if absorcao else 'Não'},"
             f"Estado: {estado},Entrada: {limpa(entrada)},"
@@ -249,11 +267,7 @@ def executar_motor():
         ticker = ativo_info.get("ticker")
         if not ticker or ticker == "#N/A": continue
         
-        res = analisar_reversao_media(
-            ticker, 
-            ativo_info.get("nome", "N/A"), 
-            ativo_info.get("setor", "Desconhecido")
-        )
+        res = analisar_reversao_media(ativo_info)
         
         res_dict = res if isinstance(res, dict) else None
         if res_dict:
@@ -273,13 +287,15 @@ REGRAS ESTRITAS (ANTI-ALUCINAÇÃO):
 
 REGRAS DE TRIAGEM E EXECUÇÃO:
 1. VALIDAÇÃO DE FUNDO: Confirma a Capitulação. Um RVOL > 1.5 ou "Absorção: Sim" indicam que o dinheiro institucional começou a comprar o pânico.
-2. VETO FUNDAMENTAL: O motor já filtra penny stocks (<$3) e mREITs, mas se souberes que a queda foi originada por fraude ou falência iminente, emite um VETO OBRIGATÓRIO.
-3. TÁTICA DE SAÍDA (Hit & Run): O alvo de Take-Profit é fixo e cravado na EMA9. Não recomendes o uso de Trailing Stops. O objetivo é comprar barato e largar a ação mal ela toque na linha dos 9 dias.
-4. TÁTICA DE ENTRADA: Recomenda execução próxima do fecho (para confirmar a vela de absorção) ou o uso de Buy Limit na zona de pânico.
+2. CONTEXTO INSTITUCIONAL (RS SCORE): Avalia o RS Score reportado. Se o ativo tiver RS Score de Elite (>= 80), o ressalto beneficia de suporte de fundo forte; se for laggard (< 50), exige cautela redobrada.
+3. VETO FUNDAMENTAL: O motor já filtra penny stocks (<$3) e mREITs, mas se souberes que a queda foi originada por fraude ou falência iminente, emite um VETO OBRIGATÓRIO.
+4. TÁTICA DE SAÍDA (Hit & Run): O alvo de Take-Profit é fixo e cravado na EMA9. Não recomendes o uso de Trailing Stops. O objetivo é comprar barato e largar a ação mal ela toque na linha dos 9 dias.
+5. TÁTICA DE ENTRADA: Recomenda execução próxima do fecho (para confirmar a vela de absorção) ou o uso de Buy Limit na zona de pânico.
 
 ESTRUTURA VISUAL OBRIGATÓRIA:
 🎯 [TICKER] - [Nome da Empresa] ([Setor])
 - 🚨 SINAL DE PÂNICO: [Destacar a Dist MM20 e o RSI]
+- 📊 CONTEXTO INSTITUCIONAL (RS SCORE): [Incluir o RS Score e o respetivo estado institucional]
 - 🩸 PEGADA INSTITUCIONAL: [Referir RVOL ou Absorção]
 - ⚙️ TÁTICA: HIT & RUN. Retirar lucro imediato no alvo EMA9.
 - 🔢 DADOS EXATOS: Entrada: X | Stop: X | TP (EMA9): X | Qtd: X | Valor a Investir: X
