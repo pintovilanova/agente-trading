@@ -1,5 +1,6 @@
 import os
 import sys
+import time
 import smtplib
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
@@ -30,12 +31,10 @@ if not GEMINI_API_KEY:
 
 genai.configure(api_key=GEMINI_API_KEY)
 
-# Usa o modelo Gemini mais capaz para texto
+# Usa o modelo Gemini configurado
 modelo_ia = genai.GenerativeModel('gemini-3.6-flash')
 
 # 2. DEFINIR OS FICHEIROS GERADOS PELOS TEUS MOTORES
-# Ajusta estes nomes para os nomes exatos dos ficheiros TXT que os teus 
-# motores 07, 03, 04 e 06 estão a criar localmente.
 ficheiros_alvo = [
     "comboio_breakout_temp.txt",     # Ficheiro do Motor 07
     "comboio_reversao_temp.txt",     # Ficheiro do Motor 03 (Pânico)
@@ -53,7 +52,7 @@ for ficheiro in ficheiros_alvo:
     if os.path.exists(ficheiro):
         with open(ficheiro, "r", encoding="utf-8") as f:
             dados = f.read().strip()
-            # Só adiciona se o ficheiro tiver conteúdo útil (ignorar se disser "[SEM OPORTUNIDADES]")
+            # Só adiciona se o ficheiro tiver conteúdo útil
             if dados and "Nenhum ativo" not in dados and "[SEM OPORTUNIDADES]" not in dados:
                 conteudo_bruto_total += f"\n\n==================================\n"
                 conteudo_bruto_total += f"📁 FONTE: {ficheiro}\n"
@@ -99,24 +98,37 @@ except Exception as e:
     print(f"[ERRO CRÍTICO] Falha ao comunicar com o Gemini: {e}")
     sys.exit(1)
 
-# 6. ENVIAR EMAIL ÚNICO
+# 6. ENVIAR EMAIL ÚNICO (Com Sistema Anti-Falhas)
 print("\nA preparar envio do Email Institucional...")
-try:
-    msg = MIMEMultipart()
-    msg['From'] = EMAIL_USER
-    msg['To'] = EMAIL_USER
-    # Assunto dinâmico com a data e quantidade de estratégias ativas
-    data_hoje = datetime.now(ZoneInfo('Europe/Lisbon')).strftime('%d/%m/%Y')
-    msg['Subject'] = f"tradingRelatorioIA US - 🤖 RELATÓRIO MESTRE ({data_hoje})"
-    
-    # Adicionar o relatório gerado pela IA
-    msg.attach(MIMEText(relatorio_final, 'plain', 'utf-8'))
-    
-    server = smtplib.SMTP(SMTP_SERVER, SMTP_PORT)
-    server.starttls()
-    server.login(EMAIL_USER, EMAIL_PASS)
-    server.sendmail(EMAIL_USER, EMAIL_USER, msg.as_string())
-    server.quit()
-    print("[SUCESSO] Email Mestre Orquestrado enviado com sucesso!")
-except Exception as e:
-    print(f"[ERRO] Falha ao enviar email mestre: {e}")
+
+max_tentativas = 3
+for tentativa in range(max_tentativas):
+    try:
+        msg = MIMEMultipart()
+        msg['From'] = EMAIL_USER
+        msg['To'] = EMAIL_USER
+        
+        # Assunto dinâmico com a data
+        data_hoje = datetime.now(ZoneInfo('Europe/Lisbon')).strftime('%d/%m/%Y')
+        msg['Subject'] = f"tradingRelatorioIA US - 🤖 RELATÓRIO MESTRE ({data_hoje})"
+        
+        # Adicionar o relatório gerado pela IA
+        msg.attach(MIMEText(relatorio_final, 'plain', 'utf-8'))
+        
+        # Sistema de socket com timeout de 15 segundos
+        server = smtplib.SMTP(SMTP_SERVER, SMTP_PORT, timeout=15)
+        server.starttls()
+        server.login(EMAIL_USER, EMAIL_PASS)
+        server.sendmail(EMAIL_USER, EMAIL_USER, msg.as_string())
+        server.quit()
+        
+        print(f"[SUCESSO] Email Mestre Orquestrado enviado com sucesso na tentativa {tentativa + 1}!")
+        break  # Sai do loop após sucesso
+        
+    except Exception as e:
+        print(f"[ERRO] Falha ao enviar email mestre (tentativa {tentativa + 1} de {max_tentativas}): {e}")
+        if tentativa < max_tentativas - 1:
+            print("A aguardar 5 segundos antes de tentar novamente...")
+            time.sleep(5)
+        else:
+            print("[ERRO CRÍTICO] O servidor Gmail fechou a ligação definitivamente. Falha no envio do relatório mestre.")
