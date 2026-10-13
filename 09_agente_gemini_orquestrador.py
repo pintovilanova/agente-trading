@@ -2,6 +2,8 @@ import os
 import sys
 import time
 import smtplib
+import imaplib
+import email
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 from datetime import datetime
@@ -18,12 +20,6 @@ except ImportError:
 # ===================================================================
 # SISTEMA DE TRADING INSTITUCIONAL - AGENTE IA ORQUESTRADOR (PIPELINE)
 # ===================================================================
-# Descrição:
-# Este script corre no final da pipeline diária. Varre o disco da máquina 
-# virtual em busca de TODOS os ficheiros "comboio" gerados pelos motores.
-# Envia primeiro um email de BACKUP BRUTO (para o caso de falha da IA)
-# e depois tenta auditar via Gemini e enviar o Relatório Mestre Final.
-# ===================================================================
 
 # 1. CREDENCIAIS (GitHub Secrets)
 EMAIL_USER = os.environ.get("EMAIL_USER")
@@ -31,12 +27,13 @@ EMAIL_PASS = os.environ.get("EMAIL_PASS")
 GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY")
 SMTP_SERVER = "smtp.gmail.com"
 SMTP_PORT = 587
+IMAP_SERVER = "imap.gmail.com"
 
 if not GEMINI_API_KEY:
     print("[ERRO] GEMINI_API_KEY não encontrada nas variáveis de ambiente.")
     sys.exit(1)
 
-# Função Auxiliar para Envio de Email
+# Função Auxiliar de Envio de Email (SMTP)
 def enviar_email(assunto, corpo_texto):
     if not EMAIL_USER or not EMAIL_PASS:
         print("[AVISO] EMAIL_USER ou EMAIL_PASS não definidos. Email não enviado.")
@@ -65,61 +62,130 @@ def enviar_email(assunto, corpo_texto):
                 time.sleep(5)
     return False
 
-# 2. DEFINIR TODOS OS FICHEIROS GERADOS PELOS EXTRATORES E MOTORES
+# Função Auxiliar para Ler o Último Email de Backup no Gmail (IMAP)
+def obter_conteudo_ultimo_email_backup():
+    if not EMAIL_USER or not EMAIL_PASS:
+        print("[ERRO] EMAIL_USER ou EMAIL_PASS não definidos nas variáveis de ambiente.")
+        return None
+    try:
+        print("\n[IMAP] A ligar ao servidor de e-mail para procurar o último backup...")
+        mail = imaplib.IMAP4_SSL(IMAP_SERVER)
+        mail.login(EMAIL_USER, EMAIL_PASS)
+        mail.select("inbox")
+
+        # Procura por substring no assunto (apanha qualquer data ou emoji)
+        status, data = mail.search(None, 'SUBJECT "DADOS BRUTOS PARA IA"')
+        if status != "OK" or not data[0]:
+            print("[IMAP] Nenhum e-mail de backup encontrado na caixa de entrada.")
+            mail.logout()
+            return None
+
+        # O IMAP devolve os IDs ordenados. O elemento [-1] é o e-mail mais recente.
+        email_ids = data[0].split()
+        ultimo_id = email_ids[-1]
+
+        print(f"[IMAP] E-mail de backup mais recente encontrado (ID: {ultimo_id.decode()}). A extrair dados...")
+
+        status, msg_data = mail.fetch(ultimo_id, "(RFC822)")
+        if status != "OK":
+            print("[IMAP] Erro ao carregar a mensagem de e-mail.")
+            mail.logout()
+            return None
+
+        for response_part in msg_data:
+            if isinstance(response_part, tuple):
+                msg = email.message_from_bytes(response_part[1])
+                body = ""
+                if msg.is_multipart():
+                    for part in msg.walk():
+                        content_type = part.get_content_type()
+                        content_disposition = str(part.get("Content-Disposition"))
+                        if content_type == "text/plain" and "attachment" not in content_disposition:
+                            payload = part.get_payload(decode=True)
+                            if payload:
+                                body = payload.decode('utf-8', errors='ignore')
+                                break
+                else:
+                    payload = msg.get_payload(decode=True)
+                    if payload:
+                        body = payload.decode('utf-8', errors='ignore')
+                
+                mail.logout()
+                return body.strip()
+
+        mail.logout()
+    except Exception as e:
+        print(f"[ERRO IMAP] Falha ao ler e-mail de backup: {e}")
+    return None
+
+# 2. DEFINIR FICHEIROS ALVO DOS MOTORES
 ficheiros_alvo = [
-    "comboio_temp.txt",             # Ficheiro do Extrator US
-    "comboio_europa.txt",           # Ficheiro do Extrator Europa
-    "comboio_vcp_temp.txt",         # Ficheiro do Motor 07 (VCP Breakout)
-    "comboio_reversao_temp.txt",    # Ficheiro do Motor 03 (Pânico)
-    "comboio_earnings_temp.txt",    # Ficheiro do Motor 04 (PEAD)
-    "comboio_connors_temp.txt",     # Ficheiro do Motor 05 (REVERSAO)
-    "comboio_carver_temp.txt"       # Ficheiro do Motor 06 (Fast Trend Carver)
+    "comboio_temp.txt",             # Extrator US
+    "comboio_europa.txt",           # Extrator Europa
+    "comboio_vcp_temp.txt",         # Motor 07 (VCP Breakout)
+    "comboio_reversao_temp.txt",    # Motor 03 (Pânico)
+    "comboio_earnings_temp.txt",    # Motor 04 (PEAD)
+    "comboio_connors_temp.txt",     # Motor 05 (REVERSAO)
+    "comboio_carver_temp.txt"       # Motor 06 (Fast Trend Carver)
 ]
 
 conteudo_bruto_total = ""
+veio_do_email = False
 
 print("A procurar relatórios dos extratores e motores na máquina virtual...")
 
-# 3. RECOLHER DADOS DE TODOS OS FICHEIROS DISPONÍVEIS
-for ficheiro in ficheiros_alvo:
-    if os.path.exists(ficheiro):
-        with open(ficheiro, "r", encoding="utf-8") as f:
-            dados = f.read().strip()
-            
+# Verificar quais ficheiros existem fisicamente no disco
+ficheiros_existentes = [f for f in ficheiros_alvo if os.path.exists(f)]
+
+if not ficheiros_existentes:
+    print("\n[AVISO] Nenhum ficheiro 'comboio' encontrado no disco da máquina virtual.")
+    print("A tentar recuperar os dados do último e-mail de backup via IMAP...")
+    
+    conteudo_backup = obter_conteudo_ultimo_email_backup()
+    if conteudo_backup:
+        print("[SUCESSO] Dados brutos recuperados do e-mail de backup com sucesso!")
+        conteudo_bruto_total = conteudo_backup
+        veio_do_email = True
+    else:
+        print("[ERRO CRÍTICO] Não existem ficheiros no disco e não foi possível obter o e-mail de backup.")
+        sys.exit(1)
+else:
+    # 3. RECOLHER DADOS DOS FICHEIROS LOCAIS
+    for ficheiro in ficheiros_alvo:
+        if os.path.exists(ficheiro):
+            with open(ficheiro, "r", encoding="utf-8") as f:
+                dados = f.read().strip()
+                
+                conteudo_bruto_total += f"\n\n==================================\n"
+                conteudo_bruto_total += f"📁 FONTE: {ficheiro}\n"
+                conteudo_bruto_total += f"==================================\n"
+                
+                if dados and "Nenhum ativo" not in dados and "[SEM OPORTUNIDADES]" not in dados:
+                    conteudo_bruto_total += f"{dados}\n"
+                    print(f"[ENCONTRADO] Dados detetados no {ficheiro}.")
+                else:
+                    conteudo_bruto_total += "[SEM SINAIS OU OPORTUNIDADES PARA ESTA ESTRATÉGIA HOJE]\n"
+                    print(f"[VAZIO] {ficheiro} lido, adicionado como sem sinais ao relatório.")
+        else:
             conteudo_bruto_total += f"\n\n==================================\n"
             conteudo_bruto_total += f"📁 FONTE: {ficheiro}\n"
             conteudo_bruto_total += f"==================================\n"
-            
-            # Se tiver conteúdo válido de ativos
-            if dados and "Nenhum ativo" not in dados and "[SEM OPORTUNIDADES]" not in dados:
-                conteudo_bruto_total += f"{dados}\n"
-                print(f"[ENCONTRADO] Dados detetados no {ficheiro}.")
-            else:
-                conteudo_bruto_total += "[SEM SINAIS OU OPORTUNIDADES PARA ESTA ESTRATÉGIA HOJE]\n"
-                print(f"[VAZIO] {ficheiro} lido, adicionado como sem sinais ao relatório.")
-    else:
-        conteudo_bruto_total += f"\n\n==================================\n"
-        conteudo_bruto_total += f"📁 FONTE: {ficheiro}\n"
-        conteudo_bruto_total += f"==================================\n"
-        conteudo_bruto_total += "[ERRO: FICHEIRO NÃO ENCONTRADO - MOTOR PODE TER FALHADO]\n"
-        print(f"[FALTA] {ficheiro} não encontrado.")
+            conteudo_bruto_total += "[ERRO: FICHEIRO NÃO ENCONTRADO - MOTOR PODE TER FALHADO]\n"
+            print(f"[FALTA] {ficheiro} não encontrado.")
 
 if not conteudo_bruto_total.strip():
     print("\n[INFO] Nenhum dado gerado. A pipeline termina de forma silenciosa.")
     sys.exit(0)
 
-# ===================================================================
-# 4. PASSO ADICIONADO: ENVIAR DADOS BRUTOS POR EMAIL ANTES DA IA
-# ===================================================================
 data_hoje = datetime.now(ZoneInfo('Europe/Lisbon')).strftime('%d/%m/%Y')
-assunto_backup = f"tradingRelatorioIA - 📦 DADOS BRUTOS PARA IA / BACKUP ({data_hoje})"
 
-print("\nA enviar dados brutos consolidados para o Email de Backup...")
-enviar_email(assunto_backup, conteudo_bruto_total)
+# 4. ENVIAR E-MAIL DE BACKUP APENAS SE OS DADOS FORAM LIDOS DO DISCO
+if not veio_do_email:
+    assunto_backup = f"tradingRelatorioIA - 📦 DADOS BRUTOS PARA IA / BACKUP ({data_hoje})"
+    print("\nA enviar dados brutos consolidados para o Email de Backup...")
+    enviar_email(assunto_backup, conteudo_bruto_total)
 
-# ===================================================================
-# 5. CHAMADA E AUDITORIA DA IA (GEMINI)
-# ===================================================================
+# 5. PROMPT DO ORQUESTRADOR IA
 prompt_orquestrador = f"""
 És o Analista Quantitativo Principal (Agente Orquestrador).
 Abaixo estão os relatórios em bruto e os dados gerados dinamicamente pelos Extratores de Mercado (US e Europa) e pelos vários Motores de Estratégia no fecho do mercado de hoje.
@@ -141,36 +207,40 @@ print("\nA enviar dados consolidados para o Gemini Auditar...")
 
 relatorio_final = None
 
-try:
-    if USE_NEW_GENAI:
-        client = genai.Client(api_key=GEMINI_API_KEY)
-        response = client.models.generate_content(
-            model='gemini-3.6-flash', # ou gemini-1.5-flash dependendo do modelo ativo na conta
-            contents=prompt_orquestrador,
-        )
-        relatorio_final = response.text
-    else:
-        genai.configure(api_key=GEMINI_API_KEY)
-        modelo_ia = genai.GenerativeModel('gemini-3.6-flash')
-        resposta = modelo_ia.generate_content(prompt_orquestrador)
-        relatorio_final = resposta.text
-        
-    print("[SUCESSO] Relatório mestre gerado pela IA!")
+# Lista de modelos em cascata (arranca com o 3.6 e recorre a alternativas se necessário)
+modelos_para_testar = ['gemini-3.6-flash', 'gemini-2.5-flash', 'gemini-2.0-flash']
 
-except Exception as e:
-    print(f"\n[ALERTA DE QUOTA / ERRO IA] Falha ao comunicar com o Gemini: {e}")
-    print("[INFO] A pipeline não vai falhar. O email com os DADOS BRUTOS já foi enviado para processamento manual.")
+for mod in modelos_para_testar:
+    try:
+        print(f"A testar modelo Gemini: {mod}...")
+        if USE_NEW_GENAI:
+            client = genai.Client(api_key=GEMINI_API_KEY)
+            response = client.models.generate_content(
+                model=mod,
+                contents=prompt_orquestrador,
+            )
+            relatorio_final = response.text
+        else:
+            genai.configure(api_key=GEMINI_API_KEY)
+            modelo_ia = genai.GenerativeModel(mod)
+            resposta = modelo_ia.generate_content(prompt_orquestrador)
+            relatorio_final = resposta.text
+            
+        print(f"[SUCESSO] Relatório mestre gerado pela IA com o modelo {mod}!")
+        break
+    except Exception as e:
+        print(f"[AVISO] Falha ao comunicar com o modelo {mod}: {e}")
+
+if not relatorio_final:
+    print("\n[ALERTA DE IA] Não foi possível obter resposta de nenhum modelo Gemini.")
+    print("[INFO] A pipeline termina sem crash.")
     
-    # Envia email de aviso específico sobre a falha da IA
     assunto_erro = f"tradingRelatorioIA - ⚠️ AVISO: FALHA NA IA ({data_hoje})"
-    corpo_erro = f"Ocorreu um erro ao gerar o relatório consolidado com a IA (Quota excedida ou limite de API).\n\nErro: {e}\n\nPor favor, utiliza o email com o assunto '[BACKUP BRUTO]' enviado anteriormente e cola o conteúdo no ChatGPT/Claude/Gemini Web manualmente para gerar o relatório."
+    corpo_erro = f"Ocorreu um erro ao comunicar com a API do Gemini (Modelo indisponível ou limite de quota).\n\nPor favor, utiliza o e-mail com o assunto '[BACKUP BRUTO]' enviado anteriormente e cola o conteúdo diretamente no ChatGPT / Claude / Gemini Web para obter o relatório formatado."
     enviar_email(assunto_erro, corpo_erro)
     sys.exit(0)
 
-# ===================================================================
 # 6. ENVIAR EMAIL DO RELATÓRIO FINAL DA IA
-# ===================================================================
-if relatorio_final:
-    print("\nA preparar envio do Relatório Mestre Formatado pela IA...")
-    assunto_final = f"tradingRelatorioIA Global - 🤖 RELATÓRIO MESTRE ({data_hoje})"
-    enviar_email(assunto_final, relatorio_final)
+print("\nA preparar envio do Relatório Mestre Formatado pela IA...")
+assunto_final = f"tradingRelatorioIA Global - 🤖 RELATÓRIO MESTRE ({data_hoje})"
+enviar_email(assunto_final, relatorio_final)
