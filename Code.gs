@@ -1968,7 +1968,7 @@ function dispararAgenteGitHubViaAPI() {
 // MOTOR HÍBRIDO (WEBHOOK PARA O GITHUB: US + EUROPA)
 // ==========================================
 
-// 1. O Python chama o GET para ler a Watchlist e as Posições Ativas
+// 1. O Python chama o GET para ler a Watchlist, Posições Ativas e Configurações
 function doGet(e) {
   var ss = SpreadsheetApp.getActiveSpreadsheet();
   
@@ -1986,16 +1986,20 @@ function doGet(e) {
   var ativos = [];
   
   if (ultimaLinha >= 3) {
-    // Lê as colunas E (Ticker) e F (Nome) a partir da linha 3
-    var valores = sheet.getRange(3, 5, ultimaLinha - 2, 2).getValues();
+    // Lê desde a coluna E (5) até à coluna O (15), num total de 11 colunas a partir da linha 3
+    var valores = sheet.getRange(3, 5, ultimaLinha - 2, 11).getValues();
     
     for (var i = 0; i < valores.length; i++) {
-      var t = valores[i][0]; // Ticker
-      var n = valores[i][1]; // Nome
+      var linhaAtivo = valores[i];
+      var t = linhaAtivo[0];   // Coluna E (Ticker)
+      var n = linhaAtivo[1];   // Coluna F (Nome)
+      var rs = linhaAtivo[10]; // Coluna O (RS Score - índice 10 a contar da coluna E)
+      
       if (t && t.toString().trim() !== "") {
         ativos.push({
           "ticker": t.toString().trim(),
-          "nome": n ? n.toString().trim() : "N/A"
+          "nome": n ? n.toString().trim() : "N/A",
+          "rs_score": rs !== undefined && rs !== "" ? rs.toString().trim() : "N/A"
         });
       }
     }
@@ -2018,7 +2022,6 @@ function doGet(e) {
         var tickerDiario = linha[1];   // Coluna B (índice 1)
         var statusDiario = linha[22];  // Coluna W (índice 22)
         
-        // CORREÇÃO: Aceita tanto ATIVA como ATIVA_FAST
         if (tickerDiario && statusDiario) {
           var statusUpper = statusDiario.toString().trim().toUpperCase();
           if (statusUpper === "ATIVA" || statusUpper === "ATIVA_FAST") {
@@ -2034,15 +2037,39 @@ function doGet(e) {
       }
     }
   }
+
+  // ------------------------------------------
+  // LEITURA DA ABA "Configs" (Configurações da Conta/Parâmetros)
+  // Coluna A (1) = Parâmetro, Coluna B (2) = Valor
+  // ------------------------------------------
+  var configs = {};
+  var sheetConfigs = ss.getSheetByName("Configs");
+  
+  if (sheetConfigs) {
+    var ultimaLinhaConfigs = sheetConfigs.getLastRow();
+    if (ultimaLinhaConfigs >= 2) {
+      var dadosConfigs = sheetConfigs.getRange(2, 1, ultimaLinhaConfigs - 1, 2).getValues();
+      
+      for (var k = 0; k < dadosConfigs.length; k++) {
+        var chave = dadosConfigs[k][0];
+        var valor = dadosConfigs[k][1];
+        
+        if (chave && chave.toString().trim() !== "") {
+          configs[chave.toString().trim()] = valor;
+        }
+      }
+    }
+  }
   
   // Empacota tudo num objeto JSON estruturado
   var respostaCompleta = {
     "ativos": ativos,
-    "posicoesAtivas": posicoesAtivas
+    "posicoesAtivas": posicoesAtivas,
+    "configs": configs
   };
   
   return ContentService.createTextOutput(JSON.stringify(respostaCompleta))
-                     .setMimeType(ContentService.MimeType.JSON);
+                       .setMimeType(ContentService.MimeType.JSON);
 }
 
 // 2. O Python envia os resultados via POST
@@ -2126,7 +2153,30 @@ function doPost(e) {
     return ContentService.createTextOutput(JSON.stringify({"status": "sucesso"}))
                          .setMimeType(ContentService.MimeType.JSON);
   }
-  
+  // ==========================================================
+  // LÓGICA PARA ATUALIZAR O RS SCORE (MOTOR 08 - RADAR)
+  // ==========================================================
+  if (payload.acao === "atualizar_rs_score") {
+    var dataRange = sheet.getDataRange();
+    var values = dataRange.getValues();
+    var alteracoes = 0;
+    
+    for (var i = 0; i < dados.length; i++) {
+      var d = dados[i];
+      // Procura o Ticker na Coluna E (índice 4 do array)
+      for (var row = 1; row < values.length; row++) {
+        if (values[row][4] === d.ticker) {
+          // Coluna O corresponde à 15ª coluna (índice 14 no array)
+          sheet.getRange(row + 1, 15).setValue(d.rs_score);
+          alteracoes++;
+          break;
+        }
+      }
+    }
+    
+    return ContentService.createTextOutput(JSON.stringify({"status": "sucesso", "atualizados": alteracoes}))
+           .setMimeType(ContentService.MimeType.JSON);
+  }
   return ContentService.createTextOutput(JSON.stringify({"status": "erro", "mensagem": "Ação desconhecida"}))
                        .setMimeType(ContentService.MimeType.JSON);
 }
