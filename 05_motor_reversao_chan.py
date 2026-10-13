@@ -216,7 +216,7 @@ def analisar_connors_chan(ativo_info):
             f"{ticker},Nome: {nome_empresa},Setor: {setor},Preço: {limpa(preco)},"
             f"RS Score: {rs_score} ({status_rs}),"
             f"BBLower: {limpa(bbl_inferior)},RSI2: {limpa(rsi_2)},"
-            f"Estado: {estado},Entrada: {limpa(entrada)},"
+            f"Estado: {estado},Ordem: BUY LIMIT,Entrada: {limpa(entrada)},"
             f"Stop: {limpa(stop_loss)},Take-Profit: {limpa(alvo_tp)},"
             f"Qtd: {qtd_acoes},ValorInvestir: {valor_investir},"
             f"Data: {datetime.now(ZoneInfo('Europe/Lisbon')).strftime('%d/%m/%Y %H:%M:%S')}"
