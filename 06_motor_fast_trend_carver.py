@@ -34,22 +34,14 @@ SMTP_SERVER = "smtp.gmail.com"
 SMTP_PORT = 587
 
 # ===================================================================
-# CONFIGURAÇÕES DE RISCO INSTITUCIONAL (MÉTODO CARVER)
-# ===================================================================
-CAPITAL_TOTAL_CONTA = 10400.00  
-ALVO_VOLATILIDADE_ANUAL = 0.05  
-VOLATILIDADE_ALVO_DIARIA_USD = (CAPITAL_TOTAL_CONTA * ALVO_VOLATILIDADE_ANUAL) / 16.0 
-
-# ===================================================================
 # 2. FUNÇÕES DE REDE
 # ===================================================================
 def buscar_dados_completos():
-    print("A carregar a Watchlist e Posições Ativas a partir do Google Sheets...")
+    print("A carregar a Watchlist, Posições Ativas e Configurações a partir do Google Sheets...")
     if not WEBHOOK_URL: 
         print("[ERRO] WEBHOOK_URL não configurado.")
-        return [], {}
+        return [], {}, {}
     try:
-        # Garante que apanha a aba correta se necessário, ou usa a raiz
         url_alvo = WEBHOOK_URL if "?" in WEBHOOK_URL else f"{WEBHOOK_URL}?aba=Analise Compra"
         resp = requests.get(url_alvo)
         
@@ -58,20 +50,21 @@ def buscar_dados_completos():
                 dados = resp.json()
             except json.JSONDecodeError:
                 print(f"[ERRO] O Webhook não retornou um JSON válido. Resposta: {resp.text[:200]}")
-                return [], {}
+                return [], {}, {}
 
             if isinstance(dados, dict):
                 ativos = dados.get("ativos", [])
                 posicoes = dados.get("posicoesAtivas", {})
-                return ativos, posicoes
+                configs = dados.get("configs", {})
+                return ativos, posicoes, configs
             elif isinstance(dados, list):
-                return dados, {}
+                return dados, {}, {}
                 
         print(f"[AVISO] Webhook retornou status {resp.status_code}. Resposta: {resp.text[:200]}")
-        return [], {}
+        return [], {}, {}
     except Exception as e:
         print(f"[ERRO CRÍTICO] Sheets: {e}")
-        return [], {}
+        return [], {}, {}
 
 # ===================================================================
 # FUNÇÃO DE ENVIO DE EMAIL (Com Sistema Anti-Falhas)
@@ -90,11 +83,9 @@ def enviar_email_bruto(conteudo):
     
     msg.attach(MIMEText(conteudo, 'plain', 'utf-8'))
     
-    # Sistema de Tolerância a Falhas (Retry) com Timeout
     max_tentativas = 3
     for tentativa in range(max_tentativas):
         try:
-            # Adicionado timeout de 15 segundos para proteger contra bloqueios do Gmail
             server = smtplib.SMTP(SMTP_SERVER, SMTP_PORT, timeout=15)
             server.starttls()
             server.login(EMAIL_USER, EMAIL_PASS)
@@ -102,7 +93,7 @@ def enviar_email_bruto(conteudo):
             server.quit()
             
             print(f"[SUCESSO] Email bruto do Carver enviado na tentativa {tentativa + 1}!")
-            break  # Sai do loop por sucesso
+            break
             
         except Exception as e:
             print(f"[ERRO] Falha ao enviar o email (tentativa {tentativa + 1} de {max_tentativas}): {e}")
@@ -149,7 +140,7 @@ def calcular_indicadores_tecnicos(ticker):
         print(f"[ERRO] Falha ao descarregar dados para {ticker}: {e}")
         return None
 
-def analisar_tendencia_carver(ativo_info):
+def analisar_tendencia_carver(ativo_info, vol_alvo_diaria_usd):
     ticker = ativo_info.get("ticker")
     nome_empresa = ativo_info.get("nome", "N/A")
     setor = ativo_info.get("setor", "Desconhecido")
@@ -174,7 +165,7 @@ def analisar_tendencia_carver(ativo_info):
     stop_loss = round(entrada - (atr36 * 1.5), 2)
     alvo_tp = round(entrada + ((entrada - stop_loss) * 2.5), 2)
     
-    qtd_bruta = (VOLATILIDADE_ALVO_DIARIA_USD / atr36) * multiplicador
+    qtd_bruta = (vol_alvo_diaria_usd / atr36) * multiplicador
     qtd_acoes = round(qtd_bruta, 2)
     val_calc = entrada * qtd_acoes
     valor_investir = f"~{val_calc:.2f} USD"
@@ -251,10 +242,24 @@ def monitorizar_posicao_ativa(ticker, nome_empresa, status_atual, dados_posicao)
 # 4. EXECUÇÃO PRINCIPAL
 # ===================================================================
 def executar_motor():
-    ativos, posicoes_ativas_dict = buscar_dados_completos()
+    ativos, posicoes_ativas_dict, configs = buscar_dados_completos()
     if not ativos and not posicoes_ativas_dict:
         print("[ERRO] Nenhum dado carregado do Sheets. A terminar.")
         sys.exit(1)
+
+    # Leitura dinâmica das configurações de risco da tab Configs (com fallback de segurança)
+    try:
+        capital_total_conta = float(configs.get("CAPITAL_TOTAL_CONTA", 10400.00))
+        alvo_volatilidade_anual = float(configs.get("ALVO_VOLATILIDADE_ANUAL", 0.05))
+    except (ValueError, TypeError):
+        capital_total_conta = 10400.00
+        alvo_volatilidade_anual = 0.05
+
+    volatilidade_alvo_diaria_usd = (capital_total_conta * alvo_volatilidade_anual) / 16.0
+
+    print(f"[CONFIG] Capital Total da Conta: ${capital_total_conta:,.2f}")
+    print(f"[CONFIG] Alvo Volatilidade Anual: {alvo_volatilidade_anual*100:.1f}%")
+    print(f"[CONFIG] Orçamento Diário de Volatilidade: ${volatilidade_alvo_diaria_usd:.2f}\n")
         
     ativos_acionados = []
     posicoes_em_gestao = []
@@ -267,7 +272,7 @@ def executar_motor():
         if ticker in posicoes_ativas_dict:
             continue
 
-        res = analisar_tendencia_carver(ativo_info)
+        res = analisar_tendencia_carver(ativo_info, volatilidade_alvo_diaria_usd)
         if res:
             ativos_acionados.append(res)
             
