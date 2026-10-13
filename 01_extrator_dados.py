@@ -77,9 +77,10 @@ def enviar_email_para_agente_ia(relatorio_texto, assunto="🦅 tradingRelatorioI
                 print("[ERRO CRÍTICO] O servidor Gmail fechou a ligação definitivamente. Falha no envio.")
 
 # ===================================================================
-# 2. BUSCAR A WATCHLIST E POSIÇÕES ATIVAS (Google Sheets via Webhook)
+# 2. BUSCAR A WATCHLIST, POSIÇÕES ATIVAS E CONFIGS (Google Sheets via Webhook)
 # ===================================================================
-print("A carregar a Watchlist e Posições Ativas a partir do Google Sheets...")
+print("A carregar a Watchlist, Posições Ativas e Configurações a partir do Google Sheets...")
+configs_data = {}
 try:
     resposta_webhook = requests.get(WEBHOOK_URL)
     if resposta_webhook.status_code == 200:
@@ -88,12 +89,15 @@ try:
         if isinstance(dados_webhook, dict) and "ativos" in dados_webhook:
             ativos_data = dados_webhook.get("ativos", [])
             posicoes_ativas = dados_webhook.get("posicoesAtivas", {})
+            configs_data = dados_webhook.get("configs", {})
         elif isinstance(dados_webhook, list):
             ativos_data = dados_webhook
             posicoes_ativas = {}
+            configs_data = {}
         else:
             ativos_data = []
             posicoes_ativas = {}
+            configs_data = {}
 
         if len(ativos_data) > 0:
             print(f"[SUCESSO] {len(ativos_data)} ativos carregados da Watchlist.")
@@ -142,8 +146,16 @@ except Exception as e:
 # ===================================================================
 # CONFIGURAÇÕES DE RISCO INSTITUCIONAL (MÉTODO CARVER)
 # ===================================================================
-CAPITAL_TOTAL_CONTA = 10400.00  
-ALVO_VOLATILIDADE_ANUAL = 0.05 
+# Lidos dinamicamente da tab 'Configs' do Google Sheets via Webhook (com fallback de segurança)
+try:
+    CAPITAL_TOTAL_CONTA = float(configs_data.get("CAPITAL_TOTAL_CONTA", 10400.00))
+    ALVO_VOLATILIDADE_ANUAL = float(configs_data.get("ALVO_VOLATILIDADE_ANUAL", 0.05))
+except (ValueError, TypeError):
+    CAPITAL_TOTAL_CONTA = 10400.00
+    ALVO_VOLATILIDADE_ANUAL = 0.05
+
+print(f"[CONFIG] Capital Total da Conta: ${CAPITAL_TOTAL_CONTA:,.2f}")
+print(f"[CONFIG] Alvo Volatilidade Anual: {ALVO_VOLATILIDADE_ANUAL*100:.1f}%")
 
 VOLATILIDADE_ALVO_DIARIA_USD = (CAPITAL_TOTAL_CONTA * ALVO_VOLATILIDADE_ANUAL) / 16.0 
 
