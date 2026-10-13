@@ -15,7 +15,7 @@
 #    - Trava de Fim de Semana: Aborta automaticamente aos sábados e domingos.
 # 2. Gestão de Risco Institucional (Target Volatility - Método Carver):
 #    - Orçamento de flutuação diária calculado sobre o capital total da conta 
-#      ($10,400.00) com um alvo de volatilidade anual conservador (5%).
+#      lido dinamicamente da tab 'Configs' do Google Sheets.
 #    - Dimensionamento dinâmico baseado no ATR para nivelar o risco real.
 # 3. Anomalia e Filtro PEAD:
 #    - Validação de datas de resultados recentes via yfinance.
@@ -61,38 +61,36 @@ SMTP_SERVER = "smtp.gmail.com"
 SMTP_PORT = 587
 
 # ===================================================================
-# CONFIGURAÇÕES DE RISCO INSTITUCIONAL (MÉTODO CARVER)
-# ===================================================================
-CAPITAL_TOTAL_CONTA = 10400.00  
-ALVO_VOLATILIDADE_ANUAL = 0.05  
-
-VOLATILIDADE_ALVO_DIARIA_USD = (CAPITAL_TOTAL_CONTA * ALVO_VOLATILIDADE_ANUAL) / 16.0 
-
-# ===================================================================
 # 2. FUNÇÕES DE REDE (Google Sheets e Email)
 # ===================================================================
 def buscar_watchlist():
-    print("A carregar a Watchlist a partir do Google Sheets...")
+    print("A carregar a Watchlist e Configurações a partir do Google Sheets...")
     if not WEBHOOK_URL: 
         print("[ERRO] WEBHOOK_URL não configurado.")
-        return []
+        return [], {}
     try:
         resp = requests.get(WEBHOOK_URL)
         if resp.status_code == 200:
             dados = resp.json()
-            ativos = dados.get("ativos", []) if isinstance(dados, dict) else dados
+            if isinstance(dados, dict):
+                ativos = dados.get("ativos", [])
+                configs = dados.get("configs", {})
+            elif isinstance(dados, list):
+                ativos = dados
+                configs = {}
+            else:
+                ativos = []
+                configs = {}
+                
             print(f"[SUCESSO] {len(ativos)} ativos carregados para auditoria.")
-            return ativos
+            return ativos, configs
         else:
             print(f"[ERRO] Falha ao descarregar dados: {resp.status_code}")
-            return []
+            return [], {}
     except Exception as e:
         print(f"[ERRO CRÍTICO] Falha de comunicação com Sheets: {e}")
-        return []
+        return [], {}
 
-# ===================================================================
-# FUNÇÃO DE ENVIO DE EMAIL (Com Sistema Anti-Falhas)
-# ===================================================================
 def enviar_email(conteudo):
     print("\nA enviar relatório de Earnings Drift para o Agente IA...")
     
@@ -107,11 +105,9 @@ def enviar_email(conteudo):
     
     msg.attach(MIMEText(conteudo, 'plain', 'utf-8'))
     
-    # Sistema de Tolerância a Falhas (Retry) com Timeout
     max_tentativas = 3
     for tentativa in range(max_tentativas):
         try:
-            # Adicionado timeout de 15 segundos para evitar ligações penduradas
             server = smtplib.SMTP(SMTP_SERVER, SMTP_PORT, timeout=15)
             server.starttls()
             server.login(EMAIL_USER, EMAIL_PASS)
@@ -119,7 +115,7 @@ def enviar_email(conteudo):
             server.quit()
             
             print(f"[SUCESSO] Email de Earnings enviado na tentativa {tentativa + 1}!")
-            break  # Se enviou com sucesso, sai do loop
+            break
             
         except Exception as e:
             print(f"[ERRO] Falha ao enviar o email (tentativa {tentativa + 1} de {max_tentativas}): {e}")
@@ -132,7 +128,7 @@ def enviar_email(conteudo):
 # ===================================================================
 # 3. MOTOR MATEMÁTICO: EARNINGS DRIFT (PEAD)
 # ===================================================================
-def analisar_earnings_drift(ativo_info):
+def analisar_earnings_drift(ativo_info, vol_alvo_diaria_usd):
     ticker = ativo_info.get("ticker")
     nome_empresa = ativo_info.get("nome", "N/A")
     setor = ativo_info.get("setor", "Desconhecido")
@@ -199,9 +195,9 @@ def analisar_earnings_drift(ativo_info):
             risco = entrada - stop_loss
             
             if pd.notna(atr) and atr > 0:
-                qtd_acoes = round(VOLATILIDADE_ALVO_DIARIA_USD / atr, 2)
+                qtd_acoes = round(vol_alvo_diaria_usd / atr, 2)
             else:
-                qtd_acoes = round(VOLATILIDADE_ALVO_DIARIA_USD / risco, 2) if risco > 0 else "N/A"
+                qtd_acoes = round(vol_alvo_diaria_usd / risco, 2) if risco > 0 else "N/A"
                 
             if qtd_acoes != "N/A":
                 val_calc = entrada * qtd_acoes
@@ -231,7 +227,7 @@ def analisar_earnings_drift(ativo_info):
             f"{ticker},Nome: {nome_empresa},Setor: {setor},Preço: {limpa(preco)},"
             f"RS Score: {rs_score} ({status_rs}),"
             f"DataEarnings: {data_earnings_str},VarDia: {limpa(var_perc)}%,RVOL: {limpa(rvol)},"
-            f"Estado: {estado},Entrada: {limpa(entrada)},Stop: {limpa(stop_loss)},"
+            f"Estado: {estado},Ordem: BUY STOP,Entrada: {limpa(entrada)},Stop: {limpa(stop_loss)},"
             f"Take-Profit: {limpa(alvo_tp)},Qtd: {qtd_acoes},ValorInvestir: {valor_investir},"
             f"Data: {datetime.now(ZoneInfo('Europe/Lisbon')).strftime('%d/%m/%Y %H:%M:%S')}"
         )
@@ -264,15 +260,29 @@ def executar_motor():
     resultados_para_sheets = []
     comboio_ia = []
     
-    ativos = buscar_watchlist()
+    ativos, configs = buscar_watchlist()
     if not ativos:
         sys.exit(1)
         
+    # Leitura dinâmica das configurações de risco da tab Configs (com fallback de segurança)
+    try:
+        capital_total_conta = float(configs.get("CAPITAL_TOTAL_CONTA", 10400.00))
+        alvo_volatilidade_anual = float(configs.get("ALVO_VOLATILIDADE_ANUAL", 0.05))
+    except (ValueError, TypeError):
+        capital_total_conta = 10400.00
+        alvo_volatilidade_anual = 0.05
+
+    volatilidade_alvo_diaria_usd = (capital_total_conta * alvo_volatilidade_anual) / 16.0
+
+    print(f"[CONFIG] Capital Total da Conta: ${capital_total_conta:,.2f}")
+    print(f"[CONFIG] Alvo Volatilidade Anual: {alvo_volatilidade_anual*100:.1f}%")
+    print(f"[CONFIG] Orçamento Diário de Volatilidade: ${volatilidade_alvo_diaria_usd:.2f}\n")
+
     for ativo_info in ativos:
         ticker = ativo_info.get("ticker")
         if not ticker or ticker == "#N/A": continue
         
-        res = analisar_earnings_drift(ativo_info)
+        res = analisar_earnings_drift(ativo_info, volatilidade_alvo_diaria_usd)
         
         if res:
             print(f"[SUCESSO] {ticker} ativado no motor PEAD!")
