@@ -73,14 +73,12 @@ def obter_conteudo_ultimo_email_backup():
         mail.login(EMAIL_USER, EMAIL_PASS)
         mail.select("inbox")
 
-        # Procura por substring no assunto (apanha qualquer data ou emoji)
         status, data = mail.search(None, 'SUBJECT "DADOS BRUTOS PARA IA"')
         if status != "OK" or not data[0]:
             print("[IMAP] Nenhum e-mail de backup encontrado na caixa de entrada.")
             mail.logout()
             return None
 
-        # O IMAP devolve os IDs ordenados. O elemento [-1] é o e-mail mais recente.
         email_ids = data[0].split()
         ultimo_id = email_ids[-1]
 
@@ -134,7 +132,6 @@ veio_do_email = False
 
 print("A procurar relatórios dos extratores e motores na máquina virtual...")
 
-# Verificar quais ficheiros existem fisicamente no disco
 ficheiros_existentes = [f for f in ficheiros_alvo if os.path.exists(f)]
 
 if not ficheiros_existentes:
@@ -150,7 +147,6 @@ if not ficheiros_existentes:
         print("[ERRO CRÍTICO] Não existem ficheiros no disco e não foi possível obter o e-mail de backup.")
         sys.exit(1)
 else:
-    # 3. RECOLHER DADOS DOS FICHEIROS LOCAIS
     for ficheiro in ficheiros_alvo:
         if os.path.exists(ficheiro):
             with open(ficheiro, "r", encoding="utf-8") as f:
@@ -179,13 +175,11 @@ if not conteudo_bruto_total.strip():
 
 data_hoje = datetime.now(ZoneInfo('Europe/Lisbon')).strftime('%d/%m/%Y')
 
-# 4. ENVIAR E-MAIL DE BACKUP APENAS SE OS DADOS FORAM LIDOS DO DISCO
 if not veio_do_email:
     assunto_backup = f"tradingRelatorioIA - 📦 DADOS BRUTOS PARA IA / BACKUP ({data_hoje})"
     print("\nA enviar dados brutos consolidados para o Email de Backup...")
     enviar_email(assunto_backup, conteudo_bruto_total)
 
-# 5. PROMPT DO ORQUESTRADOR IA
 prompt_orquestrador = f"""
 És o Analista Quantitativo Principal (Agente Orquestrador).
 Abaixo estão os relatórios em bruto e os dados gerados dinamicamente pelos Extratores de Mercado (US e Europa) e pelos vários Motores de Estratégia no fecho do mercado de hoje.
@@ -207,36 +201,49 @@ print("\nA enviar dados consolidados para o Gemini Auditar...")
 
 relatorio_final = None
 
-# Lista de modelos em cascata (arranca com o 3.6 e recorre a alternativas se necessário)
-modelos_para_testar = ['gemini-3.6-flash', 'gemini-2.5-flash', 'gemini-2.0-flash']
+# Modelos recomendados e ativos pela API Gemini
+modelos_para_testar = ['gemini-3.8-flash', 'gemini-3.6-flash', 'gemini-1.5-flash']
 
 for mod in modelos_para_testar:
-    try:
-        print(f"A testar modelo Gemini: {mod}...")
-        if USE_NEW_GENAI:
-            client = genai.Client(api_key=GEMINI_API_KEY)
-            response = client.models.generate_content(
-                model=mod,
-                contents=prompt_orquestrador,
-            )
-            relatorio_final = response.text
-        else:
-            genai.configure(api_key=GEMINI_API_KEY)
-            modelo_ia = genai.GenerativeModel(mod)
-            resposta = modelo_ia.generate_content(prompt_orquestrador)
-            relatorio_final = resposta.text
-            
-        print(f"[SUCESSO] Relatório mestre gerado pela IA com o modelo {mod}!")
+    if relatorio_final:
         break
-    except Exception as e:
-        print(f"[AVISO] Falha ao comunicar com o modelo {mod}: {e}")
+        
+    print(f"\nA testar modelo Gemini: {mod}...")
+    
+    # Tenta até 3 vezes por modelo para superar erros 503 de alta procura
+    for tentativa in range(1, 4):
+        try:
+            if USE_NEW_GENAI:
+                client = genai.Client(api_key=GEMINI_API_KEY)
+                response = client.models.generate_content(
+                    model=mod,
+                    contents=prompt_orquestrador,
+                )
+                relatorio_final = response.text
+            else:
+                genai.configure(api_key=GEMINI_API_KEY)
+                modelo_ia = genai.GenerativeModel(mod)
+                resposta = modelo_ia.generate_content(prompt_orquestrador)
+                relatorio_final = resposta.text
+                
+            print(f"[SUCESSO] Relatório mestre gerado pela IA com o modelo {mod}!")
+            break
+        except Exception as e:
+            err_msg = str(e)
+            print(f"[AVISO] Tentativa {tentativa} no modelo {mod} falhou: {err_msg}")
+            if "503" in err_msg or "UNAVAILABLE" in err_msg:
+                print("Servidor temporariamente ocupado (503). A aguardar 4 segundos antes de tentar novamente...")
+                time.sleep(4)
+            else:
+                # Erro 404 ou outro erro não-temporário: salta para o próximo modelo da lista
+                break
 
 if not relatorio_final:
     print("\n[ALERTA DE IA] Não foi possível obter resposta de nenhum modelo Gemini.")
-    print("[INFO] A pipeline termina sem crash.")
+    print("[INFO] A pipeline termina sem crash. O e-mail com os DADOS BRUTOS já está disponível para uso manual.")
     
     assunto_erro = f"tradingRelatorioIA - ⚠️ AVISO: FALHA NA IA ({data_hoje})"
-    corpo_erro = f"Ocorreu um erro ao comunicar com a API do Gemini (Modelo indisponível ou limite de quota).\n\nPor favor, utiliza o e-mail com o assunto '[BACKUP BRUTO]' enviado anteriormente e cola o conteúdo diretamente no ChatGPT / Claude / Gemini Web para obter o relatório formatado."
+    corpo_erro = f"Ocorreu um erro ao comunicar com a API do Gemini (Alta procura temporária ou limite de quota).\n\nPor favor, utiliza o e-mail de backup enviado anteriormente com o assunto '[DADOS BRUTOS PARA IA]' e cola o conteúdo no ChatGPT / Claude / Gemini Web para obter o relatório formatado."
     enviar_email(assunto_erro, corpo_erro)
     sys.exit(0)
 
