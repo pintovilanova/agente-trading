@@ -43,38 +43,36 @@ SMTP_SERVER = "smtp.gmail.com"
 SMTP_PORT = 587
 
 # ===================================================================
-# CONFIGURAÇÕES DE RISCO INSTITUCIONAL (MÉTODO CARVER)
-# ===================================================================
-CAPITAL_TOTAL_CONTA = 10400.00  
-ALVO_VOLATILIDADE_ANUAL = 0.05  
-
-VOLATILIDADE_ALVO_DIARIA_USD = (CAPITAL_TOTAL_CONTA * ALVO_VOLATILIDADE_ANUAL) / 16.0 
-
-# ===================================================================
 # 2. FUNÇÕES DE REDE
 # ===================================================================
 def buscar_watchlist():
-    print("A carregar a Watchlist a partir do Google Sheets...")
+    print("A carregar a Watchlist e Configurações a partir do Google Sheets...")
     if not WEBHOOK_URL: 
         print("[ERRO] WEBHOOK_URL não configurado.")
-        return []
+        return [], {}
     try:
         resp = requests.get(WEBHOOK_URL)
         if resp.status_code == 200:
             dados = resp.json()
-            ativos = dados.get("ativos", []) if isinstance(dados, dict) else dados
+            if isinstance(dados, dict):
+                ativos = dados.get("ativos", [])
+                configs = dados.get("configs", {})
+            elif isinstance(dados, list):
+                ativos = dados
+                configs = {}
+            else:
+                ativos = []
+                configs = {}
+                
             print(f"[SUCESSO] {len(ativos)} ativos carregados para motor Connors-Chan.")
-            return ativos
+            return ativos, configs
         else:
             print(f"[ERRO] Falha ao descarregar dados: {resp.status_code}")
-            return []
+            return [], {}
     except Exception as e:
         print(f"[ERRO CRÍTICO] Falha de comunicação com Sheets: {e}")
-        return []
+        return [], {}
 
-# ===================================================================
-# FUNÇÃO DE ENVIO DE EMAIL (Com Sistema Anti-Falhas)
-# ===================================================================
 def enviar_email(conteudo):
     print("\nA enviar email do Motor Connors-Chan para o Agente IA...")
     
@@ -85,16 +83,13 @@ def enviar_email(conteudo):
     msg = MIMEMultipart()
     msg['From'] = EMAIL_USER
     msg['To'] = EMAIL_USER
-    # Assunto Técnico com os teus ícones
     msg['Subject'] = "🧲 tradingRelatorioIA US - CONNORS-CHAN REVERSÃO 🏹"
     
     msg.attach(MIMEText(conteudo, 'plain', 'utf-8'))
     
-    # Sistema de Tolerância a Falhas (Retry) com Timeout
     max_tentativas = 3
     for tentativa in range(max_tentativas):
         try:
-            # Adicionado timeout de 15 segundos para evitar bloqueios do Gmail
             server = smtplib.SMTP(SMTP_SERVER, SMTP_PORT, timeout=15)
             server.starttls()
             server.login(EMAIL_USER, EMAIL_PASS)
@@ -102,7 +97,7 @@ def enviar_email(conteudo):
             server.quit()
             
             print(f"[SUCESSO] Email enviado na tentativa {tentativa + 1}! O Agente IA tem novos alvos estatísticos.")
-            break  # Sai do loop por sucesso
+            break
             
         except Exception as e:
             print(f"[ERRO] Falha ao enviar email (tentativa {tentativa + 1} de {max_tentativas}): {e}")
@@ -115,7 +110,7 @@ def enviar_email(conteudo):
 # ===================================================================
 # 3. MOTOR MATEMÁTICO: CONNORS-CHAN (RSI(2) + BANDAS DE BOLLINGER)
 # ===================================================================
-def analisar_connors_chan(ativo_info):
+def analisar_connors_chan(ativo_info, vol_alvo_diaria_usd):
     try:
         ticker = ativo_info.get("ticker")
         nome_empresa = ativo_info.get("nome", "N/A")
@@ -188,9 +183,9 @@ def analisar_connors_chan(ativo_info):
                  entrada = alvo_tp = stop_loss = "N/A"
             else:
                  if pd.notna(atr) and atr > 0:
-                     qtd_acoes = round(VOLATILIDADE_ALVO_DIARIA_USD / atr, 2)
+                     qtd_acoes = round(vol_alvo_diaria_usd / atr, 2)
                  else:
-                     qtd_acoes = round(VOLATILIDADE_ALVO_DIARIA_USD / risco, 2) if risco > 0 else "N/A"
+                     qtd_acoes = round(vol_alvo_diaria_usd / risco, 2) if risco > 0 else "N/A"
 
                  if qtd_acoes != "N/A":
                      val_calc = entrada * qtd_acoes
@@ -236,17 +231,31 @@ def analisar_connors_chan(ativo_info):
 # 4. EXECUÇÃO PRINCIPAL E GERAÇÃO DE PROMPT
 # ===================================================================
 def executar_motor():
-    ativos = buscar_watchlist()
+    ativos, configs = buscar_watchlist()
     if not ativos:
         sys.exit(1)
         
+    # Leitura dinâmica das configurações de risco da tab Configs (com fallback de segurança)
+    try:
+        capital_total_conta = float(configs.get("CAPITAL_TOTAL_CONTA", 10400.00))
+        alvo_volatilidade_anual = float(configs.get("ALVO_VOLATILIDADE_ANUAL", 0.05))
+    except (ValueError, TypeError):
+        capital_total_conta = 10400.00
+        alvo_volatilidade_anual = 0.05
+
+    volatilidade_alvo_diaria_usd = (capital_total_conta * alvo_volatilidade_anual) / 16.0
+
+    print(f"[CONFIG] Capital Total da Conta: ${capital_total_conta:,.2f}")
+    print(f"[CONFIG] Alvo Volatilidade Anual: {alvo_volatilidade_anual*100:.1f}%")
+    print(f"[CONFIG] Orçamento Diário de Volatilidade: ${volatilidade_alvo_diaria_usd:.2f}\n")
+
     ativos_acionados = []
     
     for ativo_info in ativos:
         ticker = ativo_info.get("ticker")
         if not ticker or ticker == "#N/A": continue
         
-        res = analisar_connors_chan(ativo_info)
+        res = analisar_connors_chan(ativo_info, volatilidade_alvo_diaria_usd)
         
         if res:
             print(f"[OK] {ticker} analisado. Estado: {res['estado']}")
