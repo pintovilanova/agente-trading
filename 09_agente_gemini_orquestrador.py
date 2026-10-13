@@ -150,7 +150,7 @@ try:
         relatorio_final = response.text
     else:
         genai.configure(api_key=GEMINI_API_KEY)
-        modelo_ia = genai.GenerativeModel('gemini-1.5-flash')
+        modelo_ia = genai.GenerativeModel('gemini-3.6-flash')
         resposta = modelo_ia.generate_content(prompt_orquestrador)
         relatorio_final = resposta.text
         
