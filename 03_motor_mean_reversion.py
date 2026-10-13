@@ -6,30 +6,11 @@
 # objetivo não é caçar tendências, mas sim identificar quedas massivas e 
 # anomalias estatísticas em ativos da Watchlist, acionando entradas cirúrgicas 
 # para ressaltos rápidos ("Dead Cat Bounce" / Estratégia Hit & Run).
-#
-# Pilares Técnicos e Arquitetura:
-# 1. Filtros de Segurança Estrutural (Anti-Lixo):
-#    - Rejeição automática de Penny Stocks (Preço < 3.00 USD).
-#    - Exclusão estrita do setor imobiliário / REITs / mREITs.
-# 2. Gatilhos de Pânico Extremo (O Confluente):
-#    - Distância à SMA20 inferior ou igual a -8.0%.
-#    - RSI de 14 períodos em sobrevenda extrema (< 30).
-#    - Confirmação institucional por Volume Relativo (RVOL >= 1.5) 
-#      OU padrão de vela de Absorção (Sombra inferior > 1.5x o corpo).
-# 3. Gestão de Risco Institucional (Método Carver - Target Volatility):
-#    - Orçamento de flutuação diária calculado com base na volatilidade 
-#      anual alvo lida da tab 'Configs' do Google Sheets.
-#    - Dimensionamento de posições baseado no ATR (Average True Range) 
-#      para nivelar o risco real por ativo.
-# 4. Execução e Saída (Hit & Run):
-#    - Stop Loss físico cravado a 1% abaixo do mínimo do dia de pânico.
-#    - Validação matemática de Rácio Risco/Recompensa (Recompensa >= Risco).
-#    - Alvo de Take-Profit fixo e cravado estritamente na EMA9 (sem trailing).
 # ===================================================================
 
 import pandas as pd
 import yfinance as yf
-import pandas_ta as ta  # <-- Importação explícita obrigatória para registar os métodos .ta
+import pandas_ta as ta
 import numpy as np
 from datetime import datetime
 from zoneinfo import ZoneInfo
@@ -69,7 +50,7 @@ def buscar_watchlist():
         print("[ERRO] WEBHOOK_URL não configurado.")
         return [], {}
     try:
-        resp = requests.get(WEBHOOK_URL)
+        resp = requests.get(WEBHOOK_URL, timeout=15)
         if resp.status_code == 200:
             dados = resp.json()
             if isinstance(dados, dict):
@@ -104,11 +85,9 @@ def enviar_email(conteudo):
     
     msg.attach(MIMEText(conteudo, 'plain', 'utf-8'))
     
-    # Sistema de Tolerância a Falhas (Retry) com Timeout
     max_tentativas = 3
     for tentativa in range(max_tentativas):
         try:
-            # Adicionado timeout de 15 segundos para evitar timeouts do servidor
             server = smtplib.SMTP(SMTP_SERVER, SMTP_PORT, timeout=15)
             server.starttls()
             server.login(EMAIL_USER, EMAIL_PASS)
@@ -116,7 +95,7 @@ def enviar_email(conteudo):
             server.quit()
             
             print(f"[SUCESSO] Email enviado na tentativa {tentativa + 1}! O Agente IA tem novos alvos para triagem.")
-            break  # Sai do loop após sucesso
+            break
             
         except Exception as e:
             print(f"[ERRO] Falha ao enviar email (tentativa {tentativa + 1} de {max_tentativas}): {e}")
@@ -143,15 +122,12 @@ def analisar_reversao_media(ativo_info, vol_alvo_diaria_usd):
         if isinstance(df.columns, pd.MultiIndex):
             df.columns = df.columns.droplevel(1)
 
-        # Verificar se há dados suficientes
         if len(df) < 25:
             return None
 
         preco = df.iloc[-1]['Close']
 
-        # -------------------------------------------------------------
-        # FILTROS DE SEGURANÇA ESTRUTURAL (ANTI-LIXO BOLSISTA)
-        # -------------------------------------------------------------
+        # Filtros de Segurança Estrutural
         if pd.isna(preco) or preco < 3.00:
             print(f"[FILTRADO] {ticker} rejeitado por preço baixo (Preço: {preco}).")
             return None
@@ -170,15 +146,14 @@ def analisar_reversao_media(ativo_info, vol_alvo_diaria_usd):
         rs = gain / loss
         df['RSI_14'] = 100 - (100 / (1 + rs))
         
-        # Média Móvel de 9 (Alvo de Saída)
+        # EMA 9
         df['EMA_9'] = df['Close'].ewm(span=9, adjust=False).mean()
         
-        # Volume Relativo (RVOL) e ATR para o Carver
+        # RVOL e ATR
         df['SMA_20_Vol'] = df['Volume'].rolling(window=20).mean()
         df['RVOL'] = df['Volume'] / df['SMA_20_Vol']
         df.ta.atr(length=14, append=True)
 
-        # Selecionar o último dia de forma segura após o cálculo das colunas
         ultimo_dia = df.iloc[-1]
 
         sma20 = ultimo_dia.get('SMA_20', np.nan)
@@ -189,7 +164,7 @@ def analisar_reversao_media(ativo_info, vol_alvo_diaria_usd):
         
         dist_mm20 = ((preco - sma20) / sma20) * 100 if pd.notna(sma20) and sma20 > 0 else 0.0
         
-        # Deteção de Absorção (Candlestick)
+        # Deteção de Absorção
         abertura = ultimo_dia.get('Open', preco)
         minimo = ultimo_dia.get('Low', preco)
         
@@ -204,9 +179,6 @@ def analisar_reversao_media(ativo_info, vol_alvo_diaria_usd):
         qtd_acoes = "N/A"
         valor_investir = "N/A"
         
-        # -------------------------------------------------------------
-        # A MATEMÁTICA DO GATILHO DE CHOQUE
-        # -------------------------------------------------------------
         if pd.notna(dist_mm20) and dist_mm20 <= -8.0 and pd.notna(rsi) and rsi < 30 and (rvol >= 1.5 or absorcao):
             estado = "PÂNICO EXTREMO - Oportunidade de Reversão"
             entrada = round(preco, 2)
@@ -220,7 +192,6 @@ def analisar_reversao_media(ativo_info, vol_alvo_diaria_usd):
                  estado = "Rejeitado (Rácio de Risco Negativo)"
                  entrada = alvo_tp = stop_loss = "N/A"
             else:
-                 # CÁLCULO DE MESTRE CARVER ADAPTADO A REVERSÃO:
                  if pd.notna(atr) and atr > 0:
                      qtd_acoes = round(vol_alvo_diaria_usd / atr, 2)
                  else:
@@ -234,7 +205,6 @@ def analisar_reversao_media(ativo_info, vol_alvo_diaria_usd):
             if pd.isna(v) or v == "N/A": return "N/A"
             return round(float(v), 2)
 
-        # Análise contextual do RS Score (Coluna O)
         try:
             val_rs = float(rs_score)
             if val_rs >= 80:
@@ -273,9 +243,9 @@ def analisar_reversao_media(ativo_info, vol_alvo_diaria_usd):
 def executar_motor():
     ativos, configs = buscar_watchlist()
     if not ativos:
-        sys.exit(1)
+        print("[AVISO] Nenhum ativo carregado para análise. A terminar a execução sem erro.")
+        sys.exit(0)
         
-    # Leitura dinâmica das configurações de risco da tab Configs (com fallback de segurança)
     try:
         capital_total_conta = float(configs.get("CAPITAL_TOTAL_CONTA", 10400.00))
         alvo_volatilidade_anual = float(configs.get("ALVO_VOLATILIDADE_ANUAL", 0.05))
@@ -283,7 +253,6 @@ def executar_motor():
         capital_total_conta = 10400.00
         alvo_volatilidade_anual = 0.05
 
-    # Orçamento diário de volatilidade do Carver (constante 16 para raiz de 256 dias úteis)
     volatilidade_alvo_diaria_usd = (capital_total_conta * alvo_volatilidade_anual) / 16.0
 
     print(f"[CONFIG] Capital Total da Conta: ${capital_total_conta:,.2f}")
@@ -304,11 +273,42 @@ def executar_motor():
             if "PÂNICO EXTREMO" in res_dict['estado']:
                 ativos_acionados.append(res_dict)
                 
-    # ==============================================================================
-    # PROMPT DE SISTEMA PARA A IA (Instruções Rigorosas)
-    # ==============================================================================
-    prompt_ia = """Atuas como o Analista Quantitativo Chefe de um fundo institucional. O teu mandato é auditar ações que sofreram quedas massivas e identificar fundos institucionais para ressaltos rápidos (Dead Cat Bounce). 
-Não estás à procura de tendências; estás a apanhar a correção de uma anomalia estatística baseada no orçamento de volatilidade da conta.
+    prompt_ia = (
+        "Atuas como o Analista Quantitativo Chefe de um fundo institucional. O teu mandato é auditar ações que sofreram quedas massivas e identificar fundos institucionais para ressaltos rápidos (Dead Cat Bounce).\n"
+        "Não estás à procura de tendências; estás a apanhar a correção de uma anomalia estatística baseada no orçamento de volatilidade da conta.\n\n"
+        "REGRAS ESTRITAS (ANTI-ALUCINAÇÃO):\n"
+        "- NUNCA inventes, deduzas ou alteres preços, tickers ou indicadores. Usa EXATAMENTE os números fornecidos nos dados.\n"
+        "- O tom deve ser militar, frio e puramente matemático. Sem saudações.\n\n"
+        "REGRAS DE TRIAGEM E EXECUÇÃO:\n"
+        "1. VALIDAÇÃO DE FUNDO: Confirma a Capitulação. Um RVOL > 1.5 ou 'Absorção: Sim' indicam que o dinheiro institucional começou a comprar o pânico.\n"
+        "2. CONTEXTO INSTITUCIONAL (RS SCORE): Avalia o RS Score reportado. Se o ativo tiver RS Score de Elite (>= 80), o ressalto beneficia de suporte de fundo forte; se for laggard (< 50), exige cautela redobrada.\n"
+        "3. VETO FUNDAMENTAL: O motor já filtra penny stocks (<$3) e mREITs, mas se souberes que a queda foi originada por fraude ou falência iminente, emite um VETO OBRIGATÓRIO.\n"
+        "4. TÁTICA DE SAÍDA (Hit & Run): O alvo de Take-Profit é fixo e cravado na EMA9. Não recomendes o uso de Trailing Stops. O objetivo é comprar barato e largar a ação mal ela toque na linha dos 9 dias.\n"
+        "5. TÁTICA DE ENTRADA: Recomenda execução próxima do fecho (para confirmar a vela de absorção) ou o uso de Buy Limit na zona de pânico.\n\n"
+        "ESTRUTURA VISUAL OBRIGATÓRIA:\n"
+        "🎯 [TICKER] - [Nome da Empresa] ([Setor])\n"
+        "- 🚨 SINAL DE PÂNICO: [Destacar a Dist MM20 e o RSI]\n"
+        "- 📊 CONTEXTO INSTITUCIONAL (RS SCORE): [Incluir o RS Score e o respetivo estado institucional]\n"
+        "- 🩸 PEGADA INSTITUCIONAL: [Referir RVOL ou Absorção]\n"
+        "- ⚙️ TÁTICA: HIT & RUN. Retirar lucro imediato no alvo EMA9.\n"
+        "- 🔢 DADOS EXATOS: Entrada: X | Stop: X | TP (EMA9): X | Qtd: X | Valor a Investir: X\n"
+        "- 📋 REFERÊNCIA: [Linha do Comboio]\n\n"
+        "Termina o relatório com: 'EXECUÇÃO MECÂNICA. NÃO PERSEGUIR O PREÇO. O RISCO DITA A SOBREVIVÊNCIA.'"
+    )
+    
+    bloco_texto_ia = f"{prompt_ia}\n\n--------------------------------------------------\n"
+    
+    if not ativos_acionados:
+        bloco_texto_ia += "[SEM SINAIS DE PÂNICO] - Nenhuma ação da Watchlist cumpre os requisitos matemáticos de sobrevenda extrema hoje.\n"
+    else:
+        bloco_texto_ia += "DADOS DOS ATIVOS EM PÂNICO (COMBOIO):\n\n"
+        for item in ativos_acionados:
+            bloco_texto_ia += item["comboio_str"] + "\n"
+            
+    with open("comboio_reversao_temp.txt", "w", encoding="utf-8") as f:
+        f.write(bloco_texto_ia)
+        
+    enviar_email(bloco_texto_ia)
 
-REGRAS ESTRITAS (ANTI-ALUCINAÇÃO):
-- NUNCA inventes, deduzas ou alteres preços, tickers
+if __name__ == "__main__":
+    executar_motor()
