@@ -390,7 +390,7 @@ for d in dados_temporarios:
         f"RS Score: {d['rs_score']} ({d['status_rs']}),"
         f"Dist MM20: {d['dist_mm20']}%,EMA9: {d['ema9']},Momentum: {d['momentum']},"
         f"RSI: {d['rsi']},ADX: {d['adx']},ATR: {d['atr']} (Vol: {d['atr_perc']}%),"
-        f"RVOL: {d['rvol']},Estado: {d['estado']},Entrada: {entrada_str},"
+        f"RVOL: {d['rvol']},Estado: {d['estado']},Ordem: BUY STOP,Entrada: {entrada_str},"
         f"Stop: {d['stop']},Take-Profit: {d['tp']},Break-Even: {d['be']},"
         f"Qtd: {qtd_final},ValorInvestir: {valor_investir},Trailing: {d['trailing']},Lote: {tipo_lote},Earnings: {d['earnings']},"
         f"PosicaoAtiva: {d['posicao_ativa']},Data: {d['data']}"
