@@ -1,26 +1,6 @@
 # ===================================================================
 # SISTEMA DE TRADING INSTITUCIONAL - MOTOR DE COMPRESSÃO VCP (BREAKOUT)
 # ===================================================================
-# Descrição Geral:
-# Este script atua como um rastreador de "Molas Comprimidas" (Volatility 
-# Contraction Pattern - VCP / Bollinger Squeeze). O objetivo é detetar 
-# ativos saudáveis em tendência de alta que entraram num período de 
-# consolidação extrema e seca de volume institucional, antecipando uma 
-# rutura (breakout) iminente e explosiva.
-#
-# Pilares Técnicos e Arquitetura:
-# 1. Filtro de Tendência Estrutural (Mark Minervini):
-#    - Preço > SMA 50 > SMA 200 (Garante que a consolidação ocorre num Bull Market).
-# 2. Gatilhos de Compressão (O "Squeeze"):
-#    - Bollinger Band Width (BBW) nos níveis mais baixos dos últimos 120 dias.
-#    - Contração de Preço: Intervalo (High - Low) dos últimos 5 dias muito estreito.
-#    - Seca de Volume: Volume médio dos últimos 3 dias < 60% da média de 50 dias.
-# 3. Gestão de Risco de Alta Precisão:
-#    - Stop Loss cravado estritamente abaixo do mínimo dos últimos 5 dias (risco mínimo).
-#    - Entrada (Buy Stop) acima do máximo dos últimos 5 dias.
-#    - Dimensionamento baseado na volatilidade (ATR) adaptado ao micro-risco.
-# ===================================================================
-
 import pandas as pd
 import yfinance as yf
 import numpy as np
@@ -58,29 +38,41 @@ SMTP_PORT = 587
 def buscar_watchlist():
     print("A carregar a Watchlist e Configurações a partir do Google Sheets...")
     if not WEBHOOK_URL: 
+        print("[ERRO CRÍTICO] WEBHOOK_URL não encontrada nas variáveis de ambiente.")
         return [], {}
     try:
-        resp = requests.get(WEBHOOK_URL)
+        url_alvo = WEBHOOK_URL if "?" in WEBHOOK_URL else f"{WEBHOOK_URL}?aba=Analise Compra"
+        resp = requests.get(url_alvo, timeout=15)
+        print(f"[DEBUG] Status Code do Webhook: {resp.status_code}")
+        
         if resp.status_code == 200:
-            dados = resp.json()
+            try:
+                dados = resp.json()
+            except Exception as e:
+                print(f"[ERRO] O Webhook não retornou JSON válido: {e}. Resposta: {resp.text[:200]}")
+                return [], {}
+
             if isinstance(dados, dict):
+                if "erro" in dados:
+                    print(f"[ERRO DO SHEETS] {dados['erro']}")
+                    return [], {}
                 ativos = dados.get("ativos", [])
                 configs = dados.get("configs", {})
+                print(f"[SUCESSO] {len(ativos)} ativos e {len(configs)} configurações carregados.")
+                return ativos, configs
             elif isinstance(dados, list):
-                ativos = dados
-                configs = {}
+                print(f"[SUCESSO] {len(dados)} ativos carregados (formato lista).")
+                return dados, {}
             else:
-                ativos = []
-                configs = {}
-            return ativos, configs
-        return [], {}
+                print(f"[ERRO] Formato de dados inesperado: {type(dados)}")
+                return [], {}
+        else:
+            print(f"[ERRO HTTP] Falha ao descarregar dados: {resp.status_code}. Resposta: {resp.text[:200]}")
+            return [], {}
     except Exception as e:
-        print(f"[ERRO CRÍTICO] Sheets: {e}")
+        print(f"[ERRO CRÍTICO] Falha de comunicação com Sheets: {e}")
         return [], {}
 
-# ===================================================================
-# FUNÇÃO DE ENVIO DE EMAIL (Com Sistema Anti-Falhas)
-# ===================================================================
 def enviar_email(conteudo):
     print("\nA enviar email VCP/Squeeze para o Agente IA...")
     
@@ -172,32 +164,24 @@ def analisar_compressao_vcp(ativo_info, vol_alvo_diaria_usd):
         vol_sma50 = float(ultimo['Vol_SMA_50'])
         atr = float(ultimo['ATR_14'])
         
-        # Caixote de 5 dias (High/Low da consolidação)
+        # Caixote de 5 dias
         max_5d = float(df['High'].iloc[-5:].max())
         min_5d = float(df['Low'].iloc[-5:].min())
 
-        # ==============================================================
-        # CONDIÇÕES DO GATILHO VCP (SQUEEZE)
-        # ==============================================================
-        # 1. Bull Market Estrutural
+        # Condições do Gatilho VCP (Squeeze)
         tendencia_alta = (preco > sma50) and (sma50 > sma200)
-        
-        # 2. Compressão Histórica (BBW no percentil 15% mais baixo dos últimos 6 meses)
         bbw_120d_min = float(df['BBW'].iloc[-120:].min())
         squeeze_ativo = bbw_atual <= (bbw_120d_min * 1.5) and bbw_atual < 8.0
-        
-        # 3. Seca de Volume (Desinteresse / Sem pressão de venda)
         seca_volume = vol_medio_3d < (vol_sma50 * 0.6)
 
         if tendencia_alta and squeeze_ativo and seca_volume:
             estado = "SQUEEZE EXTREMO - Ignição Iminente"
-            entrada_gatilho = round(max_5d * 1.002, 2) # Ligeiramente acima do máximo
-            stop_loss = round(min_5d * 0.998, 2) # Ligeiramente abaixo do mínimo
+            entrada_gatilho = round(max_5d * 1.002, 2)
+            stop_loss = round(min_5d * 0.998, 2)
             
             risco = entrada_gatilho - stop_loss
-            alvo_tp = round(entrada_gatilho + (risco * 3), 2) # Rácio 3:1
+            alvo_tp = round(entrada_gatilho + (risco * 3), 2)
             
-            # Dimensionamento (Volatilidade Alvo)
             if atr > 0:
                 qtd_acoes = round(vol_alvo_diaria_usd / atr, 2)
             else:
@@ -208,7 +192,6 @@ def analisar_compressao_vcp(ativo_info, vol_alvo_diaria_usd):
             
             def limpa(v): return round(float(v), 2)
             
-            # Análise contextual do RS Score (Coluna O) sem bloqueios rígidos
             try:
                 val_rs = float(rs_score)
                 if val_rs >= 80:
@@ -247,9 +230,9 @@ def analisar_compressao_vcp(ativo_info, vol_alvo_diaria_usd):
 def executar_motor():
     ativos, configs = buscar_watchlist()
     if not ativos:
-        sys.exit(1)
+        print("[AVISO] Nenhum ativo carregado para análise. A terminar a execução sem erro.")
+        sys.exit(0)
         
-    # Leitura dinâmica das configurações de risco da tab Configs (com fallback de segurança)
     try:
         capital_total_conta = float(configs.get("CAPITAL_TOTAL_CONTA", 10400.00))
         alvo_volatilidade_anual = float(configs.get("ALVO_VOLATILIDADE_ANUAL", 0.05))
@@ -272,7 +255,6 @@ def executar_motor():
         if res:
             ativos_acionados.append(res)
             
-    # Ordenar pelos ativos mais comprimidos (menor BBW)
     ativos_acionados = sorted(ativos_acionados, key=lambda k: k['bbw'])
 
     prompt_ia = """Atuas como Analista Quantitativo de Breakouts (Modelo Mark Minervini). O teu mandato é auditar ativos em fase de Squeeze (Contração de Volatilidade) preparados para explosão direcional.
