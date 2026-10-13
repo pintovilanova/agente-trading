@@ -128,9 +128,10 @@ A tua missão é ler integralmente este conteúdo, processar todos os ativos que
 
 🚨 REGRAS ESTRITAS ANTI-ALUCINAÇÃO & CONTEXTO DE GESTÃO 🚨
 1. ZERO CRIATIVIDADE DE DADOS: Não inventes preços, tickers, stops ou tamanhos de posição. Utiliza unicamente e na íntegra os dados fornecidos nos ficheiros abaixo.
-2. LEITURA INTEGRAL (PROIBIDO OMITIR ATIVOS OU ESTRATÉGIAS): Deves incluir todos os ativos, posições ativas, alertas macro e sinais de entrada. Se uma fonte indicar "[SEM SINAIS OU OPORTUNIDADES PARA ESTA ESTRATÉGIA HOJE]", DEVES criar a secção respetiva baseada no nome do ficheiro fonte (ex: EARNINGS DRIFT, VCP BREAKOUT, etc.) e escrever explicitamente que não há sinais hoje. Não omitas NENHUMA estratégia.
+2. LEITURA INTEGRAL (PROIBIDO OMITIR ATIVOS OU ESTRATÉGIAS): Deves incluir todos os ativos, posições ativas, alertas macro e sinais de entrada. Se uma fonte indicar "[SEM SINAIS OU OPORTUNIDADES PARA ESTA ESTRATÉGIA HOJE]", DEVES criar a secção respetiva baseada no nome do ficheiro fonte e escrever explicitamente que não há sinais hoje. Não omitas NENHUMA estratégia.
 3. ESTRUTURA INSTITUCIONAL DINÂMICA: Organiza o relatório por secções lógicas com base nas fontes lidas.
-4. RESTRIÇÃO DE NOTAS OPERACIONAIS: O lembrete operacional referente à alteração do estado no Google Sheets para 'ATIVA_FAST' e à gestão de Trailing Stop diário deve ser posicionado **estritamente e de forma exclusiva** na secção afeta ao **Fast Trend Carver**. Nunca mistures esta regra com outras estratégias (como Breakouts clássicos, Pânico ou PEAD), uma vez que a mecânica 'ATIVA_FAST' é exclusiva desse modelo.
+4. RESTRIÇÃO DE NOTAS OPERACIONAIS: O lembrete operacional referente à alteração do estado no Google Sheets para 'ATIVA_FAST' e à gestão de Trailing Stop diário deve ser posicionado estritamente e de forma exclusiva na secção afeta ao Fast Trend Carver. Nunca mistures esta regra com outras estratégias.
+5. VETO DE SOBREPOSIÇÃO (CRÍTICO): Antes de sugerires qualquer NOVA ENTRADA num ativo (seja no VCP, Reversão, PEAD, Breakouts ou Carver Momentum), verifica obrigatoriamente se esse ativo já se encontra listado como [POSIÇÃO ATIVA - ATIVA_FAST] ou se tem 'PosicaoAtiva: SIM' noutra fonte. Se já estiver ativo na carteira, É ESTRITAMENTE PROIBIDO sugerir uma nova entrada para esse mesmo ticker em qualquer secção. Omite-o dos novos sinais.
 
 DADOS RECOLHIDOS HOJE NOS FICHEIROS:
 {conteudo_bruto_total}
