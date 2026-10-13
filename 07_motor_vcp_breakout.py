@@ -52,27 +52,31 @@ EMAIL_PASS = os.environ.get("EMAIL_PASS")
 SMTP_SERVER = "smtp.gmail.com"
 SMTP_PORT = 587
 
-CAPITAL_TOTAL_CONTA = 10400.00  
-ALVO_VOLATILIDADE_ANUAL = 0.05  
-VOLATILIDADE_ALVO_DIARIA_USD = (CAPITAL_TOTAL_CONTA * ALVO_VOLATILIDADE_ANUAL) / 16.0 
-
 # ===================================================================
 # 2. FUNÇÕES DE REDE
 # ===================================================================
 def buscar_watchlist():
-    print("A carregar a Watchlist a partir do Google Sheets...")
+    print("A carregar a Watchlist e Configurações a partir do Google Sheets...")
     if not WEBHOOK_URL: 
-        return []
+        return [], {}
     try:
         resp = requests.get(WEBHOOK_URL)
         if resp.status_code == 200:
             dados = resp.json()
-            ativos = dados.get("ativos", []) if isinstance(dados, dict) else dados
-            return ativos
-        return []
+            if isinstance(dados, dict):
+                ativos = dados.get("ativos", [])
+                configs = dados.get("configs", {})
+            elif isinstance(dados, list):
+                ativos = dados
+                configs = {}
+            else:
+                ativos = []
+                configs = {}
+            return ativos, configs
+        return [], {}
     except Exception as e:
         print(f"[ERRO CRÍTICO] Sheets: {e}")
-        return []
+        return [], {}
 
 # ===================================================================
 # FUNÇÃO DE ENVIO DE EMAIL (Com Sistema Anti-Falhas)
@@ -91,11 +95,9 @@ def enviar_email(conteudo):
     
     msg.attach(MIMEText(conteudo, 'plain', 'utf-8'))
     
-    # Sistema de Tolerância a Falhas (Retry) com Timeout
     max_tentativas = 3
     for tentativa in range(max_tentativas):
         try:
-            # Adicionado timeout de 15 segundos para proteger contra bloqueios do Gmail
             server = smtplib.SMTP(SMTP_SERVER, SMTP_PORT, timeout=15)
             server.starttls()
             server.login(EMAIL_USER, EMAIL_PASS)
@@ -103,7 +105,7 @@ def enviar_email(conteudo):
             server.quit()
             
             print(f"[SUCESSO] Email VCP enviado na tentativa {tentativa + 1}!")
-            break  # Sai do loop por sucesso
+            break
             
         except Exception as e:
             print(f"[ERRO] Falha ao enviar o email (tentativa {tentativa + 1} de {max_tentativas}): {e}")
@@ -116,13 +118,11 @@ def enviar_email(conteudo):
 # ===================================================================
 # 3. MOTOR MATEMÁTICO: COMPRESSÃO DE VOLATILIDADE
 # ===================================================================
-def analisar_compressao_vcp(ativo_info):
+def analisar_compressao_vcp(ativo_info, vol_alvo_diaria_usd):
     try:
         ticker = ativo_info.get("ticker")
         nome_empresa = ativo_info.get("nome", "N/A")
         setor = ativo_info.get("setor", "Desconhecido")
-        
-        # Recolher o RS Score da Coluna O enviado pelo Sheets
         rs_score = ativo_info.get("rs_score", "N/A")
 
         df = yf.download(ticker, period="1y", interval="1d", progress=False)
@@ -199,9 +199,9 @@ def analisar_compressao_vcp(ativo_info):
             
             # Dimensionamento (Volatilidade Alvo)
             if atr > 0:
-                qtd_acoes = round(VOLATILIDADE_ALVO_DIARIA_USD / atr, 2)
+                qtd_acoes = round(vol_alvo_diaria_usd / atr, 2)
             else:
-                qtd_acoes = round(VOLATILIDADE_ALVO_DIARIA_USD / risco, 2) if risco > 0 else "N/A"
+                qtd_acoes = round(vol_alvo_diaria_usd / risco, 2) if risco > 0 else "N/A"
                 
             val_calc = entrada_gatilho * qtd_acoes if qtd_acoes != "N/A" else 0
             valor_investir = f"~{val_calc:.2f} USD"
@@ -245,16 +245,30 @@ def analisar_compressao_vcp(ativo_info):
 # 4. EXECUÇÃO PRINCIPAL
 # ===================================================================
 def executar_motor():
-    ativos = buscar_watchlist()
+    ativos, configs = buscar_watchlist()
     if not ativos:
         sys.exit(1)
         
+    # Leitura dinâmica das configurações de risco da tab Configs (com fallback de segurança)
+    try:
+        capital_total_conta = float(configs.get("CAPITAL_TOTAL_CONTA", 10400.00))
+        alvo_volatilidade_anual = float(configs.get("ALVO_VOLATILIDADE_ANUAL", 0.05))
+    except (ValueError, TypeError):
+        capital_total_conta = 10400.00
+        alvo_volatilidade_anual = 0.05
+
+    volatilidade_alvo_diaria_usd = (capital_total_conta * alvo_volatilidade_anual) / 16.0
+
+    print(f"[CONFIG] Capital Total da Conta: ${capital_total_conta:,.2f}")
+    print(f"[CONFIG] Alvo Volatilidade Anual: {alvo_volatilidade_anual*100:.1f}%")
+    print(f"[CONFIG] Orçamento Diário de Volatilidade: ${volatilidade_alvo_diaria_usd:.2f}\n")
+
     ativos_acionados = []
     for ativo_info in ativos:
         ticker = ativo_info.get("ticker")
         if not ticker or ticker == "#N/A": continue
         
-        res = analisar_compressao_vcp(ativo_info)
+        res = analisar_compressao_vcp(ativo_info, volatilidade_alvo_diaria_usd)
         if res:
             ativos_acionados.append(res)
             
