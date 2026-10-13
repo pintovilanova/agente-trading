@@ -198,7 +198,7 @@ def analisar_tendencia_carver(ativo_info):
         f"RS Score: {rs_score} ({status_rs}),"
         f"EMA8: {limpa(ema8)},EMA32: {limpa(ema32)},ATR36: {limpa(atr36)},"
         f"Forecast: {limpa(forecast_carver)},Multiplicador: x{limpa(multiplicador)},"
-        f"Estado: {estado_str},Entrada: {limpa(entrada)},Stop: {limpa(stop_loss)},"
+        f"Estado: {estado_str},Ordem: BUY STOP,Entrada: {limpa(entrada)},Stop: {limpa(stop_loss)},"
         f"Take-Profit: {limpa(alvo_tp)},Qtd: {qtd_acoes},ValorInvestir: {valor_investir},"
         f"Data: {datetime.now(ZoneInfo('Europe/Lisbon')).strftime('%d/%m/%Y %H:%M:%S')}"
     )
