@@ -4,9 +4,16 @@ import time
 import smtplib
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
-import google.generativeai as genai
 from datetime import datetime
 from zoneinfo import ZoneInfo
+
+# Importação da biblioteca Gemini com suporte a nova e antiga API
+try:
+    from google import genai
+    USE_NEW_GENAI = True
+except ImportError:
+    import google.generativeai as genai
+    USE_NEW_GENAI = False
 
 # ===================================================================
 # SISTEMA DE TRADING INSTITUCIONAL - AGENTE IA ORQUESTRADOR (PIPELINE)
@@ -14,7 +21,8 @@ from zoneinfo import ZoneInfo
 # Descrição:
 # Este script corre no final da pipeline diária. Varre o disco da máquina 
 # virtual em busca de TODOS os ficheiros "comboio" gerados pelos motores.
-# Lê dinamicamente o conteúdo, audita via Gemini e envia o Relatório Mestre.
+# Envia primeiro um email de BACKUP BRUTO (para o caso de falha da IA)
+# e depois tenta auditar via Gemini e enviar o Relatório Mestre Final.
 # ===================================================================
 
 # 1. CREDENCIAIS (GitHub Secrets)
@@ -28,20 +36,44 @@ if not GEMINI_API_KEY:
     print("[ERRO] GEMINI_API_KEY não encontrada nas variáveis de ambiente.")
     sys.exit(1)
 
-genai.configure(api_key=GEMINI_API_KEY)
-
-# Usa o modelo Gemini configurado
-modelo_ia = genai.GenerativeModel('gemini-3.6-flash')
+# Função Auxiliar para Envio de Email
+def enviar_email(assunto, corpo_texto):
+    if not EMAIL_USER or not EMAIL_PASS:
+        print("[AVISO] EMAIL_USER ou EMAIL_PASS não definidos. Email não enviado.")
+        return False
+        
+    max_tentativas = 3
+    for tentativa in range(max_tentativas):
+        try:
+            msg = MIMEMultipart()
+            msg['From'] = EMAIL_USER
+            msg['To'] = EMAIL_USER
+            msg['Subject'] = assunto
+            msg.attach(MIMEText(corpo_texto, 'plain', 'utf-8'))
+            
+            server = smtplib.SMTP(SMTP_SERVER, SMTP_PORT, timeout=15)
+            server.starttls()
+            server.login(EMAIL_USER, EMAIL_PASS)
+            server.sendmail(EMAIL_USER, EMAIL_USER, msg.as_string())
+            server.quit()
+            
+            print(f"[SUCESSO] Email '{assunto}' enviado com sucesso na tentativa {tentativa + 1}!")
+            return True
+        except Exception as e:
+            print(f"[ERRO] Falha ao enviar email (tentativa {tentativa + 1} de {max_tentativas}): {e}")
+            if tentativa < max_tentativas - 1:
+                time.sleep(5)
+    return False
 
 # 2. DEFINIR TODOS OS FICHEIROS GERADOS PELOS EXTRATORES E MOTORES
 ficheiros_alvo = [
-    "comboio_temp.txt",                 # Ficheiro do Extrator US
-    "comboio_europa.txt",               # Ficheiro do Extrator Europa
-    "comboio_vcp_temp.txt",             # Ficheiro do Motor 07 (VCP Breakout)
-    "comboio_reversao_temp.txt",        # Ficheiro do Motor 03 (Pânico)
-    "comboio_earnings_temp.txt",        # Ficheiro do Motor 04 (PEAD)
-    "comboio_connors_temp.txt",         # Ficheiro do Motor 05 (REVERSAO)
-    "comboio_carver_temp.txt"           # Ficheiro do Motor 06 (Fast Trend Carver)
+    "comboio_temp.txt",             # Ficheiro do Extrator US
+    "comboio_europa.txt",           # Ficheiro do Extrator Europa
+    "comboio_vcp_temp.txt",         # Ficheiro do Motor 07 (VCP Breakout)
+    "comboio_reversao_temp.txt",    # Ficheiro do Motor 03 (Pânico)
+    "comboio_earnings_temp.txt",    # Ficheiro do Motor 04 (PEAD)
+    "comboio_connors_temp.txt",     # Ficheiro do Motor 05 (REVERSAO)
+    "comboio_carver_temp.txt"       # Ficheiro do Motor 06 (Fast Trend Carver)
 ]
 
 conteudo_bruto_total = ""
@@ -63,7 +95,6 @@ for ficheiro in ficheiros_alvo:
                 conteudo_bruto_total += f"{dados}\n"
                 print(f"[ENCONTRADO] Dados detetados no {ficheiro}.")
             else:
-                # SE ESTIVER VAZIO, AVISA A IA EM VEZ DE OMITIR!
                 conteudo_bruto_total += "[SEM SINAIS OU OPORTUNIDADES PARA ESTA ESTRATÉGIA HOJE]\n"
                 print(f"[VAZIO] {ficheiro} lido, adicionado como sem sinais ao relatório.")
     else:
@@ -73,14 +104,22 @@ for ficheiro in ficheiros_alvo:
         conteudo_bruto_total += "[ERRO: FICHEIRO NÃO ENCONTRADO - MOTOR PODE TER FALHADO]\n"
         print(f"[FALTA] {ficheiro} não encontrado.")
 
-# 4. VALIDAÇÃO DE SEGURANÇA
-# Retirada a trava de "motores_ativos == 0" para garantir que, mesmo num dia de mercado 
-# completamente morto em que nenhum motor dá sinal, recebes um relatório a atestar isso.
 if not conteudo_bruto_total.strip():
     print("\n[INFO] Nenhum dado gerado. A pipeline termina de forma silenciosa.")
     sys.exit(0)
 
-# 5. PROMPT DO ORQUESTRADOR IA (Dinâmico e Contextualizado por Estratégia)
+# ===================================================================
+# 4. PASSO ADICIONADO: ENVIAR DADOS BRUTOS POR EMAIL ANTES DA IA
+# ===================================================================
+data_hoje = datetime.now(ZoneInfo('Europe/Lisbon')).strftime('%d/%m/%Y')
+assunto_backup = f"tradingRelatorioIA - 📦 DADOS BRUTOS PARA IA / BACKUP ({data_hoje})"
+
+print("\nA enviar dados brutos consolidados para o Email de Backup...")
+enviar_email(assunto_backup, conteudo_bruto_total)
+
+# ===================================================================
+# 5. CHAMADA E AUDITORIA DA IA (GEMINI)
+# ===================================================================
 prompt_orquestrador = f"""
 És o Analista Quantitativo Principal (Agente Orquestrador).
 Abaixo estão os relatórios em bruto e os dados gerados dinamicamente pelos Extratores de Mercado (US e Europa) e pelos vários Motores de Estratégia no fecho do mercado de hoje.
@@ -98,42 +137,39 @@ DADOS RECOLHIDOS HOJE NOS FICHEIROS:
 """
 
 print("\nA enviar dados consolidados para o Gemini Auditar...")
+
+relatorio_final = None
+
 try:
-    resposta = modelo_ia.generate_content(prompt_orquestrador)
-    relatorio_final = resposta.text
+    if USE_NEW_GENAI:
+        client = genai.Client(api_key=GEMINI_API_KEY)
+        response = client.models.generate_content(
+            model='gemini-2.5-flash', # ou gemini-1.5-flash dependendo do modelo ativo na conta
+            contents=prompt_orquestrador,
+        )
+        relatorio_final = response.text
+    else:
+        genai.configure(api_key=GEMINI_API_KEY)
+        modelo_ia = genai.GenerativeModel('gemini-1.5-flash')
+        resposta = modelo_ia.generate_content(prompt_orquestrador)
+        relatorio_final = resposta.text
+        
     print("[SUCESSO] Relatório mestre gerado pela IA!")
+
 except Exception as e:
-    print(f"[ERRO CRÍTICO] Falha ao comunicar com o Gemini: {e}")
-    sys.exit(1)
+    print(f"\n[ALERTA DE QUOTA / ERRO IA] Falha ao comunicar com o Gemini: {e}")
+    print("[INFO] A pipeline não vai falhar. O email com os DADOS BRUTOS já foi enviado para processamento manual.")
+    
+    # Envia email de aviso específico sobre a falha da IA
+    assunto_erro = f"tradingRelatorioIA - ⚠️ AVISO: FALHA NA IA ({data_hoje})"
+    corpo_erro = f"Ocorreu um erro ao gerar o relatório consolidado com a IA (Quota excedida ou limite de API).\n\nErro: {e}\n\nPor favor, utiliza o email com o assunto '[BACKUP BRUTO]' enviado anteriormente e cola o conteúdo no ChatGPT/Claude/Gemini Web manualmente para gerar o relatório."
+    enviar_email(assunto_erro, corpo_erro)
+    sys.exit(0)
 
-# 6. ENVIAR EMAIL ÚNICO (Com Sistema Anti-Falhas)
-print("\nA preparar envio do Email Institucional...")
-
-max_tentativas = 3
-for tentativa in range(max_tentativas):
-    try:
-        msg = MIMEMultipart()
-        msg['From'] = EMAIL_USER
-        msg['To'] = EMAIL_USER
-        
-        data_hoje = datetime.now(ZoneInfo('Europe/Lisbon')).strftime('%d/%m/%Y')
-        msg['Subject'] = f"tradingRelatorioIA Global - 🤖 RELATÓRIO MESTRE ({data_hoje})"
-        
-        msg.attach(MIMEText(relatorio_final, 'plain', 'utf-8'))
-        
-        server = smtplib.SMTP(SMTP_SERVER, SMTP_PORT, timeout=15)
-        server.starttls()
-        server.login(EMAIL_USER, EMAIL_PASS)
-        server.sendmail(EMAIL_USER, EMAIL_USER, msg.as_string())
-        server.quit()
-        
-        print(f"[SUCESSO] Email Mestre Global enviado com sucesso na tentativa {tentativa + 1}!")
-        break
-        
-    except Exception as e:
-        print(f"[ERRO] Falha ao enviar email mestre (tentativa {tentativa + 1} de {max_tentativas}): {e}")
-        if tentativa < max_tentativas - 1:
-            print("A aguardar 5 segundos antes de tentar novamente...")
-            time.sleep(5)
-        else:
-            print("[ERRO CRÍTICO] O servidor Gmail fechou a ligação definitivamente.")
+# ===================================================================
+# 6. ENVIAR EMAIL DO RELATÓRIO FINAL DA IA
+# ===================================================================
+if relatorio_final:
+    print("\nA preparar envio do Relatório Mestre Formatado pela IA...")
+    assunto_final = f"tradingRelatorioIA Global - 🤖 RELATÓRIO MESTRE ({data_hoje})"
+    enviar_email(assunto_final, relatorio_final)
