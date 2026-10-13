@@ -256,7 +256,7 @@ def analisar_reversao_media(ativo_info):
             f"RS Score: {rs_score} ({status_rs}),"
             f"Dist MM20: {limpa(dist_mm20)}%,EMA9: {limpa(ema9)},"
             f"RSI: {limpa(rsi)},RVOL: {limpa(rvol)},Absorção: {'Sim' if absorcao else 'Não'},"
-            f"Estado: {estado},Entrada: {limpa(entrada)},"
+            f"Estado: {estado},Ordem: BUY LIMIT,Entrada: {limpa(entrada)},"
             f"Stop: {limpa(stop_loss)},Take-Profit: {limpa(alvo_tp)},"
             f"Qtd: {qtd_acoes},ValorInvestir: {valor_investir},"
             f"Data: {datetime.now(ZoneInfo('Europe/Lisbon')).strftime('%d/%m/%Y %H:%M:%S')}"
