@@ -43,7 +43,6 @@ SMTP_PORT = 587
 def enviar_email_para_agente_ia(relatorio_texto, assunto="🇪🇺🎯 tradingRelatorioIA Europa 🛡️"):
     print(f"\nA enviar email para o Agente IA (Assunto: '{assunto}')...")
     
-    # Validação de segurança das credenciais
     if not EMAIL_USER or not EMAIL_PASS:
         print("[AVISO] Credenciais de email em falta. A saltar envio.")
         return
@@ -55,11 +54,9 @@ def enviar_email_para_agente_ia(relatorio_texto, assunto="🇪🇺🎯 tradingRe
     
     msg.attach(MIMEText(relatorio_texto, 'plain', 'utf-8'))
     
-    # Sistema de Tolerância a Falhas (Retry) com Timeout
     max_tentativas = 3
     for tentativa in range(max_tentativas):
         try:
-            # Adicionado timeout=15 para evitar que a ligação encrave
             server = smtplib.SMTP(SMTP_SERVER, SMTP_PORT, timeout=15)
             server.starttls()
             server.login(EMAIL_USER, EMAIL_PASS)
@@ -67,7 +64,7 @@ def enviar_email_para_agente_ia(relatorio_texto, assunto="🇪🇺🎯 tradingRe
             server.quit()
             
             print(f"[SUCESSO] Email enviado na tentativa {tentativa + 1}! O teu Agente IA já pode ler a caixa de entrada.")
-            break  # Se enviou com sucesso, quebra o loop e avança
+            break
             
         except Exception as e:
             print(f"[ERRO] Falha ao enviar o email (tentativa {tentativa + 1} de {max_tentativas}): {e}")
@@ -78,31 +75,34 @@ def enviar_email_para_agente_ia(relatorio_texto, assunto="🇪🇺🎯 tradingRe
                 print("[ERRO CRÍTICO] O servidor Gmail fechou a ligação definitivamente. Falha no envio.")
 
 # ===================================================================
-# 2. BUSCAR A WATCHLIST E POSIÇÕES ATIVAS (Google Sheets via Webhook)
+# 2. BUSCAR A WATCHLIST, POSIÇÕES ATIVAS E CONFIGS (Google Sheets via Webhook)
 # ===================================================================
-print(f"A carregar a Watchlist e Posições Ativas da Europa a partir do Google Sheets (Aba: {NOME_ABA_EUROPA})...")
+print(f"A carregar a Watchlist, Posições Ativas e Configurações da Europa a partir do Google Sheets (Aba: {NOME_ABA_EUROPA})...")
 try:
     url_get = f"{WEBHOOK_URL}?aba={NOME_ABA_EUROPA}"
-    resposta_webhook = requests.get(url_get)
+    resposta_webhook = requests.get(url_get, timeout=15)
     if resposta_webhook.status_code == 200:
         dados_webhook = resposta_webhook.json()
         
         if isinstance(dados_webhook, dict) and "ativos" in dados_webhook:
             ativos_data = dados_webhook.get("ativos", [])
             posicoes_ativas = dados_webhook.get("posicoesAtivas", {})
+            configs = dados_webhook.get("configs", {})
         elif isinstance(dados_webhook, list):
             ativos_data = dados_webhook
             posicoes_ativas = {}
+            configs = {}
         else:
             ativos_data = []
             posicoes_ativas = {}
+            configs = {}
 
         if len(ativos_data) > 0:
             print(f"[SUCESSO] {len(ativos_data)} ativos europeus carregados da Watchlist.")
             print(f"[SUCESSO] {len(posicoes_ativas)} posições ativas detetadas no Diário de Bordo.")
         else:
-            print("[ERRO] A lista de ativos veio vazia.")
-            sys.exit(1)
+            print("[AVISO] A lista de ativos veio vazia. A terminar a execução sem erro.")
+            sys.exit(0)
     else:
         print(f"[ERRO] Falha ao descarregar dados: {resposta_webhook.status_code}")
         sys.exit(1)
@@ -111,9 +111,28 @@ except Exception as e:
     sys.exit(1)
 
 # ===================================================================
+# LEITURA DINÂMICA DAS CONFIGURAÇÕES DE RISCO (MÉTODO CARVER)
+# ===================================================================
+try:
+    capital_total_conta = float(configs.get("CAPITAL_TOTAL_CONTA", 10400.00))
+    alvo_volatilidade_anual = float(configs.get("ALVO_VOLATILIDADE_ANUAL", 0.05))
+except (ValueError, TypeError):
+    capital_total_conta = 10400.00
+    alvo_volatilidade_anual = 0.05
+
+volatilidade_alvo_diaria_usd = (capital_total_conta * alvo_volatilidade_anual) / 16.0
+risco_maximo_dolares = volatilidade_alvo_diaria_usd
+multiplicador_trailing_ts = 1.5
+racio_tp_base = 1.2
+
+print(f"[CONFIG] Capital Total da Conta: ${capital_total_conta:,.2f}")
+print(f"[CONFIG] Alvo Volatilidade Anual: {alvo_volatilidade_anual*100:.1f}%")
+print(f"[CONFIG] Orçamento Diário de Volatilidade: ${volatilidade_alvo_diaria_usd:.2f}\n")
+
+# ===================================================================
 # 3. VETO MACRO (SPY FLASH CRASH & BEAR MARKET)
 # ===================================================================
-print("\nA verificar Veto Macro (SPY)...")
+print("A verificar Veto Macro (SPY)...")
 try:
     df_spy = yf.download("SPY", period="2y", interval="1d", progress=False)
     if isinstance(df_spy.columns, pd.MultiIndex):
@@ -140,11 +159,6 @@ try:
     print("[OK] SPY Saudável. A iniciar extração...\n")
 except Exception as e:
     print(f"Erro na validação do SPY: {e}")
-
-# Configurações de Risco
-risco_maximo_dolares = 25.00
-multiplicador_trailing_ts = 1.5
-racio_tp_base = 1.2
 
 dados_temporarios = []
 
