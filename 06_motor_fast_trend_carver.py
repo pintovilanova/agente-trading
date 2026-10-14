@@ -43,7 +43,7 @@ def buscar_dados_completos():
         return [], {}, {}
     try:
         url_alvo = WEBHOOK_URL if "?" in WEBHOOK_URL else f"{WEBHOOK_URL}?aba=Analise Compra"
-        resp = requests.get(url_alvo)
+        resp = requests.get(url_alvo, timeout=15)
         
         if resp.status_code == 200:
             try:
@@ -115,6 +115,11 @@ def calcular_indicadores_tecnicos(ticker):
         if isinstance(df.columns, pd.MultiIndex):
             df.columns = df.columns.droplevel(1)
 
+        # BLINDAGEM CONTRA BARRAS INCOMPLETAS DE HOJE (NaNs)
+        df = df.dropna(subset=['Close', 'High', 'Low'])
+        if df.empty or len(df) < 50:
+            return None
+
         df['EMA_8'] = df['Close'].ewm(span=8, adjust=False).mean()
         df['EMA_32'] = df['Close'].ewm(span=32, adjust=False).mean()
 
@@ -128,6 +133,11 @@ def calcular_indicadores_tecnicos(ticker):
         
         tr = pd.concat([tr1, tr2, tr3], axis=1).max(axis=1)
         df['ATR_36'] = tr.rolling(window=36).mean()
+
+        # Elimina linhas que ainda tenham NaNs nos indicadores calculados
+        df = df.dropna(subset=['EMA_8', 'EMA_32', 'ATR_36'])
+        if df.empty:
+            return None
 
         ultimo = df.iloc[-1]
         return {
@@ -150,7 +160,7 @@ def analisar_tendencia_carver(ativo_info, vol_alvo_diaria_usd):
     if not ind: return None
     
     preco, ema8, ema32, atr36 = ind['preco'], ind['ema8'], ind['ema32'], ind['atr36']
-    if pd.isna(ema8) or pd.isna(ema32) or pd.isna(atr36) or atr36 == 0:
+    if pd.isna(preco) or pd.isna(ema8) or pd.isna(ema32) or pd.isna(atr36) or atr36 == 0:
         return None
 
     diferenca_bruta = ema8 - ema32
@@ -172,7 +182,6 @@ def analisar_tendencia_carver(ativo_info, vol_alvo_diaria_usd):
 
     def limpa(v): return round(float(v), 2)
 
-    # Análise contextual do RS Score (Coluna O)
     try:
         val_rs = float(rs_score)
         if val_rs >= 80:
@@ -205,6 +214,12 @@ def monitorizar_posicao_ativa(ticker, nome_empresa, status_atual, dados_posicao)
     if not ind: return None
     
     preco, ema8, ema32, atr36 = ind['preco'], ind['ema8'], ind['ema32'], ind['atr36']
+    
+    # PROTEÇÃO CONTRA NANs
+    if pd.isna(preco) or pd.isna(ema8) or pd.isna(ema32) or pd.isna(atr36):
+        print(f"[AVISO] Valores inválidos/NaN detetados para {ticker}. Monitorização ignorada hoje.")
+        return None
+
     trailing_stop_calculado = round(preco - (atr36 * 1.5), 2)
     
     preco_entrada = dados_posicao.get("precoEntrada", "N/A")
@@ -218,11 +233,12 @@ def monitorizar_posicao_ativa(ticker, nome_empresa, status_atual, dados_posicao)
     if stop_atual_registado is not None and str(stop_atual_registado).strip() != "":
         try:
             stop_atual_val = float(stop_atual_registado)
-            if stop_atual_val >= trailing_stop_calculado:
-                stop_final = stop_atual_val
-                instrucao_risco = f"MANTER o Stop atual em {stop_atual_val} (o cálculo matemático de hoje ({trailing_stop_calculado}) é inferior, aplicando-se a regra de inércia do trailing stop)."
-            else:
-                instrucao_risco = f"SUBIR o Stop do valor anterior ({stop_atual_val}) para o novo patamar ({trailing_stop_calculado})."
+            if pd.notna(stop_atual_val):
+                if stop_atual_val >= trailing_stop_calculado:
+                    stop_final = stop_atual_val
+                    instrucao_risco = f"MANTER o Stop atual em {stop_atual_val} (o cálculo matemático de hoje ({trailing_stop_calculado}) é inferior, aplicando-se a regra de inércia do trailing stop)."
+                else:
+                    instrucao_risco = f"SUBIR o Stop do valor anterior ({stop_atual_val}) para o novo patamar ({trailing_stop_calculado})."
         except ValueError:
             pass
 
@@ -244,10 +260,9 @@ def monitorizar_posicao_ativa(ticker, nome_empresa, status_atual, dados_posicao)
 def executar_motor():
     ativos, posicoes_ativas_dict, configs = buscar_dados_completos()
     if not ativos and not posicoes_ativas_dict:
-        print("[ERRO] Nenhum dado carregado do Sheets. A terminar.")
-        sys.exit(1)
+        print("[AVISO] Nenhum dado carregado do Sheets. A terminar sem erro.")
+        sys.exit(0)
 
-    # Leitura dinâmica das configurações de risco da tab Configs (com fallback de segurança)
     try:
         capital_total_conta = float(configs.get("CAPITAL_TOTAL_CONTA", 10400.00))
         alvo_volatilidade_anual = float(configs.get("ALVO_VOLATILIDADE_ANUAL", 0.05))
@@ -276,7 +291,7 @@ def executar_motor():
         if res:
             ativos_acionados.append(res)
             
-    # 2. Processa posições ativas APENAS se o estado for ATIVA_FAST (ignora as 'ATIVA' de outros scripts)
+    # 2. Processa posições ativas APENAS se o estado for ATIVA_FAST
     for ticker, dados_pos in posicoes_ativas_dict.items():
         status_atual = dados_pos.get("status", "").strip().upper()
         
