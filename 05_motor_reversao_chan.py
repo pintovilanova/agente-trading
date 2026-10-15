@@ -42,6 +42,16 @@ EMAIL_PASS = os.environ.get("EMAIL_PASS")
 SMTP_SERVER = "smtp.gmail.com"
 SMTP_PORT = 587
 
+def limpar_float(val):
+    """Converte com segurança valores numéricos (mesmo com vírgulas) para float."""
+    if val is None: return None
+    try:
+        val_str = str(val).replace(",", ".").strip()
+        if val_str == "" or val_str.lower() in ["nan", "n/a", "none"]: return None
+        return float(val_str)
+    except (ValueError, TypeError):
+        return None
+
 # ===================================================================
 # 2. FUNÇÕES DE REDE
 # ===================================================================
@@ -51,7 +61,7 @@ def buscar_watchlist():
         print("[ERRO] WEBHOOK_URL não configurado.")
         return [], {}
     try:
-        resp = requests.get(WEBHOOK_URL)
+        resp = requests.get(WEBHOOK_URL, timeout=15)
         if resp.status_code == 200:
             dados = resp.json()
             if isinstance(dados, dict):
@@ -112,10 +122,13 @@ def enviar_email(conteudo):
 # ===================================================================
 def analisar_connors_chan(ativo_info, vol_alvo_diaria_usd):
     try:
-        ticker = ativo_info.get("ticker")
+        ticker = str(ativo_info.get("ticker", "")).strip().upper()
         nome_empresa = ativo_info.get("nome", "N/A")
         setor = ativo_info.get("setor", "Desconhecido")
         rs_score = ativo_info.get("rs_score", "N/A")
+
+        if not ticker or ticker == "#N/A" or ticker == "NONE":
+            return None
 
         df = yf.download(ticker, period="1y", interval="1d", progress=False)
         if df.empty:
@@ -124,7 +137,8 @@ def analisar_connors_chan(ativo_info, vol_alvo_diaria_usd):
         if isinstance(df.columns, pd.MultiIndex):
             df.columns = df.columns.droplevel(1)
 
-        # BLINDAGEM CONTRA IPOs RECENTES (Histórico curto):
+        # BLINDAGEM CONTRA NaNs E HISTÓRICO CURTO:
+        df = df.dropna(subset=['Close', 'High', 'Low', 'Volume'])
         if len(df) < 25:
             return None
 
@@ -132,13 +146,13 @@ def analisar_connors_chan(ativo_info, vol_alvo_diaria_usd):
         preco = ultimo_dia['Close']
 
         # -------------------------------------------------------------
-        # FILTROS DE SEGURANÇA ESTRUTURAL (ANTI-LIXO BOLSISTA)
+        # FILTROS DE SEGURANÇA ESTRUTURAL
         # -------------------------------------------------------------
         if pd.isna(preco) or preco < 3.00:
             print(f"[FILTRADO] {ticker} rejeitado por preço baixo (Preço: {preco}).")
             return None
             
-        if setor and any(termo in setor.lower() for termo in ["real estate", "reit", "mortgage"]):
+        if setor and any(termo in str(setor).lower() for termo in ["real estate", "reit", "mortgage"]):
             print(f"[FILTRADO] {ticker} rejeitado por pertencer ao setor REIT/Imobiliário.")
             return None
 
@@ -147,7 +161,10 @@ def analisar_connors_chan(ativo_info, vol_alvo_diaria_usd):
         df.ta.rsi(length=2, append=True)              # Cria RSI_2
         df.ta.atr(length=14, append=True)             # Cria ATRr_14
 
-        # Recolher o último dia com as colunas novas
+        df = df.dropna(subset=['BBL_20_2.0', 'BBM_20_2.0', 'RSI_2', 'ATRr_14'])
+        if df.empty:
+            return None
+
         ultimo_dia = df.iloc[-1]
 
         bbl_inferior = ultimo_dia.get('BBL_20_2.0', np.nan)
@@ -178,33 +195,35 @@ def analisar_connors_chan(ativo_info, vol_alvo_diaria_usd):
             risco = entrada - stop_loss
             recompensa = alvo_tp - entrada
             
-            if recompensa < risco:
-                 estado = "Rejeitado (Rácio de Risco Negativo)"
-                 entrada = alvo_tp = stop_loss = "N/A"
+            if recompensa < risco or risco <= 0:
+                estado = "Rejeitado (Rácio de Risco Negativo)"
+                entrada = alvo_tp = stop_loss = "N/A"
             else:
-                 if pd.notna(atr) and atr > 0:
-                     qtd_acoes = round(vol_alvo_diaria_usd / atr, 2)
-                 else:
-                     qtd_acoes = round(vol_alvo_diaria_usd / risco, 2) if risco > 0 else "N/A"
+                if pd.notna(atr) and atr > 0:
+                    qtd_acoes = round(vol_alvo_diaria_usd / atr, 2)
+                else:
+                    qtd_acoes = round(vol_alvo_diaria_usd / risco, 2) if risco > 0 else "N/A"
 
-                 if qtd_acoes != "N/A":
-                     val_calc = entrada * qtd_acoes
-                     valor_investir = f"~{val_calc:.2f} USD"
+                if qtd_acoes != "N/A":
+                    val_calc = entrada * qtd_acoes
+                    valor_investir = f"~{val_calc:.2f} USD"
 
         def limpa(v):
             if pd.isna(v) or v == "N/A": return "N/A"
-            return round(float(v), 2)
+            try:
+                return round(float(v), 2)
+            except:
+                return "N/A"
 
-        # Análise contextual do RS Score (Coluna O)
-        try:
-            val_rs = float(rs_score)
-            if val_rs >= 80:
+        val_rs_num = limpar_float(rs_score)
+        if val_rs_num is not None:
+            if val_rs_num >= 80:
                 status_rs = "🔥 ELITE (RS >= 80 - Vento a Favor)"
-            elif val_rs >= 50:
+            elif val_rs_num >= 50:
                 status_rs = "⚖️ NEUTRO (RS 50-79 - Acompanha o Mercado)"
             else:
                 status_rs = "⚠️ FRACO / LAGGARD (RS < 50 - Vento Contra)"
-        except ValueError:
+        else:
             status_rs = "❓ SEM DADO DE RS"
 
         linha_comboio = (
@@ -233,9 +252,9 @@ def analisar_connors_chan(ativo_info, vol_alvo_diaria_usd):
 def executar_motor():
     ativos, configs = buscar_watchlist()
     if not ativos:
-        sys.exit(1)
+        print("[AVISO] Nenhum ativo carregado. A terminar a execução sem erro.")
+        sys.exit(0)
         
-    # Leitura dinâmica das configurações de risco da tab Configs (com fallback de segurança)
     try:
         capital_total_conta = float(configs.get("CAPITAL_TOTAL_CONTA", 10400.00))
         alvo_volatilidade_anual = float(configs.get("ALVO_VOLATILIDADE_ANUAL", 0.05))
