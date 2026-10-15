@@ -29,6 +29,11 @@ WEBHOOK_URL = os.environ.get('WEBHOOK_URL')
 EMAIL_USER = os.environ.get("EMAIL_USER")
 EMAIL_PASS = os.environ.get("EMAIL_PASS")
 
+if EMAIL_USER:
+    EMAIL_USER = EMAIL_USER.strip()
+if EMAIL_PASS:
+    EMAIL_PASS = EMAIL_PASS.strip()
+
 SMTP_SERVER = "smtp.gmail.com"
 SMTP_PORT = 587
 
@@ -90,6 +95,10 @@ def enviar_email(conteudo):
         print("[AVISO] Credenciais de email em falta. A saltar envio.")
         return
 
+    if "@" not in EMAIL_USER or "." not in EMAIL_USER:
+        print(f"[ERRO CRÍTICO] O e-mail configurado ('{EMAIL_USER}') não é um endereço válido. Verifica a Secret EMAIL_USER no GitHub.")
+        return
+
     msg = MIMEMultipart()
     msg['From'] = EMAIL_USER
     msg['To'] = EMAIL_USER
@@ -103,7 +112,7 @@ def enviar_email(conteudo):
             server = smtplib.SMTP(SMTP_SERVER, SMTP_PORT, timeout=15)
             server.starttls()
             server.login(EMAIL_USER, EMAIL_PASS)
-            server.sendmail(EMAIL_USER, EMAIL_PASS, msg.as_string())
+            server.sendmail(EMAIL_USER, EMAIL_USER, msg.as_string())
             server.quit()
             
             print(f"[SUCESSO] Email VCP enviado na tentativa {tentativa + 1}!")
@@ -209,11 +218,15 @@ def analisar_compressao_vcp(ativo_info, vol_alvo_diaria_usd):
             else:
                 qtd_acoes = round(vol_alvo_diaria_usd / risco, 2) if risco > 0 else "N/A"
                 
-            val_calc = entrada_gatilho * qtd_acoes if qtd_acoes != "N/A" else 0
-            valor_investir = f"~{val_calc:.2f} USD"
+            if qtd_acoes != "N/A":
+                val_calc = entrada_gatilho * qtd_acoes
+                valor_investir = f"~{val_calc:.2f} USD"
+            else:
+                valor_investir = "N/A"
             
             def limpa(v): 
                 try:
+                    if pd.isna(v) or v == "N/A": return "N/A"
                     return round(float(v), 2)
                 except:
                     return "N/A"
