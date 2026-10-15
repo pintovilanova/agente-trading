@@ -33,6 +33,16 @@ EMAIL_PASS = os.environ.get("EMAIL_PASS")
 SMTP_SERVER = "smtp.gmail.com"
 SMTP_PORT = 587
 
+def limpar_float(val):
+    """Converte com segurança valores numéricos (mesmo com vírgulas) para float."""
+    if val is None: return None
+    try:
+        val_str = str(val).replace(",", ".").strip()
+        if val_str == "" or val_str.lower() in ["nan", "n/a", "none"]: return None
+        return float(val_str)
+    except (ValueError, TypeError):
+        return None
+
 # ===================================================================
 # 2. FUNÇÕES DE REDE
 # ===================================================================
@@ -66,9 +76,6 @@ def buscar_dados_completos():
         print(f"[ERRO CRÍTICO] Sheets: {e}")
         return [], {}, {}
 
-# ===================================================================
-# FUNÇÃO DE ENVIO DE EMAIL (Com Sistema Anti-Falhas)
-# ===================================================================
 def enviar_email_bruto(conteudo):
     print("\nA enviar o relatório de dados brutos do Carver para o Agente IA via email...")
     
@@ -109,14 +116,14 @@ def enviar_email_bruto(conteudo):
 def calcular_indicadores_tecnicos(ticker):
     try:
         df = yf.download(ticker, period="1y", interval="1d", progress=False)
-        if df.empty or len(df) < 50:
+        if df.empty:
             return None
             
         if isinstance(df.columns, pd.MultiIndex):
             df.columns = df.columns.droplevel(1)
 
-        # BLINDAGEM CONTRA BARRAS INCOMPLETAS DE HOJE (NaNs)
-        df = df.dropna(subset=['Close', 'High', 'Low'])
+        # BLINDAGEM CONTRA BARRAS INCOMPLETAS E NaNs
+        df = df.dropna(subset=['Close', 'High', 'Low', 'Volume'])
         if df.empty or len(df) < 50:
             return None
 
@@ -134,7 +141,6 @@ def calcular_indicadores_tecnicos(ticker):
         tr = pd.concat([tr1, tr2, tr3], axis=1).max(axis=1)
         df['ATR_36'] = tr.rolling(window=36).mean()
 
-        # Elimina linhas que ainda tenham NaNs nos indicadores calculados
         df = df.dropna(subset=['EMA_8', 'EMA_32', 'ATR_36'])
         if df.empty:
             return None
@@ -151,10 +157,13 @@ def calcular_indicadores_tecnicos(ticker):
         return None
 
 def analisar_tendencia_carver(ativo_info, vol_alvo_diaria_usd):
-    ticker = ativo_info.get("ticker")
+    ticker = str(ativo_info.get("ticker", "")).strip().upper()
     nome_empresa = ativo_info.get("nome", "N/A")
     setor = ativo_info.get("setor", "Desconhecido")
     rs_score = ativo_info.get("rs_score", "N/A")
+
+    if not ticker or ticker == "#N/A" or ticker == "NONE":
+        return None
 
     ind = calcular_indicadores_tecnicos(ticker)
     if not ind: return None
@@ -180,17 +189,21 @@ def analisar_tendencia_carver(ativo_info, vol_alvo_diaria_usd):
     val_calc = entrada * qtd_acoes
     valor_investir = f"~{val_calc:.2f} USD"
 
-    def limpa(v): return round(float(v), 2)
+    def limpa(v):
+        try:
+            return round(float(v), 2)
+        except:
+            return "N/A"
 
-    try:
-        val_rs = float(rs_score)
-        if val_rs >= 80:
+    val_rs_num = limpar_float(rs_score)
+    if val_rs_num is not None:
+        if val_rs_num >= 80:
             status_rs = "🔥 ELITE (RS >= 80 - Vento a Favor)"
-        elif val_rs >= 50:
+        elif val_rs_num >= 50:
             status_rs = "⚖️ NEUTRO (RS 50-79 - Acompanha o Mercado)"
         else:
             status_rs = "⚠️ FRACO / LAGGARD (RS < 50 - Vento Contra)"
-    except ValueError:
+    else:
         status_rs = "❓ SEM DADO DE RS"
 
     linha_comboio = (
@@ -215,7 +228,7 @@ def monitorizar_posicao_ativa(ticker, nome_empresa, status_atual, dados_posicao)
     
     preco, ema8, ema32, atr36 = ind['preco'], ind['ema8'], ind['ema32'], ind['atr36']
     
-    # PROTEÇÃO CONTRA NANs
+    # PROTEÇÃO CONTRA NaNs
     if pd.isna(preco) or pd.isna(ema8) or pd.isna(ema32) or pd.isna(atr36):
         print(f"[AVISO] Valores inválidos/NaN detetados para {ticker}. Monitorização ignorada hoje.")
         return None
@@ -230,17 +243,13 @@ def monitorizar_posicao_ativa(ticker, nome_empresa, status_atual, dados_posicao)
     stop_final = trailing_stop_calculado
     instrucao_risco = f"Atualizar stop para {trailing_stop_calculado}"
     
-    if stop_atual_registado is not None and str(stop_atual_registado).strip() != "":
-        try:
-            stop_atual_val = float(stop_atual_registado)
-            if pd.notna(stop_atual_val):
-                if stop_atual_val >= trailing_stop_calculado:
-                    stop_final = stop_atual_val
-                    instrucao_risco = f"MANTER o Stop atual em {stop_atual_val} (o cálculo matemático de hoje ({trailing_stop_calculado}) é inferior, aplicando-se a regra de inércia do trailing stop)."
-                else:
-                    instrucao_risco = f"SUBIR o Stop do valor anterior ({stop_atual_val}) para o novo patamar ({trailing_stop_calculado})."
-        except ValueError:
-            pass
+    stop_atual_val = limpar_float(stop_atual_registado)
+    if stop_atual_val is not None:
+        if stop_atual_val >= trailing_stop_calculado:
+            stop_final = stop_atual_val
+            instrucao_risco = f"MANTER o Stop atual em {stop_atual_val} (o cálculo matemático de hoje ({trailing_stop_calculado}) é inferior, aplicando-se a regra de inércia do trailing stop)."
+        else:
+            instrucao_risco = f"SUBIR o Stop do valor anterior ({stop_atual_val}) para o novo patamar ({trailing_stop_calculado})."
 
     diferenca_bruta = ema8 - ema32
     forecast_atual = (diferenca_bruta / atr36) * 5.0 if atr36 > 0 else 0
@@ -293,7 +302,7 @@ def executar_motor():
             
     # 2. Processa posições ativas APENAS se o estado for ATIVA_FAST
     for ticker, dados_pos in posicoes_ativas_dict.items():
-        status_atual = dados_pos.get("status", "").strip().upper()
+        status_atual = str(dados_pos.get("status", "")).strip().upper()
         
         if status_atual != "ATIVA_FAST":
             continue
