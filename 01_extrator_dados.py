@@ -36,13 +36,22 @@ EMAIL_PASS = os.environ.get("EMAIL_PASS")
 SMTP_SERVER = "smtp.gmail.com"
 SMTP_PORT = 587
 
+def limpar_float(val):
+    """Converte com segurança valores numéricos (mesmo com vírgulas) para float."""
+    if val is None: return None
+    try:
+        val_str = str(val).replace(",", ".").strip()
+        if val_str == "" or val_str.lower() in ["nan", "n/a", "none"]: return None
+        return float(val_str)
+    except (ValueError, TypeError):
+        return None
+
 # ===================================================================
 # 1. FUNÇÃO DE ENVIO DE EMAIL (Com Sistema Anti-Falhas)
 # ===================================================================
 def enviar_email_para_agente_ia(relatorio_texto, assunto="🦅 tradingRelatorioIA US 🗽"):
     print(f"\nA enviar email para o Agente IA (Assunto: '{assunto}')...")
     
-    # Validação de segurança das credenciais
     if not EMAIL_USER or not EMAIL_PASS:
         print("[AVISO] Credenciais de email em falta. A saltar envio.")
         return
@@ -54,11 +63,9 @@ def enviar_email_para_agente_ia(relatorio_texto, assunto="🦅 tradingRelatorioI
     
     msg.attach(MIMEText(relatorio_texto, 'plain', 'utf-8'))
     
-    # Sistema de Tolerância a Falhas (Retry) com Timeout
     max_tentativas = 3
     for tentativa in range(max_tentativas):
         try:
-            # Adicionado timeout=15 para evitar que a ligação encrave
             server = smtplib.SMTP(SMTP_SERVER, SMTP_PORT, timeout=15)
             server.starttls()
             server.login(EMAIL_USER, EMAIL_PASS)
@@ -66,7 +73,7 @@ def enviar_email_para_agente_ia(relatorio_texto, assunto="🦅 tradingRelatorioI
             server.quit()
             
             print(f"[SUCESSO] Email enviado na tentativa {tentativa + 1}! O teu Agente IA já pode ler a caixa de entrada.")
-            break  # Se enviou com sucesso, quebra o loop e avança
+            break
             
         except Exception as e:
             print(f"[ERRO] Falha ao enviar o email (tentativa {tentativa + 1} de {max_tentativas}): {e}")
@@ -82,7 +89,7 @@ def enviar_email_para_agente_ia(relatorio_texto, assunto="🦅 tradingRelatorioI
 print("A carregar a Watchlist, Posições Ativas e Configurações a partir do Google Sheets...")
 configs_data = {}
 try:
-    resposta_webhook = requests.get(WEBHOOK_URL)
+    resposta_webhook = requests.get(WEBHOOK_URL, timeout=15)
     if resposta_webhook.status_code == 200:
         dados_webhook = resposta_webhook.json()
         
@@ -103,8 +110,8 @@ try:
             print(f"[SUCESSO] {len(ativos_data)} ativos carregados da Watchlist.")
             print(f"[SUCESSO] {len(posicoes_ativas)} posições ativas detetadas no Diário de Bordo.")
         else:
-            print("[ERRO] A lista de ativos veio vazia.")
-            sys.exit(1)
+            print("[AVISO] A lista de ativos veio vazia. A terminar a execução sem erro.")
+            sys.exit(0)
     else:
         print(f"[ERRO] Falha ao descarregar dados: {resposta_webhook.status_code}")
         sys.exit(1)
@@ -121,6 +128,7 @@ try:
     if isinstance(df_spy.columns, pd.MultiIndex):
         df_spy.columns = df_spy.columns.droplevel(1)
         
+    df_spy = df_spy.dropna(subset=['Close', 'High', 'Low'])
     df_spy.ta.sma(length=200, append=True)
     spy_hoje = df_spy.iloc[-1]
     spy_ontem = df_spy.iloc[-2]
@@ -146,7 +154,6 @@ except Exception as e:
 # ===================================================================
 # CONFIGURAÇÕES DE RISCO INSTITUCIONAL (MÉTODO CARVER)
 # ===================================================================
-# Lidos dinamicamente da tab 'Configs' do Google Sheets via Webhook (com fallback de segurança)
 try:
     CAPITAL_TOTAL_CONTA = float(configs_data.get("CAPITAL_TOTAL_CONTA", 10400.00))
     ALVO_VOLATILIDADE_ANUAL = float(configs_data.get("ALVO_VOLATILIDADE_ANUAL", 0.05))
@@ -159,8 +166,9 @@ print(f"[CONFIG] Alvo Volatilidade Anual: {ALVO_VOLATILIDADE_ANUAL*100:.1f}%")
 
 VOLATILIDADE_ALVO_DIARIA_USD = (CAPITAL_TOTAL_CONTA * ALVO_VOLATILIDADE_ANUAL) / 16.0 
 
+# REGRAS OTIMIZADAS
 multiplicador_trailing_ts = 1.5
-racio_tp_base = 1.2
+racio_tp_base = 2.5  # Elevado para 2.5R (Expectativa Matemática Positiva)
 
 dados_temporarios = []
 
@@ -168,13 +176,13 @@ dados_temporarios = []
 # 4. MOTOR MATEMÁTICO V2 (Para todos os Ativos)
 # ===================================================================
 for ativo_info in ativos_data:
-    ticker = ativo_info.get("ticker")
+    ticker = str(ativo_info.get("ticker", "")).strip().upper()
     nome_empresa = ativo_info.get("nome", "N/A")
     rs_score = ativo_info.get("rs_score", "N/A")
     
-    if not ticker or ticker == "#N/A":
+    if not ticker or ticker == "#N/A" or ticker == "NONE":
         continue
-    
+
     try:
         df = yf.download(ticker, period="2y", interval="1d", progress=False)
         if df.empty:
@@ -183,6 +191,11 @@ for ativo_info in ativos_data:
             
         if isinstance(df.columns, pd.MultiIndex):
             df.columns = df.columns.droplevel(1)
+
+        # BLINDAGEM CONTRA BARRAS INCOMPLETAS DE HOJE (NaNs)
+        df = df.dropna(subset=['Close', 'High', 'Low', 'Volume'])
+        if df.empty or len(df) < 50:
+            continue
 
         alerta_earnings = "OK"
         setor = "Desconhecido"
@@ -214,6 +227,9 @@ for ativo_info in ativos_data:
 
         media_volume_20 = df['Volume'].rolling(window=20).mean()
         df['RVOL'] = df['Volume'] / media_volume_20
+
+        df = df.dropna(subset=['RSI_14', 'ADX_14', 'ATRr_14', 'SMA_20', 'EMA_9', 'MOM_14'])
+        if df.empty: continue
 
         ultimo_dia = df.iloc[-1]
         dia_anterior = df.iloc[-2]
@@ -263,17 +279,17 @@ for ativo_info in ativos_data:
             preco_entrada = round(preco - (atr * 0.4), 2)
             multiplicador_atr = 1.0
             
-        elif cruzou_ema9 and rvol > 1.00 and momentum > 0.50 and rsi > 50:
+        elif cruzou_ema9 and rvol > 1.00 and momentum > 0.50 and rsi > 50 and dist_mm20 <= 3.00:
             recomendacao = "Ignicao EMA9"
             preco_entrada = round(preco - (atr * 0.1), 2)
             multiplicador_atr = 1.2
             
-        elif var_perc > 0 and adx >= 30 and rvol >= 1.20 and (55.00 <= rsi <= 72.00) and (0.00 <= dist_mm20 <= 3.50) and momentum > 1.50 and acima_ema9:
+        elif var_perc > 0 and adx >= 30 and rvol >= 1.20 and (55.00 <= rsi <= 72.00) and (0.00 <= dist_mm20 <= 3.00) and momentum > 1.50 and acima_ema9:
             recomendacao = "Forca Consolidada"
             preco_entrada = round(preco - (atr * 0.1), 2)
             multiplicador_atr = 1.3 
             
-        elif adx >= 25 and rvol >= 1.00 and (50.00 <= rsi <= 75.00) and (-1.00 <= dist_mm20 <= 4.00) and momentum > 0.50 and acima_ema9:
+        elif adx >= 25 and rvol >= 1.00 and (50.00 <= rsi <= 75.00) and (-1.00 <= dist_mm20 <= 3.00) and momentum > 0.50 and acima_ema9:
             recomendacao = "Alerta Iminente"
             preco_entrada = round(preco - (atr * 0.2), 2)
             multiplicador_atr = 1.2
@@ -310,7 +326,7 @@ for ativo_info in ativos_data:
             if status_pos == 'ATIVA_FAST':
                 info_carteira = f"NÃO (Gerido pelo modelo FAST - ATIVA_FAST)"
             else:
-                info_carteira = f"SIM (Entrada: {pos_info['precoEntrada']}, StopAtual: {pos_info['stopAtual']}, Qtd: {pos_info['quantidade']})"
+                info_carteira = f"SIM (Entrada: {pos_info.get('precoEntrada', 'N/A')}, StopAtual: {pos_info.get('stopAtual', 'N/A')}, Qtd: {pos_info.get('quantidade', 'N/A')})"
         else:
             info_carteira = "NÃO"
 
@@ -323,16 +339,16 @@ for ativo_info in ativos_data:
             except:
                 return "N/A"
 
-        # Análise contextual do RS Score (Coluna O)
-        try:
-            val_rs = float(rs_score)
-            if val_rs >= 80:
+        # Análise contextual do RS Score (Apenas informativo)
+        val_rs_num = limpar_float(rs_score)
+        if val_rs_num is not None:
+            if val_rs_num >= 80:
                 status_rs = "🔥 ELITE (RS >= 80 - Vento a Favor)"
-            elif val_rs >= 50:
+            elif val_rs_num >= 50:
                 status_rs = "⚖️ NEUTRO (RS 50-79 - Acompanha o Mercado)"
             else:
                 status_rs = "⚠️ FRACO / LAGGARD (RS < 50 - Vento Contra)"
-        except ValueError:
+        else:
             status_rs = "❓ SEM DADO DE RS"
 
         dados_temporarios.append({
@@ -388,12 +404,18 @@ for d in dados_temporarios:
     qtd_final = d["qtd_bruta"]
     
     if qtd_final != "N/A" and macro_hostil:
-        qtd_final = round(float(qtd_final) / 2, 2)
+        try:
+            qtd_final = round(float(qtd_final) / 2, 2)
+        except ValueError:
+            pass
         
     valor_investir = "N/A - Posição Existente"
     if d['posicao_ativa'].startswith("NÃO") and d['entrada'] != "N/A" and qtd_final != "N/A":
-        val_calc = float(d['entrada']) * float(qtd_final)
-        valor_investir = f"~{val_calc:.2f} USD"
+        try:
+            val_calc = float(d['entrada']) * float(qtd_final)
+            valor_investir = f"~{val_calc:.2f} USD"
+        except ValueError:
+            pass
 
     entrada_str = f"{d['entrada']:.2f}" if isinstance(d['entrada'], (int, float)) else d['entrada']
     
@@ -451,7 +473,6 @@ if resultados_para_sheets and WEBHOOK_URL:
 # ===================================================================
 print("\nA construir o bloco unificado (Prompt + Comboio) para o email...")
 
-# Mantém ativos com posições ativas (incluindo ATIVA_FAST) ou que cumpram os requisitos de estado
 ativos_acionados = [
     item for item in comboio_ia 
     if item["estado"] != "Observar" or item["posicao_ativa"] != "NÃO"
