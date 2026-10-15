@@ -37,6 +37,16 @@ NOME_ABA_EUROPA = "Analise Compra EU"
 SMTP_SERVER = "smtp.gmail.com"
 SMTP_PORT = 587
 
+def limpar_float(val):
+    """Converte com segurança valores numéricos (mesmo com vírgulas) para float."""
+    if val is None: return None
+    try:
+        val_str = str(val).replace(",", ".").strip()
+        if val_str == "" or val_str.lower() in ["nan", "n/a", "none"]: return None
+        return float(val_str)
+    except (ValueError, TypeError):
+        return None
+
 # ===================================================================
 # 1. FUNÇÃO DE ENVIO DE EMAIL (Com Sistema Anti-Falhas)
 # ===================================================================
@@ -111,7 +121,7 @@ except Exception as e:
     sys.exit(1)
 
 # ===================================================================
-# LEITURA DINÂMICA DAS CONFIGURAÇÕES DE RISCO (MÉTODO CARVER)
+# LEITURA DINÂMICA DAS CONFIGURAÇÕES DE RISCO (MÉSTATICAS)
 # ===================================================================
 try:
     capital_total_conta = float(configs.get("CAPITAL_TOTAL_CONTA", 10400.00))
@@ -123,7 +133,7 @@ except (ValueError, TypeError):
 volatilidade_alvo_diaria_usd = (capital_total_conta * alvo_volatilidade_anual) / 16.0
 risco_maximo_dolares = volatilidade_alvo_diaria_usd
 multiplicador_trailing_ts = 1.5
-racio_tp_base = 1.2
+racio_tp_base = 2.5  # Elevado para 2.5R (Expectativa Matemática Positiva)
 
 print(f"[CONFIG] Capital Total da Conta: ${capital_total_conta:,.2f}")
 print(f"[CONFIG] Alvo Volatilidade Anual: {alvo_volatilidade_anual*100:.1f}%")
@@ -138,6 +148,7 @@ try:
     if isinstance(df_spy.columns, pd.MultiIndex):
         df_spy.columns = df_spy.columns.droplevel(1)
         
+    df_spy = df_spy.dropna(subset=['Close', 'High', 'Low'])
     df_spy.ta.sma(length=200, append=True)
     spy_hoje = df_spy.iloc[-1]
     spy_ontem = df_spy.iloc[-2]
@@ -166,11 +177,11 @@ dados_temporarios = []
 # 4. MOTOR MATEMÁTICO V2 (Para todos os Ativos)
 # ===================================================================
 for ativo_info in ativos_data:
-    ticker = ativo_info.get("ticker")
+    ticker = str(ativo_info.get("ticker", "")).strip().upper()
     nome_empresa = ativo_info.get("nome", "N/A")
     rs_score = ativo_info.get("rs_score", "N/A")
     
-    if not ticker or ticker == "#N/A":
+    if not ticker or ticker == "#N/A" or ticker == "NONE":
         continue
     
     try:
@@ -181,6 +192,11 @@ for ativo_info in ativos_data:
             
         if isinstance(df.columns, pd.MultiIndex):
             df.columns = df.columns.droplevel(1)
+
+        # BLINDAGEM CONTRA NaNs E BARRAS INCOMPLETAS
+        df = df.dropna(subset=['Close', 'High', 'Low', 'Volume'])
+        if df.empty or len(df) < 50:
+            continue
 
         alerta_earnings = "OK"
         setor = "Europa"
@@ -212,6 +228,9 @@ for ativo_info in ativos_data:
 
         media_volume_20 = df['Volume'].rolling(window=20).mean()
         df['RVOL'] = df['Volume'] / media_volume_20
+
+        df = df.dropna(subset=['RSI_14', 'ADX_14', 'ATRr_14', 'SMA_20', 'EMA_9', 'MOM_14'])
+        if df.empty: continue
 
         ultimo_dia = df.iloc[-1]
         dia_anterior = df.iloc[-2]
@@ -261,17 +280,17 @@ for ativo_info in ativos_data:
             preco_entrada = round(preco - (atr * 0.4), 2)
             multiplicador_atr = 1.0
             
-        elif cruzou_ema9 and rvol > 1.00 and momentum > 0.50 and rsi > 50:
+        elif cruzou_ema9 and rvol > 1.00 and momentum > 0.50 and rsi > 50 and dist_mm20 <= 3.00:
             recomendacao = "Ignicao EMA9"
             preco_entrada = round(preco - (atr * 0.1), 2)
             multiplicador_atr = 1.2
             
-        elif var_perc > 0 and adx >= 30 and rvol >= 1.20 and (55.00 <= rsi <= 72.00) and (0.00 <= dist_mm20 <= 3.50) and momentum > 1.50 and acima_ema9:
+        elif var_perc > 0 and adx >= 30 and rvol >= 1.20 and (55.00 <= rsi <= 72.00) and (0.00 <= dist_mm20 <= 3.00) and momentum > 1.50 and acima_ema9:
             recomendacao = "Forca Consolidada"
             preco_entrada = round(preco - (atr * 0.1), 2)
             multiplicador_atr = 1.3 
             
-        elif adx >= 25 and rvol >= 1.00 and (50.00 <= rsi <= 75.00) and (-1.00 <= dist_mm20 <= 4.00) and momentum > 0.50 and acima_ema9:
+        elif adx >= 25 and rvol >= 1.00 and (50.00 <= rsi <= 75.00) and (-1.00 <= dist_mm20 <= 3.00) and momentum > 0.50 and acima_ema9:
             recomendacao = "Alerta Iminente"
             preco_entrada = round(preco - (atr * 0.2), 2)
             multiplicador_atr = 1.2
@@ -304,7 +323,7 @@ for ativo_info in ativos_data:
             if status_pos == 'ATIVA_FAST':
                 info_carteira = f"NÃO (Gerido pelo modelo FAST - ATIVA_FAST)"
             else:
-                info_carteira = f"SIM (Entrada: {pos_info['precoEntrada']}, StopAtual: {pos_info['stopAtual']}, Qtd: {pos_info['quantidade']})"
+                info_carteira = f"SIM (Entrada: {pos_info.get('precoEntrada', 'N/A')}, StopAtual: {pos_info.get('stopAtual', 'N/A')}, Qtd: {pos_info.get('quantidade', 'N/A')})"
         else:
             info_carteira = "NÃO"
 
@@ -318,15 +337,15 @@ for ativo_info in ativos_data:
                 return "N/A"
 
         # Análise contextual do RS Score
-        try:
-            val_rs = float(rs_score)
-            if val_rs >= 80:
+        val_rs_num = limpar_float(rs_score)
+        if val_rs_num is not None:
+            if val_rs_num >= 80:
                 status_rs = "🔥 ELITE (RS >= 80 - Vento a Favor)"
-            elif val_rs >= 50:
+            elif val_rs_num >= 50:
                 status_rs = "⚖️ NEUTRO (RS 50-79 - Acompanha o Mercado)"
             else:
                 status_rs = "⚠️ FRACO / LAGGARD (RS < 50 - Vento Contra)"
-        except ValueError:
+        else:
             status_rs = "❓ SEM DADO DE RS"
 
         dados_temporarios.append({
@@ -382,12 +401,18 @@ for d in dados_temporarios:
     qtd_final = d["qtd_bruta"]
     
     if qtd_final != "N/A" and macro_hostil:
-        qtd_final = round(float(qtd_final) / 2, 2)
+        try:
+            qtd_final = round(float(qtd_final) / 2, 2)
+        except ValueError:
+            pass
         
     valor_investir = "N/A - Posição Existente"
     if d['posicao_ativa'].startswith("NÃO") and d['entrada'] != "N/A" and qtd_final != "N/A":
-        val_calc = float(d['entrada']) * float(qtd_final)
-        valor_investir = f"~{val_calc:.2f} EUR"
+        try:
+            val_calc = float(d['entrada']) * float(qtd_final)
+            valor_investir = f"~{val_calc:.2f} EUR"
+        except ValueError:
+            pass
 
     entrada_str = f"{d['entrada']:.2f}" if isinstance(d['entrada'], (int, float)) else d['entrada']
     
