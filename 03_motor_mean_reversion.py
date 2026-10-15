@@ -41,6 +41,16 @@ EMAIL_PASS = os.environ.get("EMAIL_PASS")
 SMTP_SERVER = "smtp.gmail.com"
 SMTP_PORT = 587
 
+def limpar_float(val):
+    """Converte com segurança valores numéricos (mesmo com vírgulas) para float."""
+    if val is None: return None
+    try:
+        val_str = str(val).replace(",", ".").strip()
+        if val_str == "" or val_str.lower() in ["nan", "n/a", "none"]: return None
+        return float(val_str)
+    except (ValueError, TypeError):
+        return None
+
 # ===================================================================
 # 2. FUNÇÕES DE REDE
 # ===================================================================
@@ -109,10 +119,13 @@ def enviar_email(conteudo):
 # 3. MOTOR MATEMÁTICO: REVERSÃO À MÉDIA (COM TARGET VOLATILITY)
 # ===================================================================
 def analisar_reversao_media(ativo_info, vol_alvo_diaria_usd):
-    ticker = ativo_info.get("ticker")
+    ticker = str(ativo_info.get("ticker", "")).strip().upper()
     nome_empresa = ativo_info.get("nome", "N/A")
     setor = ativo_info.get("setor", "Desconhecido")
     rs_score = ativo_info.get("rs_score", "N/A")
+
+    if not ticker or ticker == "#N/A" or ticker == "NONE":
+        return None
 
     try:
         df = yf.download(ticker, period="1y", interval="1d", progress=False)
@@ -122,17 +135,20 @@ def analisar_reversao_media(ativo_info, vol_alvo_diaria_usd):
         if isinstance(df.columns, pd.MultiIndex):
             df.columns = df.columns.droplevel(1)
 
+        # BLINDAGEM CONTRA NaNs E BARRAS INCOMPLETAS
+        df = df.dropna(subset=['Close', 'High', 'Low', 'Volume'])
         if len(df) < 25:
             return None
 
-        preco = df.iloc[-1]['Close']
+        ultimo_dia = df.iloc[-1]
+        preco = ultimo_dia['Close']
 
         # Filtros de Segurança Estrutural
         if pd.isna(preco) or preco < 3.00:
             print(f"[FILTRADO] {ticker} rejeitado por preço baixo (Preço: {preco}).")
             return None
             
-        if setor and any(termo in setor.lower() for termo in ["real estate", "reit", "mortgage"]):
+        if setor and any(termo in str(setor).lower() for termo in ["real estate", "reit", "mortgage"]):
             print(f"[FILTRADO] {ticker} rejeitado por pertencer ao setor REIT/Imobiliário.")
             return None
 
@@ -153,6 +169,10 @@ def analisar_reversao_media(ativo_info, vol_alvo_diaria_usd):
         df['SMA_20_Vol'] = df['Volume'].rolling(window=20).mean()
         df['RVOL'] = df['Volume'] / df['SMA_20_Vol']
         df.ta.atr(length=14, append=True)
+
+        df = df.dropna(subset=['SMA_20', 'RSI_14', 'EMA_9', 'RVOL', 'ATRr_14'])
+        if df.empty:
+            return None
 
         ultimo_dia = df.iloc[-1]
 
@@ -179,6 +199,7 @@ def analisar_reversao_media(ativo_info, vol_alvo_diaria_usd):
         qtd_acoes = "N/A"
         valor_investir = "N/A"
         
+        # CRITÉRIO ESTRITO DE PÂNICO
         if pd.notna(dist_mm20) and dist_mm20 <= -8.0 and pd.notna(rsi) and rsi < 30 and (rvol >= 1.5 or absorcao):
             estado = "PÂNICO EXTREMO - Oportunidade de Reversão"
             entrada = round(preco, 2)
@@ -188,32 +209,35 @@ def analisar_reversao_media(ativo_info, vol_alvo_diaria_usd):
             risco = entrada - stop_loss
             recompensa = alvo_tp - entrada
             
-            if recompensa < risco:
-                 estado = "Rejeitado (Rácio de Risco Negativo)"
-                 entrada = alvo_tp = stop_loss = "N/A"
+            if recompensa < risco or risco <= 0:
+                estado = "Rejeitado (Rácio de Risco Negativo)"
+                entrada = alvo_tp = stop_loss = "N/A"
             else:
-                 if pd.notna(atr) and atr > 0:
-                     qtd_acoes = round(vol_alvo_diaria_usd / atr, 2)
-                 else:
-                     qtd_acoes = round(vol_alvo_diaria_usd / risco, 2) if risco > 0 else "N/A"
+                if pd.notna(atr) and atr > 0:
+                    qtd_acoes = round(vol_alvo_diaria_usd / atr, 2)
+                else:
+                    qtd_acoes = round(vol_alvo_diaria_usd / risco, 2) if risco > 0 else "N/A"
 
-                 if qtd_acoes != "N/A":
-                     val_calc = entrada * qtd_acoes
-                     valor_investir = f"~{val_calc:.2f} USD"
+                if qtd_acoes != "N/A":
+                    val_calc = entrada * qtd_acoes
+                    valor_investir = f"~{val_calc:.2f} USD"
 
         def limpa(v):
             if pd.isna(v) or v == "N/A": return "N/A"
-            return round(float(v), 2)
+            try:
+                return round(float(v), 2)
+            except:
+                return "N/A"
 
-        try:
-            val_rs = float(rs_score)
-            if val_rs >= 80:
+        val_rs_num = limpar_float(rs_score)
+        if val_rs_num is not None:
+            if val_rs_num >= 80:
                 status_rs = "🔥 ELITE (RS >= 80 - Vento a Favor)"
-            elif val_rs >= 50:
+            elif val_rs_num >= 50:
                 status_rs = "⚖️ NEUTRO (RS 50-79 - Acompanha o Mercado)"
             else:
                 status_rs = "⚠️ FRACO / LAGGARD (RS < 50 - Vento Contra)"
-        except ValueError:
+        else:
             status_rs = "❓ SEM DADO DE RS"
 
         linha_comboio = (
