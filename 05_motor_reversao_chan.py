@@ -157,20 +157,34 @@ def analisar_connors_chan(ativo_info, vol_alvo_diaria_usd):
             return None
 
         # Indicadores Técnicos (Pandas TA)
-        df.ta.bbands(length=20, std=2.0, append=True) # Cria BBL_20_2.0, BBM_20_2.0, BBU_20_2.0
-        df.ta.rsi(length=2, append=True)              # Cria RSI_2
-        df.ta.atr(length=14, append=True)             # Cria ATRr_14
+        df.ta.bbands(length=20, std=2.0, append=True)
+        df.ta.rsi(length=2, append=True)            
+        df.ta.atr(length=14, append=True)           
 
-        df = df.dropna(subset=['BBL_20_2.0', 'BBM_20_2.0', 'RSI_2', 'ATRr_14'])
+        # DETEÇÃO DINÂMICA DAS COLUNAS DOS INDICADORES (Evita KeyError)
+        col_bbl = [c for c in df.columns if str(c).startswith('BBL_')]
+        col_bbm = [c for c in df.columns if str(c).startswith('BBM_')]
+        col_rsi = [c for c in df.columns if str(c).startswith('RSI_2')]
+        col_atr = [c for c in df.columns if str(c).startswith('ATRr_') or str(c).startswith('ATR_')]
+
+        if not col_bbl or not col_bbm or not col_rsi or not col_atr:
+            return None
+
+        nome_bbl = col_bbl[0]
+        nome_bbm = col_bbm[0]
+        nome_rsi = col_rsi[0]
+        nome_atr = col_atr[0]
+
+        df = df.dropna(subset=[nome_bbl, nome_bbm, nome_rsi, nome_atr])
         if df.empty:
             return None
 
         ultimo_dia = df.iloc[-1]
 
-        bbl_inferior = ultimo_dia.get('BBL_20_2.0', np.nan)
-        bb_media = ultimo_dia.get('BBM_20_2.0', np.nan)
-        rsi_2 = ultimo_dia.get('RSI_2', np.nan)
-        atr = ultimo_dia.get('ATRr_14', np.nan)
+        bbl_inferior = ultimo_dia.get(nome_bbl, np.nan)
+        bb_media = ultimo_dia.get(nome_bbm, np.nan)
+        rsi_2 = ultimo_dia.get(nome_rsi, np.nan)
+        atr = ultimo_dia.get(nome_atr, np.nan)
         minimo = ultimo_dia.get('Low', preco)
 
         estado = "Observar"
@@ -243,7 +257,7 @@ def analisar_connors_chan(ativo_info, vol_alvo_diaria_usd):
         }
 
     except Exception as e:
-        print(f"[ERRO] Falha ao processar ativo: {e}")
+        print(f"[ERRO] Falha ao processar ativo {ativo_info.get('ticker', 'N/A')}: {e}")
         return None
 
 # ===================================================================
