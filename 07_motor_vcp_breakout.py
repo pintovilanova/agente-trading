@@ -32,6 +32,16 @@ EMAIL_PASS = os.environ.get("EMAIL_PASS")
 SMTP_SERVER = "smtp.gmail.com"
 SMTP_PORT = 587
 
+def limpar_float(val):
+    """Converte com segurança valores numéricos (mesmo com vírgulas) para float."""
+    if val is None: return None
+    try:
+        val_str = str(val).replace(",", ".").strip()
+        if val_str == "" or val_str.lower() in ["nan", "n/a", "none"]: return None
+        return float(val_str)
+    except (ValueError, TypeError):
+        return None
+
 # ===================================================================
 # 2. FUNÇÕES DE REDE
 # ===================================================================
@@ -93,7 +103,7 @@ def enviar_email(conteudo):
             server = smtplib.SMTP(SMTP_SERVER, SMTP_PORT, timeout=15)
             server.starttls()
             server.login(EMAIL_USER, EMAIL_PASS)
-            server.sendmail(EMAIL_USER, EMAIL_USER, msg.as_string())
+            server.sendmail(EMAIL_USER, EMAIL_PASS, msg.as_string())
             server.quit()
             
             print(f"[SUCESSO] Email VCP enviado na tentativa {tentativa + 1}!")
@@ -112,24 +122,32 @@ def enviar_email(conteudo):
 # ===================================================================
 def analisar_compressao_vcp(ativo_info, vol_alvo_diaria_usd):
     try:
-        ticker = ativo_info.get("ticker")
+        ticker = str(ativo_info.get("ticker", "")).strip().upper()
         nome_empresa = ativo_info.get("nome", "N/A")
         setor = ativo_info.get("setor", "Desconhecido")
         rs_score = ativo_info.get("rs_score", "N/A")
 
+        if not ticker or ticker == "#N/A" or ticker == "NONE":
+            return None
+
         df = yf.download(ticker, period="1y", interval="1d", progress=False)
-        if df.empty or len(df) < 200:
+        if df.empty:
             return None
             
         if isinstance(df.columns, pd.MultiIndex):
             df.columns = df.columns.droplevel(1)
+
+        # BLINDAGEM CONTRA NaNs E BARRAS INCOMPLETAS:
+        df = df.dropna(subset=['Close', 'High', 'Low', 'Volume'])
+        if len(df) < 120:
+            return None
 
         preco = float(df.iloc[-1]['Close'])
         
         # Filtros Anti-Lixo
         if pd.isna(preco) or preco < 5.00:
             return None
-        if setor and any(termo in setor.lower() for termo in ["real estate", "reit"]):
+        if setor and any(termo in str(setor).lower() for termo in ["real estate", "reit"]):
             return None
 
         # Médias de Tendência
@@ -157,6 +175,10 @@ def analisar_compressao_vcp(ativo_info, vol_alvo_diaria_usd):
         tr = pd.concat([tr1, tr2, tr3], axis=1).max(axis=1)
         df['ATR_14'] = tr.rolling(window=14).mean()
 
+        df = df.dropna(subset=['SMA_50', 'SMA_200', 'BBW', 'Vol_SMA_50', 'ATR_14'])
+        if df.empty:
+            return None
+
         ultimo = df.iloc[-1]
         sma50 = float(ultimo['SMA_50'])
         sma200 = float(ultimo['SMA_200'])
@@ -170,7 +192,7 @@ def analisar_compressao_vcp(ativo_info, vol_alvo_diaria_usd):
 
         # Condições do Gatilho VCP (Squeeze)
         tendencia_alta = (preco > sma50) and (sma50 > sma200)
-        bbw_120d_min = float(df['BBW'].iloc[-120:].min())
+        bbw_120d_min = float(df['BBW'].iloc[-120:].min()) if len(df) >= 120 else float(df['BBW'].min())
         squeeze_ativo = bbw_atual <= (bbw_120d_min * 1.5) and bbw_atual < 8.0
         seca_volume = vol_medio_3d < (vol_sma50 * 0.6)
 
@@ -190,17 +212,21 @@ def analisar_compressao_vcp(ativo_info, vol_alvo_diaria_usd):
             val_calc = entrada_gatilho * qtd_acoes if qtd_acoes != "N/A" else 0
             valor_investir = f"~{val_calc:.2f} USD"
             
-            def limpa(v): return round(float(v), 2)
+            def limpa(v): 
+                try:
+                    return round(float(v), 2)
+                except:
+                    return "N/A"
             
-            try:
-                val_rs = float(rs_score)
-                if val_rs >= 80:
+            val_rs_num = limpar_float(rs_score)
+            if val_rs_num is not None:
+                if val_rs_num >= 80:
                     status_rs = "🔥 ELITE (RS >= 80 - Vento a Favor)"
-                elif val_rs >= 50:
+                elif val_rs_num >= 50:
                     status_rs = "⚖️ NEUTRO (RS 50-79 - Acompanha o Mercado)"
                 else:
                     status_rs = "⚠️ FRACO / LAGGARD (RS < 50 - Vento Contra)"
-            except ValueError:
+            else:
                 status_rs = "❓ SEM DADO DE RS"
             
             linha_comboio = (
@@ -221,7 +247,7 @@ def analisar_compressao_vcp(ativo_info, vol_alvo_diaria_usd):
             
         return None
     except Exception as e:
-        print(f"[ERRO] Falha ao processar ativo: {e}")
+        print(f"[ERRO] Falha ao processar ativo {ativo_info.get('ticker')}: {e}")
         return None
 
 # ===================================================================
