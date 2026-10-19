@@ -128,7 +128,8 @@ def enviar_email_bruto(conteudo):
 def verificar_regime_macro():
     """Avalia a saúde do mercado via SPY (S&P 500 ETF)."""
     try:
-        spy = yf.download("SPY", period="6m", interval="1d", progress=False)
+        # Corrigido: '6mo' em vez de '6m'
+        spy = yf.download("SPY", period="6mo", interval="1d", progress=False)
         if spy.empty:
             return {"status": "NEUTRO", "fator_lote": 1.0, "min_forecast": 10.0}
             
