@@ -30,8 +30,16 @@ WEBHOOK_URL = os.environ.get('WEBHOOK_URL')
 EMAIL_USER = os.environ.get("EMAIL_USER")
 EMAIL_PASS = os.environ.get("EMAIL_PASS")
 
+if EMAIL_USER:
+    EMAIL_USER = EMAIL_USER.strip()
+if EMAIL_PASS:
+    EMAIL_PASS = EMAIL_PASS.strip()
+
 SMTP_SERVER = "smtp.gmail.com"
 SMTP_PORT = 587
+
+# Limite máximo de novos sinais permitidos por cada setor no mesmo dia
+MAX_NOVOS_SINAIS_POR_SETOR = 2
 
 def limpar_float(val):
     """Converte com segurança valores numéricos (mesmo com vírgulas) para float."""
@@ -83,6 +91,10 @@ def enviar_email_bruto(conteudo):
         print("[AVISO] Credenciais de email em falta. A saltar envio.")
         return
 
+    if "@" not in EMAIL_USER or "." not in EMAIL_USER:
+        print(f"[ERRO CRÍTICO] O e-mail configurado ('{EMAIL_USER}') não é um endereço válido. Verifica a Secret EMAIL_USER no GitHub.")
+        return
+
     msg = MIMEMultipart()
     msg['From'] = EMAIL_USER
     msg['To'] = EMAIL_USER
@@ -111,7 +123,36 @@ def enviar_email_bruto(conteudo):
                 print("[ERRO CRÍTICO] O servidor Gmail fechou a ligação definitivamente. Falha no envio.")
 
 # ===================================================================
-# 3. MOTOR MATEMÁTICO: CÁLCULO NATIVO
+# 3. FILTRO DE REGIME MACRO (S&P 500 / SPY)
+# ===================================================================
+def verificar_regime_macro():
+    """Avalia a saúde do mercado via SPY (S&P 500 ETF)."""
+    try:
+        spy = yf.download("SPY", period="6m", interval="1d", progress=False)
+        if spy.empty:
+            return {"status": "NEUTRO", "fator_lote": 1.0, "min_forecast": 10.0}
+            
+        if isinstance(spy.columns, pd.MultiIndex):
+            spy.columns = spy.columns.droplevel(1)
+            
+        spy = spy.dropna(subset=['Close'])
+        spy['EMA_50'] = spy['Close'].ewm(span=50, adjust=False).mean()
+        
+        ultimo_preco = float(spy.iloc[-1]['Close'])
+        ema50 = float(spy.iloc[-1]['EMA_50'])
+        
+        if ultimo_preco >= ema50:
+            print(f"[MACRO] S&P 500 acima da EMA50 (${ultimo_preco:.2f} >= ${ema50:.2f}). Regime: FAVORÁVEL (Lote Completo).")
+            return {"status": "FAVORÁVEL", "fator_lote": 1.0, "min_forecast": 10.0}
+        else:
+            print(f"[MACRO AVISO] S&P 500 abaixo da EMA50 (${ultimo_preco:.2f} < ${ema50:.2f}). Regime: DEFENSIVO (Lote Reduzido a 50%, Forecast Min: 12.0).")
+            return {"status": "DEFENSIVO", "fator_lote": 0.5, "min_forecast": 12.0}
+    except Exception as e:
+        print(f"[AVISO MACRO] Falha ao verificar regime do mercado: {e}. A usar parâmetros padrão.")
+        return {"status": "NEUTRO", "fator_lote": 1.0, "min_forecast": 10.0}
+
+# ===================================================================
+# 4. MOTOR MATEMÁTICO: CÁLCULO NATIVO
 # ===================================================================
 def calcular_indicadores_tecnicos(ticker):
     try:
@@ -156,7 +197,7 @@ def calcular_indicadores_tecnicos(ticker):
         print(f"[ERRO] Falha ao descarregar dados para {ticker}: {e}")
         return None
 
-def analisar_tendencia_carver(ativo_info, vol_alvo_diaria_usd):
+def analisar_tendencia_carver(ativo_info, vol_alvo_diaria_usd, info_macro):
     ticker = str(ativo_info.get("ticker", "")).strip().upper()
     nome_empresa = ativo_info.get("nome", "N/A")
     setor = ativo_info.get("setor", "Desconhecido")
@@ -175,7 +216,9 @@ def analisar_tendencia_carver(ativo_info, vol_alvo_diaria_usd):
     diferenca_bruta = ema8 - ema32
     forecast_carver = (diferenca_bruta / atr36) * 5.0
     
-    if forecast_carver < 10.0:
+    # Exigência dinâmica de Forecast conforme o Regime Macro
+    min_forecast = info_macro.get("min_forecast", 10.0)
+    if forecast_carver < min_forecast:
         return None
 
     multiplicador = min(forecast_carver / 10.0, 2.0)
@@ -184,10 +227,14 @@ def analisar_tendencia_carver(ativo_info, vol_alvo_diaria_usd):
     stop_loss = round(entrada - (atr36 * 1.5), 2)
     alvo_tp = round(entrada + ((entrada - stop_loss) * 2.5), 2)
     
-    qtd_bruta = (vol_alvo_diaria_usd / atr36) * multiplicador
+    # Aplicação do Fator de Lote Macro (100% ou 50%)
+    fator_lote = info_macro.get("fator_lote", 1.0)
+    qtd_bruta = ((vol_alvo_diaria_usd / atr36) * multiplicador) * fator_lote
     qtd_acoes = round(qtd_bruta, 2)
     val_calc = entrada * qtd_acoes
-    valor_investir = f"~{val_calc:.2f} USD"
+    
+    label_lote = "Lote Completo" if fator_lote >= 1.0 else "Lote Reduzido a 50% (Macro Defensivo)"
+    valor_investir = f"~{val_calc:.2f} USD ({label_lote})"
 
     def limpa(v):
         try:
@@ -218,6 +265,7 @@ def analisar_tendencia_carver(ativo_info, vol_alvo_diaria_usd):
 
     return {
         "ticker": ticker,
+        "setor": setor,
         "forecast": forecast_carver,
         "comboio_str": linha_comboio
     }
@@ -264,7 +312,7 @@ def monitorizar_posicao_ativa(ticker, nome_empresa, status_atual, dados_posicao)
     return linha_monitorizacao
 
 # ===================================================================
-# 4. EXECUÇÃO PRINCIPAL
+# 5. EXECUÇÃO PRINCIPAL
 # ===================================================================
 def executar_motor():
     ativos, posicoes_ativas_dict, configs = buscar_dados_completos()
@@ -284,8 +332,11 @@ def executar_motor():
     print(f"[CONFIG] Capital Total da Conta: ${capital_total_conta:,.2f}")
     print(f"[CONFIG] Alvo Volatilidade Anual: {alvo_volatilidade_anual*100:.1f}%")
     print(f"[CONFIG] Orçamento Diário de Volatilidade: ${volatilidade_alvo_diaria_usd:.2f}\n")
+    
+    # 0. Avalia Regime Macro
+    info_macro = verificar_regime_macro()
         
-    ativos_acionados = []
+    candidatos_novos = []
     posicoes_em_gestao = []
 
     # 1. Analisa novos sinais (ignora qualquer ativo que já esteja no dicionário de posições ativas)
@@ -296,11 +347,28 @@ def executar_motor():
         if ticker in posicoes_ativas_dict:
             continue
 
-        res = analisar_tendencia_carver(ativo_info, volatilidade_alvo_diaria_usd)
+        res = analisar_tendencia_carver(ativo_info, volatilidade_alvo_diaria_usd, info_macro)
         if res:
-            ativos_acionados.append(res)
-            
-    # 2. Processa posições ativas APENAS se o estado for ATIVA_FAST
+            candidatos_novos.append(res)
+
+    # Ordena os candidatos do maior para o menor Forecast
+    candidatos_novos = sorted(candidatos_novos, key=lambda k: k['forecast'], reverse=True)
+
+    # 2. APLICAÇÃO DA TRAVA DE CORRELAÇÃO SETORIAL (Máximo 2 por setor)
+    ativos_acionados = []
+    contagem_setores = {}
+
+    for item in candidatos_novos:
+        setor = str(item.get("setor", "Desconhecido")).strip()
+        qtd_atual_setor = contagem_setores.get(setor, 0)
+        
+        if qtd_atual_setor < MAX_NOVOS_SINAIS_POR_SETOR:
+            ativos_acionados.append(item)
+            contagem_setores[setor] = qtd_atual_setor + 1
+        else:
+            print(f"[CORRELAÇÃO BLOQUEADA] Ativo {item['ticker']} ignorado. Limite de {MAX_NOVOS_SINAIS_POR_SETOR} novos sinais para o setor '{setor}' atingido.")
+
+    # 3. Processa posições ativas APENAS se o estado for ATIVA_FAST
     for ticker, dados_pos in posicoes_ativas_dict.items():
         status_atual = str(dados_pos.get("status", "")).strip().upper()
         
@@ -311,8 +379,6 @@ def executar_motor():
         monitorizacao = monitorizar_posicao_ativa(ticker, nome, status_atual, dados_pos)
         if monitorizacao:
             posicoes_em_gestao.append(monitorizacao)
-
-    ativos_acionados = sorted(ativos_acionados, key=lambda k: k['forecast'], reverse=True)
 
     prompt_ia = (
         "MODO ACELERADOR ESTATÍSTICO (CARVER FAST TREND)\n"
@@ -335,9 +401,9 @@ def executar_motor():
         bloco_texto_ia += "\n--------------------------------------------------\n"
 
     if not ativos_acionados:
-        bloco_texto_ia += "[MERCADO LENTO] - Nenhum novo ativo apresenta aceleração matemática (Forecast > 10).\n"
+        bloco_texto_ia += f"[MERCADO LENTO / FILTRADO] - Nenhum novo ativo aprovado (Regime Macro: {info_macro['status']}, Forecast Mínimo: {info_macro['min_forecast']}).\n"
     else:
-        bloco_texto_ia += "NOVOS DADOS DE ENTRADA (COMBOIO):\n\n"
+        bloco_texto_ia += f"NOVOS DADOS DE ENTRADA (COMBOIO) - REGIME MACRO: {info_macro['status']}:\n\n"
         for item in ativos_acionados:
             bloco_texto_ia += item["comboio_str"] + "\n"
 
