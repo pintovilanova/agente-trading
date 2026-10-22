@@ -41,6 +41,9 @@ SMTP_PORT = 587
 # Limite máximo de novos sinais permitidos por cada setor no mesmo dia
 MAX_NOVOS_SINAIS_POR_SETOR = 2
 
+# Limiar de Força Relativa Institucional Mínima (Rejeita Laggards)
+MIN_RS_SCORE = 50.0
+
 def limpar_float(val):
     """Converte com segurança valores numéricos (mesmo com vírgulas) para float."""
     if val is None: return None
@@ -128,10 +131,9 @@ def enviar_email_bruto(conteudo):
 def verificar_regime_macro():
     """Avalia a saúde do mercado via SPY (S&P 500 ETF)."""
     try:
-        # Corrigido: '6mo' em vez de '6m'
         spy = yf.download("SPY", period="6mo", interval="1d", progress=False)
         if spy.empty:
-            return {"status": "NEUTRO", "fator_lote": 1.0, "min_forecast": 10.0}
+            return {"status": "NEUTRO", "fator_lote": 1.0, "min_forecast": 12.0}
             
         if isinstance(spy.columns, pd.MultiIndex):
             spy.columns = spy.columns.droplevel(1)
@@ -142,15 +144,16 @@ def verificar_regime_macro():
         ultimo_preco = float(spy.iloc[-1]['Close'])
         ema50 = float(spy.iloc[-1]['EMA_50'])
         
+        # OTIMIZAÇÃO: Exigência de Forecast elevada para 12.0 (Favorável) e 14.0 (Defensivo)
         if ultimo_preco >= ema50:
-            print(f"[MACRO] S&P 500 acima da EMA50 (${ultimo_preco:.2f} >= ${ema50:.2f}). Regime: FAVORÁVEL (Lote Completo).")
-            return {"status": "FAVORÁVEL", "fator_lote": 1.0, "min_forecast": 10.0}
+            print(f"[MACRO] S&P 500 acima da EMA50 (${ultimo_preco:.2f} >= ${ema50:.2f}). Regime: FAVORÁVEL (Lote Completo, Forecast Min: 12.0).")
+            return {"status": "FAVORÁVEL", "fator_lote": 1.0, "min_forecast": 12.0}
         else:
-            print(f"[MACRO AVISO] S&P 500 abaixo da EMA50 (${ultimo_preco:.2f} < ${ema50:.2f}). Regime: DEFENSIVO (Lote Reduzido a 50%, Forecast Min: 12.0).")
-            return {"status": "DEFENSIVO", "fator_lote": 0.5, "min_forecast": 12.0}
+            print(f"[MACRO AVISO] S&P 500 abaixo da EMA50 (${ultimo_preco:.2f} < ${ema50:.2f}). Regime: DEFENSIVO (Lote Reduzido a 50%, Forecast Min: 14.0).")
+            return {"status": "DEFENSIVO", "fator_lote": 0.5, "min_forecast": 14.0}
     except Exception as e:
         print(f"[AVISO MACRO] Falha ao verificar regime do mercado: {e}. A usar parâmetros padrão.")
-        return {"status": "NEUTRO", "fator_lote": 1.0, "min_forecast": 10.0}
+        return {"status": "NEUTRO", "fator_lote": 1.0, "min_forecast": 12.0}
 
 # ===================================================================
 # 4. MOTOR MATEMÁTICO: CÁLCULO NATIVO
@@ -207,6 +210,12 @@ def analisar_tendencia_carver(ativo_info, vol_alvo_diaria_usd, info_macro):
     if not ticker or ticker == "#N/A" or ticker == "NONE":
         return None
 
+    # OTIMIZAÇÃO 1: FILTRO DE FORÇA RELATIVA INSTITUCIONAL (RS SCORE >= 50)
+    val_rs_num = limpar_float(rs_score)
+    if val_rs_num is not None and val_rs_num < MIN_RS_SCORE:
+        print(f"[VETO RS SCORE] {ticker} ignorado. RS Score fraco ({val_rs_num} < {MIN_RS_SCORE} - Laggard).")
+        return None
+
     ind = calcular_indicadores_tecnicos(ticker)
     if not ind: return None
     
@@ -218,7 +227,7 @@ def analisar_tendencia_carver(ativo_info, vol_alvo_diaria_usd, info_macro):
     forecast_carver = (diferenca_bruta / atr36) * 5.0
     
     # Exigência dinâmica de Forecast conforme o Regime Macro
-    min_forecast = info_macro.get("min_forecast", 10.0)
+    min_forecast = info_macro.get("min_forecast", 12.0)
     if forecast_carver < min_forecast:
         return None
 
@@ -226,7 +235,14 @@ def analisar_tendencia_carver(ativo_info, vol_alvo_diaria_usd, info_macro):
     estado_str = "FAST TREND - Carver Momentum"
     entrada = round(preco, 2)
     stop_loss = round(entrada - (atr36 * 1.5), 2)
-    alvo_tp = round(entrada + ((entrada - stop_loss) * 2.5), 2)
+    
+    # OTIMIZAÇÃO 2: TRAVA ANTI-GAP DOWN (Veto se o preço já abriu abaixo do Stop)
+    if entrada <= stop_loss:
+        print(f"[VETO GAP DOWN] {ticker} ignorado. Preço (${entrada:.2f}) <= Stop Loss (${stop_loss:.2f}).")
+        return None
+
+    # OTIMIZAÇÃO 3: EXPANSÃO DO PAYOFF (Rácio 3.0x de Risco para Elevar Ganho Médio)
+    alvo_tp = round(entrada + ((entrada - stop_loss) * 3.0), 2)
     
     # Aplicação do Fator de Lote Macro (100% ou 50%)
     fator_lote = info_macro.get("fator_lote", 1.0)
@@ -243,7 +259,6 @@ def analisar_tendencia_carver(ativo_info, vol_alvo_diaria_usd, info_macro):
         except:
             return "N/A"
 
-    val_rs_num = limpar_float(rs_score)
     if val_rs_num is not None:
         if val_rs_num >= 80:
             status_rs = "🔥 ELITE (RS >= 80 - Vento a Favor)"
