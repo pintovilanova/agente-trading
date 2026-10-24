@@ -8,6 +8,8 @@ from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 from datetime import datetime
 from zoneinfo import ZoneInfo
+import warnings
+warnings.filterwarnings("ignore")
 
 # Importação da biblioteca Gemini com suporte a nova e antiga API
 try:
