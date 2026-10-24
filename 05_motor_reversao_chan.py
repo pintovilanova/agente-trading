@@ -23,6 +23,8 @@ import smtplib
 import time
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
+import warnings
+warnings.filterwarnings("ignore")
 
 # ===================================================================
 # 0. TRAVA DE FIM DE SEMANA
