@@ -15,6 +15,8 @@ import numpy as np
 import time
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
+import warnings
+warnings.filterwarnings("ignore")
 
 # ===================================================================
 # 0.1 TRAVA DE FIM DE SEMANA (Não corre ao Sábado e Domingo)
