@@ -34,6 +34,8 @@ import time
 from datetime import datetime
 from zoneinfo import ZoneInfo
 import sys
+import warnings
+warnings.filterwarnings("ignore")
 
 # ===================================================================
 # 0.1 TRAVA DE FIM DE SEMANA (Não corre ao Sábado e Domingo)
