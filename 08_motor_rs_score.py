@@ -48,7 +48,7 @@ def buscar_watchlist():
     print("A carregar a Watchlist do Google Sheets...")
     if not WEBHOOK_URL: return []
     try:
-        resp = requests.get(WEBHOOK_URL)
+        resp = requests.get(WEBHOOK_URL, timeout=15)
         if resp.status_code == 200:
             dados = resp.json()
             return dados.get("ativos", []) if isinstance(dados, dict) else dados
@@ -66,7 +66,7 @@ def atualizar_rs_no_sheets(lista_scores):
             "acao": "atualizar_rs_score",
             "dados": lista_scores
         }
-        resp = requests.post(WEBHOOK_URL, json=payload)
+        resp = requests.post(WEBHOOK_URL, json=payload, timeout=15)
         if resp.status_code == 200:
             print("[SUCESSO] RS Scores gravados na Coluna O do Google Sheets!")
         else:
@@ -84,7 +84,7 @@ def enviar_email_bruto(conteudo):
         msg['Subject'] = "tradingRelatorioIA US - RS SCORE"
         msg.attach(MIMEText(conteudo, 'plain', 'utf-8'))
         
-        server = smtplib.SMTP(SMTP_SERVER, SMTP_PORT)
+        server = smtplib.SMTP(SMTP_SERVER, SMTP_PORT, timeout=15)
         server.starttls()
         server.login(EMAIL_USER, EMAIL_PASS)
         server.sendmail(EMAIL_USER, EMAIL_USER, msg.as_string())
@@ -97,11 +97,20 @@ def enviar_email_bruto(conteudo):
 # 3. MATEMÁTICA DA FORÇA RELATIVA
 # ===================================================================
 def calcular_performance_historica(ticker):
+    ticker = str(ticker).strip().upper()
+    
+    # CORREÇÃO: Conversão de BRK-A para BRK-B
+    if ticker == "BRK-A":
+        ticker = "BRK-B"
+
     try:
         df = yf.download(ticker, period="6mo", interval="1d", progress=False)
         if df.empty or len(df) < 120: return None
         if isinstance(df.columns, pd.MultiIndex):
             df.columns = df.columns.droplevel(1)
+
+        df = df.dropna(subset=['Close'])
+        if len(df) < 125: return None
 
         preco_atual = float(df['Close'].iloc[-1])
         preco_3m = float(df['Close'].iloc[-63])
@@ -171,7 +180,7 @@ def executar_radar():
         "REGRAS DE FORMATAÇÃO E AUDITORIA:\n"
         "1. ROTAÇÃO SETORIAL: Analisa a lista de ETFs. Destaca os líderes absolutos e a sangria.\n"
         "2. INFORMAÇÃO GERAL: Menciona no relatório que os RS Scores foram gravados com sucesso na "
-        "base de dados (Google Sheets) para utilização dos algoritmos VCP e Carver durante a semana.\n"
+        "base de dados (Google Sheets) para utilização dos algoritmos VCP, Carver, Breakouts e Reversão durante a semana.\n"
     )
 
     bloco_texto_ia = f"📊 RELATÓRIO RS SCORE & ROTAÇÃO SETORIAL 🧭\n\n{prompt_ia}\n\n"
