@@ -206,13 +206,28 @@ def calcular_indicadores_tecnicos(ticker):
 def analisar_tendencia_carver(ativo_info, vol_alvo_diaria_usd, info_macro):
     ticker = str(ativo_info.get("ticker", "")).strip().upper()
     nome_empresa = ativo_info.get("nome", "N/A")
-    setor = ativo_info.get("setor", "Desconhecido")
+    setor = str(ativo_info.get("setor", "Desconhecido")).strip()
     rs_score = ativo_info.get("rs_score", "N/A")
 
     if not ticker or ticker == "#N/A" or ticker == "NONE":
         return None
 
-    # OTIMIZAÇÃO 1: FILTRO DE FORÇA RELATIVA INSTITUCIONAL (RS SCORE >= 50)
+    # CORREÇÃO 1: Conversão automática de BRK-A para BRK-B (Evita fracionamento zero em $800k)
+    if ticker == "BRK-A":
+        print("[AJUSTE] Ticker BRK-A convertido automaticamente para BRK-B.")
+        ticker = "BRK-B"
+
+    # CORREÇÃO 2: Fallback automático de setor via yfinance se vier Desconhecido
+    if setor in ["Desconhecido", "N/A", "", "NONE"]:
+        try:
+            ticker_obj = yf.Ticker(ticker)
+            setor_yf = ticker_obj.info.get('sector')
+            if setor_yf:
+                setor = setor_yf
+        except Exception:
+            pass
+
+    # FILTRO DE FORÇA RELATIVA INSTITUCIONAL (RS SCORE >= 50)
     val_rs_num = limpar_float(rs_score)
     if val_rs_num is not None and val_rs_num < MIN_RS_SCORE:
         print(f"[VETO RS SCORE] {ticker} ignorado. RS Score fraco ({val_rs_num} < {MIN_RS_SCORE} - Laggard).")
@@ -238,20 +253,25 @@ def analisar_tendencia_carver(ativo_info, vol_alvo_diaria_usd, info_macro):
     entrada = round(preco, 2)
     stop_loss = round(entrada - (atr36 * 1.5), 2)
     
-    # OTIMIZAÇÃO 2: TRAVA ANTI-GAP DOWN (Veto se o preço já abriu abaixo do Stop)
+    # TRAVA ANTI-GAP DOWN (Veto se o preço já abriu abaixo do Stop)
     if entrada <= stop_loss:
         print(f"[VETO GAP DOWN] {ticker} ignorado. Preço (${entrada:.2f}) <= Stop Loss (${stop_loss:.2f}).")
         return None
 
-    # OTIMIZAÇÃO 3: EXPANSÃO DO PAYOFF (Rácio 3.0x de Risco para Elevar Ganho Médio)
+    # EXPANSÃO DO PAYOFF (Rácio 3.0x de Risco para Elevar Ganho Médio)
     alvo_tp = round(entrada + ((entrada - stop_loss) * 3.0), 2)
     
     # Aplicação do Fator de Lote Macro (100% ou 50%)
     fator_lote = info_macro.get("fator_lote", 1.0)
     qtd_bruta = ((vol_alvo_diaria_usd / atr36) * multiplicador) * fator_lote
     qtd_acoes = round(qtd_bruta, 2)
+
+    # CORREÇÃO 3: Filtro de quantidade calculada nula (Qtd <= 0)
+    if qtd_acoes <= 0:
+        print(f"[FILTRADO] {ticker} rejeitado por quantidade calculada nula ({qtd_acoes}).")
+        return None
+
     val_calc = entrada * qtd_acoes
-    
     label_lote = "Lote Completo" if fator_lote >= 1.0 else "Lote Reduzido a 50% (Macro Defensivo)"
     valor_investir = f"~{val_calc:.2f} USD ({label_lote})"
 
@@ -289,6 +309,9 @@ def analisar_tendencia_carver(ativo_info, vol_alvo_diaria_usd, info_macro):
     }
 
 def monitorizar_posicao_ativa(ticker, nome_empresa, status_atual, dados_posicao):
+    if ticker == "BRK-A":
+        ticker = "BRK-B"
+
     ind = calcular_indicadores_tecnicos(ticker)
     if not ind: return None
     
@@ -298,6 +321,24 @@ def monitorizar_posicao_ativa(ticker, nome_empresa, status_atual, dados_posicao)
     if pd.isna(preco) or pd.isna(ema8) or pd.isna(ema32) or pd.isna(atr36):
         print(f"[AVISO] Valores inválidos/NaN detetados para {ticker}. Monitorização ignorada hoje.")
         return None
+
+    # CORREÇÃO 4: Verificação de Calendário de Earnings para Posições Ativas
+    alerta_earnings = "OK"
+    try:
+        ticker_obj = yf.Ticker(ticker)
+        calendario = ticker_obj.calendar
+        if isinstance(calendario, dict) and 'Earnings Date' in calendario:
+            proxima_data = calendario['Earnings Date'][0]
+            if hasattr(proxima_data, 'date'):
+                proxima_data = proxima_data.date()
+            
+            hoje = datetime.now(ZoneInfo("Europe/Lisbon")).date()
+            dias_restantes = (proxima_data - hoje).days
+            
+            if 0 <= dias_restantes <= 3:
+                alerta_earnings = f"PERIGO (em {dias_restantes} dias)"
+    except Exception:
+        pass
 
     trailing_stop_calculado = round(preco - (atr36 * 1.5), 2)
     
@@ -317,6 +358,9 @@ def monitorizar_posicao_ativa(ticker, nome_empresa, status_atual, dados_posicao)
         else:
             instrucao_risco = f"SUBIR o Stop do valor anterior ({stop_atual_val}) para o novo patamar ({trailing_stop_calculado})."
 
+    if "PERIGO" in alerta_earnings:
+        instrucao_risco += f" | ⚠️ ALERTA CRÍTICO: EARNINGS EM BREVE ({alerta_earnings}) - AVALIAR FECHO PREVENTIVO ANTES DOS RESULTADOS!"
+
     diferenca_bruta = ema8 - ema32
     forecast_atual = (diferenca_bruta / atr36) * 5.0 if atr36 > 0 else 0
 
@@ -325,6 +369,7 @@ def monitorizar_posicao_ativa(ticker, nome_empresa, status_atual, dados_posicao)
         f"Qtd: {quantidade} | Entrada: {preco_entrada} | Preço Atual: {preco:.2f} | "
         f"EMA8: {ema8:.2f} | EMA32: {ema32:.2f} | Forecast: {forecast_atual:.2f} | "
         f"Stop Atual: {stop_atual_registado} | Novo Stop Sugerido: {stop_final} | "
+        f"Earnings: {alerta_earnings} | "
         f"🛑 AÇÃO: {instrucao_risco} (ATR: {atr36:.2f})"
     )
     return linha_monitorizacao
@@ -403,7 +448,8 @@ def executar_motor():
         "O teu mandato é auditar as entradas geradas e monitorizar as posições ativas do portefólio.\n"
         "Presta especial atenção ao RS Score institucional anexado aos dados de cada novo sinal para avaliar o contexto de força do mercado.\n"
         "ATENÇÃO À GESTÃO DE RISCO: Respeita estritamente a regra de inércia do trailing stop nas posições ativas "
-        "(o stop nunca desce, se o stop atual registado já for superior ao novo cálculo sugerido, a instrução deve ser obrigatoriamente manter o valor atual).\n\n"
+        "(o stop nunca desce, se o stop atual registado já for superior ao novo cálculo sugerido, a instrução deve ser obrigatoriamente manter o valor atual).\n"
+        "Se uma posição ativa apresentar aviso de Earnings em breve, reforça o alerta de fecho preventivo antes da apresentação de resultados.\n\n"
         "REGRAS ESTRITAS:\n"
         "- 🔄 GESTÃO DE ESTADOS NO SHEETS (LEMBRETE OBRIGATÓRIO): Termina o teu relatório com uma secção de 'Lembrete Operacional' contendo exatamente estas duas notas:\n"
         "  1. \"🟢 NOVAS ENTRADAS: Assim que abrires uma nova posição sugerida neste relatório, altera o seu estado no Google Sheets para 'ATIVA_FAST' para que eu inicie o cálculo diário do Trailing Stop.\"\n"
