@@ -118,7 +118,9 @@ def obter_conteudo_ultimo_email_backup():
         print(f"[ERRO IMAP] Falha ao ler e-mail de backup: {e}")
     return None
 
-# 2. DEFINIR FICHEIROS ALVO DOS MOTORES
+# ===================================================================
+# 2. DEFINIR FICHEIROS ALVO DOS MOTORES (ATUALIZADO)
+# ===================================================================
 ficheiros_alvo = [
     "comboio_temp.txt",             # Extrator US
     "comboio_europa.txt",           # Extrator Europa
@@ -126,7 +128,8 @@ ficheiros_alvo = [
     "comboio_reversao_temp.txt",    # Motor 03 (Pânico)
     "comboio_earnings_temp.txt",    # Motor 04 (PEAD)
     "comboio_connors_temp.txt",     # Motor 05 (REVERSAO)
-    "comboio_carver_temp.txt"       # Motor 06 (Fast Trend Carver)
+    "comboio_carver_temp.txt",      # Motor 06 (Fast Trend Carver)
+    "comboio_holygrail_temp.txt"    # Motor 10 (Holy Grail Pullbacks) <-- NOVA INTEGRAÇÃO
 ]
 
 conteudo_bruto_total = ""
@@ -182,18 +185,21 @@ if not veio_do_email:
     print("\nA enviar dados brutos consolidados para o Email de Backup...")
     enviar_email(assunto_backup, conteudo_bruto_total)
 
+# ===================================================================
+# 3. PROMPT DE ORQUESTRAÇÃO
+# ===================================================================
 prompt_orquestrador = f"""
 És o Analista Quantitativo Principal (Agente Orquestrador).
-Abaixo estão os relatórios em bruto e os dados gerados dinamicamente pelos Extratores de Mercado (US e Europa) e pelos vários Motores de Estratégia no fecho do mercado de hoje.
+Abaixo estão os relatórios em bruto e os dados gerados dinamicamente pelos Extratores de Mercado (US e Europa) e pelos vários Motores de Estratégia no fecho do mercado de hoje, incluindo o novo motor Holy Grail (Pullbacks de Liderança).
 
 A tua missão é ler integralmente este conteúdo, processar todos os ativos que aparecem nas fontes e compilar um ÚNICO relatório consolidado, limpo, detalhado e altamente profissional para o Gestor de Conta aprovar na corretora.
 
 🚨 REGRAS ESTRITAS ANTI-ALUCINAÇÃO & CONTEXTO DE GESTÃO 🚨
 1. ZERO CRIATIVIDADE DE DADOS: Não inventes preços, tickers, stops ou tamanhos de posição. Utiliza unicamente e na íntegra os dados fornecidos nos ficheiros abaixo.
-2. LEITURA INTEGRAL (PROIBIDO OMITIR ATIVOS OU ESTRATÉGIAS): Deves incluir todos os ativos, posições ativas, alertas macro e sinais de entrada. Se uma fonte indicar "[SEM SINAIS OU OPORTUNIDADES PARA ESTA ESTRATÉGIA HOJE]", DEVES criar a secção respetiva baseada no nome do ficheiro fonte e escrever explicitamente que não há sinais hoje. Não omitas NENHUMA estratégia.
+2. LEITURA INTEGRAL (PROIBIDO OMITIR ATIVOS OU ESTRATÉGIAS): Deves incluir todos os ativos, posições ativas, alertas macro e sinais de entrada. Se uma fonte indicar "[SEM SINAIS OU OPORTUNIDADES PARA ESTA ESTRATÉGIA HOJE]", DEVES criar a secção respetiva baseada no nome do ficheiro fonte e escrever explicitamente que não há sinais hoje. Não omitas NENHUMA estratégia (incluindo o Holy Grail Pullbacks).
 3. ESTRUTURA INSTITUCIONAL DINÂMICA: Organiza o relatório por secções lógicas com base nas fontes lidas.
-4. RESTRIÇÃO DE NOTAS OPERACIONAIS: O lembrete operacional referente à alteração do estado no Google Sheets para 'ATIVA_FAST' e à gestão de Trailing Stop diário deve ser posicionado estritamente e de forma exclusiva na secção afeta ao Fast Trend Carver. Nunca mistures esta regra com outras estratégias.
-5. VETO DE SOBREPOSIÇÃO (CRÍTICO): Antes de sugerires qualquer NOVA ENTRADA num ativo (seja no VCP, Reversão, PEAD, Breakouts ou Carver Momentum), verifica obrigatoriamente se esse ativo já se encontra listado como [POSIÇÃO ATIVA - ATIVA_FAST] ou se tem 'PosicaoAtiva: SIM' noutra fonte. Se já estiver ativo na carteira, É ESTRITAMENTE PROIBIDO sugerir uma nova entrada para esse mesmo ticker em qualquer secção. Omite-o dos novos sinais.
+4. RESTRIÇÃO DE NOTAS OPERACIONAIS: O lembrete operacional referente à alteração do estado no Google Sheets para 'ATIVA_FAST' e à gestão de Trailing Stop diário deve ser posicionado estritamente e de forma exclusiva na secção afeta ao Fast Trend Carver e aos Holy Grail Pullbacks (que transferem a gestão de saída para o Carver). Nunca mistures esta regra com outras estratégias.
+5. VETO DE SOBREPOSIÇÃO (CRÍTICO): Antes de sugerires qualquer NOVA ENTRADA num ativo (seja no VCP, Reversão, PEAD, Breakouts, Holy Grail ou Carver Momentum), verifica obrigatoriamente se esse ativo já se encontra listado como [POSIÇÃO ATIVA - ATIVA_FAST] ou se tem 'PosicaoAtiva: SIM' noutra fonte. Se já estiver ativo na carteira, É ESTRITAMENTE PROIBIDO sugerir uma nova entrada para esse mesmo ticker em qualquer secção. Omite-o dos novos sinais.
 
 DADOS RECOLHIDOS HOJE NOS FICHEIROS:
 {conteudo_bruto_total}
@@ -249,7 +255,9 @@ if not relatorio_final:
     enviar_email(assunto_erro, corpo_erro)
     sys.exit(0)
 
+# ===================================================================
 # 6. ENVIAR EMAIL DO RELATÓRIO FINAL DA IA
+# ===================================================================
 print("\nA preparar envio do Relatório Mestre Formatado pela IA...")
 assunto_final = f"tradingRelatorioIA Global - 🤖 RELATÓRIO MESTRE ({data_hoje})"
 enviar_email(assunto_final, relatorio_final)
