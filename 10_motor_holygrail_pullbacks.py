@@ -118,6 +118,9 @@ def analisar_holy_grail(ativo_info, vol_alvo_diaria_usd):
         if val_rs_num is None or val_rs_num < MIN_RS_SCORE_HOLY_GRAIL:
             return None
 
+        # Pausa aleatória curta para evitar o bloqueio 401 do Yahoo Finance
+        time.sleep(random.uniform(0.8, 1.8))
+
         # 2. CALENDÁRIO DE EARNINGS (Trava de Segurança)
         alerta_earnings = "OK"
         try:
@@ -135,8 +138,16 @@ def analisar_holy_grail(ativo_info, vol_alvo_diaria_usd):
         except:
             pass
 
-        # 3. DADOS FINANCEIROS
-        df = yf.download(ticker, period="1y", interval="1d", progress=False)
+        # 3. DADOS FINANCEIROS COM TRATAMENTO DE RETENTATIVA
+        df = pd.DataFrame()
+        for tentativa_yf in range(3):
+            try:
+                df = yf.download(ticker, period="1y", interval="1d", progress=False, timeout=15)
+                if not df.empty and len(df) >= 100:
+                    break
+            except Exception:
+                time.sleep(2)
+
         if df.empty or len(df) < 100: return None
         if isinstance(df.columns, pd.MultiIndex): df.columns = df.columns.droplevel(1)
         df = df.dropna(subset=['Close', 'High', 'Low', 'Volume'])
