@@ -39,6 +39,8 @@ if EMAIL_PASS:
 SMTP_SERVER = "smtp.gmail.com"
 SMTP_PORT = 587
 
+MIN_RS_SCORE = 50.0
+
 def limpar_float(val):
     """Converte com segurança valores numéricos (mesmo com vírgulas) para float."""
     if val is None: return None
@@ -135,11 +137,45 @@ def analisar_compressao_vcp(ativo_info, vol_alvo_diaria_usd):
     try:
         ticker = str(ativo_info.get("ticker", "")).strip().upper()
         nome_empresa = ativo_info.get("nome", "N/A")
-        setor = ativo_info.get("setor", "Desconhecido")
+        setor = str(ativo_info.get("setor", "Desconhecido")).strip()
         rs_score = ativo_info.get("rs_score", "N/A")
 
         if not ticker or ticker == "#N/A" or ticker == "NONE":
             return None
+
+        # CORREÇÃO 1: Conversão automática de BRK-A para BRK-B
+        if ticker == "BRK-A":
+            print("[AJUSTE] Ticker BRK-A convertido automaticamente para BRK-B.")
+            ticker = "BRK-B"
+
+        # CORREÇÃO 2: Filtro Anti-Laggard (RS Score >= 50)
+        val_rs_num = limpar_float(rs_score)
+        if val_rs_num is not None and val_rs_num < MIN_RS_SCORE:
+            print(f"[VETO RS SCORE] {ticker} ignorado. RS Score fraco ({val_rs_num} < {MIN_RS_SCORE} - Laggard).")
+            return None
+
+        # CORREÇÃO 3: Fallback automático de setor e verificação de Earnings via yfinance
+        alerta_earnings = "OK"
+        try:
+            ticker_obj = yf.Ticker(ticker)
+            if setor in ["Desconhecido", "N/A", "", "NONE"]:
+                setor_yf = ticker_obj.info.get('sector')
+                if setor_yf:
+                    setor = setor_yf
+
+            calendario = ticker_obj.calendar
+            if isinstance(calendario, dict) and 'Earnings Date' in calendario:
+                proxima_data = calendario['Earnings Date'][0]
+                if hasattr(proxima_data, 'date'):
+                    proxima_data = proxima_data.date()
+                
+                hoje = datetime.now(ZoneInfo("Europe/Lisbon")).date()
+                dias_restantes = (proxima_data - hoje).days
+                
+                if 0 <= dias_restantes <= 3:
+                    alerta_earnings = f"PERIGO (em {dias_restantes} dias)"
+        except Exception:
+            pass
 
         df = yf.download(ticker, period="1y", interval="1d", progress=False)
         if df.empty:
@@ -216,15 +252,18 @@ def analisar_compressao_vcp(ativo_info, vol_alvo_diaria_usd):
             alvo_tp = round(entrada_gatilho + (risco * 3), 2)
             
             if atr > 0:
-                qtd_acoes = round(vol_alvo_diaria_usd / atr, 2)
+                qtd_calc = round(vol_alvo_diaria_usd / atr, 2)
             else:
-                qtd_acoes = round(vol_alvo_diaria_usd / risco, 2) if risco > 0 else "N/A"
+                qtd_calc = round(vol_alvo_diaria_usd / risco, 2) if risco > 0 else 0
                 
-            if qtd_acoes != "N/A":
-                val_calc = entrada_gatilho * qtd_acoes
-                valor_investir = f"~{val_calc:.2f} USD"
-            else:
-                valor_investir = "N/A"
+            # CORREÇÃO 4: Trava Anti-Quantidade Nula (Qtd <= 0)
+            if qtd_calc <= 0:
+                print(f"[FILTRADO] {ticker} rejeitado por quantidade calculada nula ({qtd_calc}).")
+                return None
+
+            qtd_acoes = qtd_calc
+            val_calc = entrada_gatilho * qtd_acoes
+            valor_investir = f"~{val_calc:.2f} USD"
             
             def limpa(v): 
                 try:
@@ -233,7 +272,6 @@ def analisar_compressao_vcp(ativo_info, vol_alvo_diaria_usd):
                 except:
                     return "N/A"
             
-            val_rs_num = limpar_float(rs_score)
             if val_rs_num is not None:
                 if val_rs_num >= 80:
                     status_rs = "🔥 ELITE (RS >= 80 - Vento a Favor)"
@@ -250,7 +288,7 @@ def analisar_compressao_vcp(ativo_info, vol_alvo_diaria_usd):
                 f"BBW Atual: {limpa(bbw_atual)}%,Volume 3D: Seco (-40%+),"
                 f"Gatilho Compra (Buy Stop): {limpa(entrada_gatilho)},"
                 f"Stop Físico (Min 5D): {limpa(stop_loss)},Alvo TP: {limpa(alvo_tp)},"
-                f"Estado: {estado},Qtd: {qtd_acoes},ValorInvestir: {valor_investir},"
+                f"Estado: {estado},Qtd: {qtd_acoes},ValorInvestir: {valor_investir},Earnings: {alerta_earnings},"
                 f"Data: {datetime.now(ZoneInfo('Europe/Lisbon')).strftime('%d/%m/%Y %H:%M:%S')}"
             )
 
@@ -303,7 +341,7 @@ def executar_motor():
 REGRAS ESTRITAS:
 1. O ativo não deve ser comprado a mercado. Recomenda SEMPRE ordens pendentes "Buy Stop" no Gatilho de Compra estipulado.
 2. Destaca o facto do risco ser mínimo, dado que o Stop Loss está cravado na base da consolidação (caixote de 5 dias).
-3. Avalia o Rácio Risco/Recompensa e presta especial atenção ao RS Score institucional anexado aos dados.
+3. Avalia o Rácio Risco/Recompensa e presta especial atenção ao RS Score institucional anexado aos dados. Se detetar EARNINGS = PERIGO, desclassifica o sinal de imediato.
 
 ESTRUTURA OBRIGATÓRIA:
 🎯 [TICKER] - [Nome da Empresa] ([Setor])
