@@ -126,10 +126,21 @@ def analisar_connors_chan(ativo_info, vol_alvo_diaria_usd):
     try:
         ticker = str(ativo_info.get("ticker", "")).strip().upper()
         nome_empresa = ativo_info.get("nome", "N/A")
-        setor = ativo_info.get("setor", "Desconhecido")
+        setor = str(ativo_info.get("setor", "Desconhecido")).strip()
         rs_score = ativo_info.get("rs_score", "N/A")
 
         if not ticker or ticker == "#N/A" or ticker == "NONE":
+            return None
+
+        # CORREÇÃO 1: Conversão automática de BRK-A para BRK-B
+        if ticker == "BRK-A":
+            print("[AJUSTE] Ticker BRK-A convertido automaticamente para BRK-B.")
+            ticker = "BRK-B"
+
+        # CORREÇÃO 2: Filtro Anti-Laggard (RS Score >= 50)
+        val_rs_num = limpar_float(rs_score)
+        if val_rs_num is not None and val_rs_num < 50:
+            print(f"[FILTRADO] {ticker} rejeitado por RS Score fraco ({val_rs_num} < 50 - Laggard).")
             return None
 
         df = yf.download(ticker, period="1y", interval="1d", progress=False)
@@ -139,7 +150,7 @@ def analisar_connors_chan(ativo_info, vol_alvo_diaria_usd):
         if isinstance(df.columns, pd.MultiIndex):
             df.columns = df.columns.droplevel(1)
 
-        # BLINDAGEM CONTRA NaNs E HISTÓRICO CURTO:
+        # BLINDAGEM CONTRA NaNs E HISTÓRICO CURTO
         df = df.dropna(subset=['Close', 'High', 'Low', 'Volume'])
         if len(df) < 25:
             return None
@@ -148,12 +159,36 @@ def analisar_connors_chan(ativo_info, vol_alvo_diaria_usd):
         preco = ultimo_dia['Close']
 
         # -------------------------------------------------------------
-        # FILTROS DE SEGURANÇA ESTRUTURAL
+        # FILTROS DE SEGURANÇA ESTRUTURAL E CALENDÁRIO
         # -------------------------------------------------------------
         if pd.isna(preco) or preco < 3.00:
             print(f"[FILTRADO] {ticker} rejeitado por preço baixo (Preço: {preco}).")
             return None
+
+        alerta_earnings = "OK"
+        try:
+            ticker_obj = yf.Ticker(ticker)
             
+            # CORREÇÃO 3: Fallback automático de setor via yfinance
+            if setor in ["Desconhecido", "N/A", "", "NONE"]:
+                setor_yf = ticker_obj.info.get('sector')
+                if setor_yf:
+                    setor = setor_yf
+
+            calendario = ticker_obj.calendar
+            if isinstance(calendario, dict) and 'Earnings Date' in calendario:
+                proxima_data = calendario['Earnings Date'][0]
+                if hasattr(proxima_data, 'date'):
+                    proxima_data = proxima_data.date()
+                
+                hoje = datetime.now(ZoneInfo("Europe/Lisbon")).date()
+                dias_restantes = (proxima_data - hoje).days
+                
+                if 0 <= dias_restantes <= 3:
+                    alerta_earnings = f"PERIGO (em {dias_restantes} dias)"
+        except Exception:
+            pass
+
         if setor and any(termo in str(setor).lower() for termo in ["real estate", "reit", "mortgage"]):
             print(f"[FILTRADO] {ticker} rejeitado por pertencer ao setor REIT/Imobiliário.")
             return None
@@ -163,7 +198,7 @@ def analisar_connors_chan(ativo_info, vol_alvo_diaria_usd):
         df.ta.rsi(length=2, append=True)            
         df.ta.atr(length=14, append=True)           
 
-        # DETEÇÃO DINÂMICA DAS COLUNAS DOS INDICADORES (Evita KeyError)
+        # DETEÇÃO DINÂMICA DAS COLUNAS DOS INDICADORES
         col_bbl = [c for c in df.columns if str(c).startswith('BBL_')]
         col_bbm = [c for c in df.columns if str(c).startswith('BBM_')]
         col_rsi = [c for c in df.columns if str(c).startswith('RSI_2')]
@@ -216,11 +251,16 @@ def analisar_connors_chan(ativo_info, vol_alvo_diaria_usd):
                 entrada = alvo_tp = stop_loss = "N/A"
             else:
                 if pd.notna(atr) and atr > 0:
-                    qtd_acoes = round(vol_alvo_diaria_usd / atr, 2)
+                    qtd_calc = round(vol_alvo_diaria_usd / atr, 2)
                 else:
-                    qtd_acoes = round(vol_alvo_diaria_usd / risco, 2) if risco > 0 else "N/A"
+                    qtd_calc = round(vol_alvo_diaria_usd / risco, 2) if risco > 0 else 0
 
-                if qtd_acoes != "N/A":
+                # CORREÇÃO 4: Trava Anti-Quantidade Zero
+                if qtd_calc <= 0:
+                    estado = "Rejeitado (Quantidade Nula)"
+                    entrada = alvo_tp = stop_loss = "N/A"
+                else:
+                    qtd_acoes = qtd_calc
                     val_calc = entrada * qtd_acoes
                     valor_investir = f"~{val_calc:.2f} USD"
 
@@ -231,7 +271,6 @@ def analisar_connors_chan(ativo_info, vol_alvo_diaria_usd):
             except:
                 return "N/A"
 
-        val_rs_num = limpar_float(rs_score)
         if val_rs_num is not None:
             if val_rs_num >= 80:
                 status_rs = "🔥 ELITE (RS >= 80 - Vento a Favor)"
@@ -248,7 +287,7 @@ def analisar_connors_chan(ativo_info, vol_alvo_diaria_usd):
             f"BBLower: {limpa(bbl_inferior)},RSI2: {limpa(rsi_2)},"
             f"Estado: {estado},Ordem: BUY LIMIT,Entrada: {limpa(entrada)},"
             f"Stop: {limpa(stop_loss)},Take-Profit: {limpa(alvo_tp)},"
-            f"Qtd: {qtd_acoes},ValorInvestir: {valor_investir},"
+            f"Qtd: {qtd_acoes},ValorInvestir: {valor_investir},Earnings: {alerta_earnings},"
             f"Data: {datetime.now(ZoneInfo('Europe/Lisbon')).strftime('%d/%m/%Y %H:%M:%S')}"
         )
 
@@ -307,8 +346,8 @@ O teu mandato é auditar os sinais estatísticos gerados pelo motor Python e for
 
 Regras de Triagem e Execução:
 1. VALIDAÇÃO DE EXAUSTÃO: Confirma que o RSI(2) está abaixo de 10 e que o preço rompeu a Banda de Bollinger inferior.
-2. CONTEXTO INSTITUCIONAL (RS SCORE): Avalia o RS Score reportado. Se o ativo tiver RS Score de Elite (>= 80), o ressalto beneficia de suporte forte; se for laggard (< 50), exige cautela.
-3. VETO FUNDAMENTAL: Emite veto obrigatório caso exista um rácio de risco negativo.
+2. CONTEXTO INSTITUCIONAL (RS SCORE): Avalia o RS Score reportado. Se o ativo tiver RS Score de Elite (>= 80), o ressalto beneficia de suporte forte; se for laggard (< 50), exige cautela ou veto.
+3. VETO FUNDAMENTAL: Emite veto obrigatório caso exista um rácio de risco negativo ou se o ativo apresentar EARNINGS = PERIGO.
 4. TÁTICA DE SAÍDA: O alvo de Take-Profit é cravado na Banda Central de Bollinger (SMA20).
 5. TÁTICA DE ENTRADA: Execução com alocação rígida baseada em volatilidade (Carver).
 
