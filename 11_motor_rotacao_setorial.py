@@ -57,7 +57,7 @@ def enviar_email(assunto, corpo_texto):
         print(f"[ERRO] Falha ao enviar email: {e}")
         return False
 
-def get_yf_data(ticker, period="6m"):
+def get_yf_data(ticker, period="6mo"):  # Corrigido de "6m" para "6mo"
     for _ in range(3):
         try:
             df = yf.download(ticker, period=period, interval="1d", progress=False, timeout=15)
