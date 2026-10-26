@@ -154,7 +154,7 @@ except Exception as e:
     print(f"Erro na validação do SPY: {e}")
 
 # ===================================================================
-# CONFIGURAÇÕES DE RISCO INSTITUCIONAL (MÉTODO CARVER)
+# CONFIGURAÇÕES DE RISCO INSTITUCIONAL (MÉSTATIC/CARVER)
 # ===================================================================
 try:
     CAPITAL_TOTAL_CONTA = float(configs_data.get("CAPITAL_TOTAL_CONTA", 10400.00))
@@ -170,7 +170,7 @@ VOLATILIDADE_ALVO_DIARIA_USD = (CAPITAL_TOTAL_CONTA * ALVO_VOLATILIDADE_ANUAL) /
 
 # REGRAS OTIMIZADAS
 multiplicador_trailing_ts = 1.5
-racio_tp_base = 2.5  # Elevado para 2.5R (Expectativa Matemática Positiva)
+racio_tp_base = 3.0  # OTIMIZAÇÃO: Elevado para 3.0R (Expansão do Payoff para Expectativa Positiva)
 
 dados_temporarios = []
 
@@ -181,9 +181,15 @@ for ativo_info in ativos_data:
     ticker = str(ativo_info.get("ticker", "")).strip().upper()
     nome_empresa = ativo_info.get("nome", "N/A")
     rs_score = ativo_info.get("rs_score", "N/A")
+    setor = str(ativo_info.get("setor", "Desconhecido")).strip()
     
     if not ticker or ticker == "#N/A" or ticker == "NONE":
         continue
+
+    # CORREÇÃO 1: Conversão automática de BRK-A para BRK-B (Evita fração zero em ações de $800k)
+    if ticker == "BRK-A":
+        print("[AJUSTE] Ticker BRK-A convertido automaticamente para BRK-B.")
+        ticker = "BRK-B"
 
     try:
         df = yf.download(ticker, period="2y", interval="1d", progress=False)
@@ -200,11 +206,15 @@ for ativo_info in ativos_data:
             continue
 
         alerta_earnings = "OK"
-        setor = "Desconhecido"
         try:
             ticker_obj = yf.Ticker(ticker)
-            setor = ticker_obj.info.get('sector', 'Desconhecido')
             
+            # CORREÇÃO 2: Fallback automático de setor via yfinance se vier Desconhecido
+            if setor in ["Desconhecido", "N/A", "", "NONE"]:
+                setor_yf = ticker_obj.info.get('sector')
+                if setor_yf:
+                    setor = setor_yf
+
             calendario = ticker_obj.calendar
             if isinstance(calendario, dict) and 'Earnings Date' in calendario:
                 proxima_data = calendario['Earnings Date'][0]
@@ -314,10 +324,17 @@ for ativo_info in ativos_data:
                 
                 tp_calc = preco_entrada + (risco_por_acao * racio_tp_base)
                 preco_tp = round(tp_calc, 2)
-                qtd_acoes = round(vol_alocada / atr, 2) if atr > 0 else "N/A"
-                dist_tp = preco_tp - preco_entrada
-                preco_be = round(preco_entrada + (dist_tp / 2), 2)
-                trailing_final = round(max(trailing_base, preco_stop_calc), 2)
+                qtd_calc = round(vol_alocada / atr, 2) if atr > 0 else 0
+                
+                # CORREÇÃO 3: Veto a quantidades calculadas nulas (Qtd == 0)
+                if qtd_calc <= 0:
+                    recomendacao = "Observar"
+                    qtd_acoes = "N/A"
+                else:
+                    qtd_acoes = qtd_calc
+                    dist_tp = preco_tp - preco_entrada
+                    preco_be = round(preco_entrada + (dist_tp / 2), 2)
+                    trailing_final = round(max(trailing_base, preco_stop_calc), 2)
 
         data_atual = datetime.now(ZoneInfo("Europe/Lisbon")).strftime('%d/%m/%Y %H:%M:%S')
 
@@ -380,7 +397,7 @@ for ativo_info in ativos_data:
             "data": data_atual
         })
         
-        print(f"[OK] {ticker} analisado. Estado: {recomendacao}")
+        print(f"[OK] {ticker} analisado. Setor: {setor} | Estado: {recomendacao}")
 
     except Exception as e:
         print(f"[ERRO] Falha ao processar {ticker}: {e}")
@@ -514,6 +531,7 @@ Regras Operacionais Estritas de Triagem, Carteira e Ataque:
    - Verifica o campo 'PosicaoAtiva' em cada linha do comboio.
    - **REGRA DE OURO:** Se a PosicaoAtiva indicar **SIM**, é **estritamente proibido** sugerir nova entrada ou alocação de capital. O foco é 100% a gestão da posição existente. (Nota: Se indicar 'Gerido pelo modelo FAST', desconsidera para efeitos de gestão de Breakouts e mantém apenas a nota informativa).
    - **GESTÃO DO STOP LOSS:** Compara o 'StopAtual' com o 'Trailing'. Se o 'Trailing' for superior, recomenda subir o Stop. Se for igual ou inferior, indica manutenção.
+   - **ATENÇÃO AOS EARNINGS:** Se uma posição ativa apresentar 'EARNINGS = PERIGO', emite um alerta prioritário de liquidação preventiva antes da apresentação dos resultados.
    - Usa obrigatoriamente este template exato:
 
    🎯 [TICKER] - [Nome da Empresa] ([Setor]) [Adicionar tag (SUPLENTE) se aplicável]
