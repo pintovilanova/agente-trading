@@ -1,0 +1,42 @@
+name: 11 - 🔄 Motor Rotação Setorial (Money Flow Tracker)
+
+on:
+  # Permite testar e executar manualmente a qualquer momento no GitHub
+  workflow_dispatch:
+
+jobs:
+  run-sector-rotation-engine:
+    name: ⚙️ Execução Rotação Setorial Isolada
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: 📥 Fazer o Checkout do Código
+        uses: actions/checkout@v4
+
+      - name: 🐍 Configurar o Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: 'pip'
+
+      - name: 📦 Instalar Dependências
+        run: |
+          python -m pip install --upgrade pip
+          pip install yfinance pandas requests google-generativeai google-genai
+
+      - name: 🔄 Executar Motor Rotação Setorial
+        env:
+          # Credenciais seguras guardadas no GitHub Secrets
+          WEBHOOK_URL: ${{ secrets.WEBHOOK_URL }}
+          EMAIL_USER: ${{ secrets.EMAIL_USER }}
+          EMAIL_PASS: ${{ secrets.EMAIL_PASS }}
+        run: python 11_motor_rotacao_setorial.py
+
+      - name: 🤖 Executar Agente IA Orquestrador (Auditoria do Fluxo de Capital)
+        env:
+          # O Orquestrador vai ler o ficheiro comboio_rotacao_temp.txt gerado no passo anterior
+          WEBHOOK_URL: ${{ secrets.WEBHOOK_URL }}
+          EMAIL_USER: ${{ secrets.EMAIL_USER }}
+          EMAIL_PASS: ${{ secrets.EMAIL_PASS }}
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }} 
+        run: python 09_agente_gemini_orquestrador.py
