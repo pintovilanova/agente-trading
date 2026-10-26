@@ -76,7 +76,7 @@ def get_yf_data(ticker, period="6mo"):  # Corrigido de "6m" para "6mo"
 print("A executar análise de Rotação Setorial e Fluxo de Capital (Money Flow)...")
 
 try:
-    df_spy = get_yf_data("SPY", "6m")
+    df_spy = get_yf_data("SPY", "6mo")
     if df_spy.empty:
         print("[ERRO CRÍTICO] Não foi possível obter dados do SPY.")
         sys.exit(1)
