@@ -123,10 +123,21 @@ def enviar_email(conteudo):
 def analisar_reversao_media(ativo_info, vol_alvo_diaria_usd):
     ticker = str(ativo_info.get("ticker", "")).strip().upper()
     nome_empresa = ativo_info.get("nome", "N/A")
-    setor = ativo_info.get("setor", "Desconhecido")
+    setor = str(ativo_info.get("setor", "Desconhecido")).strip()
     rs_score = ativo_info.get("rs_score", "N/A")
 
     if not ticker or ticker == "#N/A" or ticker == "NONE":
+        return None
+
+    # CORREÇÃO 1: Conversão automática de BRK-A para BRK-B
+    if ticker == "BRK-A":
+        print("[AJUSTE] Ticker BRK-A convertido automaticamente para BRK-B.")
+        ticker = "BRK-B"
+
+    # CORREÇÃO 2: Filtro Anti-Laggard (Exige RS Score >= 50)
+    val_rs_num = limpar_float(rs_score)
+    if val_rs_num is not None and val_rs_num < 50:
+        print(f"[FILTRADO] {ticker} rejeitado por RS Score fraco ({val_rs_num} < 50 - Laggard).")
         return None
 
     try:
@@ -149,7 +160,31 @@ def analisar_reversao_media(ativo_info, vol_alvo_diaria_usd):
         if pd.isna(preco) or preco < 3.00:
             print(f"[FILTRADO] {ticker} rejeitado por preço baixo (Preço: {preco}).")
             return None
+
+        alerta_earnings = "OK"
+        try:
+            ticker_obj = yf.Ticker(ticker)
             
+            # CORREÇÃO 3: Fallback automático de setor via yfinance
+            if setor in ["Desconhecido", "N/A", "", "NONE"]:
+                setor_yf = ticker_obj.info.get('sector')
+                if setor_yf:
+                    setor = setor_yf
+
+            calendario = ticker_obj.calendar
+            if isinstance(calendario, dict) and 'Earnings Date' in calendario:
+                proxima_data = calendario['Earnings Date'][0]
+                if hasattr(proxima_data, 'date'):
+                    proxima_data = proxima_data.date()
+                
+                hoje = datetime.now(ZoneInfo("Europe/Lisbon")).date()
+                dias_restantes = (proxima_data - hoje).days
+                
+                if 0 <= dias_restantes <= 3:
+                    alerta_earnings = f"PERIGO (em {dias_restantes} dias)"
+        except Exception:
+            pass
+
         if setor and any(termo in str(setor).lower() for termo in ["real estate", "reit", "mortgage"]):
             print(f"[FILTRADO] {ticker} rejeitado por pertencer ao setor REIT/Imobiliário.")
             return None
@@ -216,11 +251,16 @@ def analisar_reversao_media(ativo_info, vol_alvo_diaria_usd):
                 entrada = alvo_tp = stop_loss = "N/A"
             else:
                 if pd.notna(atr) and atr > 0:
-                    qtd_acoes = round(vol_alvo_diaria_usd / atr, 2)
+                    qtd_calc = round(vol_alvo_diaria_usd / atr, 2)
                 else:
-                    qtd_acoes = round(vol_alvo_diaria_usd / risco, 2) if risco > 0 else "N/A"
+                    qtd_calc = round(vol_alvo_diaria_usd / risco, 2) if risco > 0 else 0
 
-                if qtd_acoes != "N/A":
+                # CORREÇÃO 4: Trava Anti-Quantidade Zero
+                if qtd_calc <= 0:
+                    estado = "Rejeitado (Quantidade Nula)"
+                    entrada = alvo_tp = stop_loss = "N/A"
+                else:
+                    qtd_acoes = qtd_calc
                     val_calc = entrada * qtd_acoes
                     valor_investir = f"~{val_calc:.2f} USD"
 
@@ -231,7 +271,6 @@ def analisar_reversao_media(ativo_info, vol_alvo_diaria_usd):
             except:
                 return "N/A"
 
-        val_rs_num = limpar_float(rs_score)
         if val_rs_num is not None:
             if val_rs_num >= 80:
                 status_rs = "🔥 ELITE (RS >= 80 - Vento a Favor)"
@@ -249,7 +288,7 @@ def analisar_reversao_media(ativo_info, vol_alvo_diaria_usd):
             f"RSI: {limpa(rsi)},RVOL: {limpa(rvol)},Absorção: {'Sim' if absorcao else 'Não'},"
             f"Estado: {estado},Ordem: BUY LIMIT,Entrada: {limpa(entrada)},"
             f"Stop: {limpa(stop_loss)},Take-Profit: {limpa(alvo_tp)},"
-            f"Qtd: {qtd_acoes},ValorInvestir: {valor_investir},"
+            f"Qtd: {qtd_acoes},ValorInvestir: {valor_investir},Earnings: {alerta_earnings},"
             f"Data: {datetime.now(ZoneInfo('Europe/Lisbon')).strftime('%d/%m/%Y %H:%M:%S')}"
         )
 
@@ -307,8 +346,8 @@ def executar_motor():
         "- O tom deve ser militar, frio e puramente matemático. Sem saudações.\n\n"
         "REGRAS DE TRIAGEM E EXECUÇÃO:\n"
         "1. VALIDAÇÃO DE FUNDO: Confirma a Capitulação. Um RVOL > 1.5 ou 'Absorção: Sim' indicam que o dinheiro institucional começou a comprar o pânico.\n"
-        "2. CONTEXTO INSTITUCIONAL (RS SCORE): Avalia o RS Score reportado. Se o ativo tiver RS Score de Elite (>= 80), o ressalto beneficia de suporte de fundo forte; se for laggard (< 50), exige cautela redobrada.\n"
-        "3. VETO FUNDAMENTAL: O motor já filtra penny stocks (<$3) e mREITs, mas se souberes que a queda foi originada por fraude ou falência iminente, emite um VETO OBRIGATÓRIO.\n"
+        "2. CONTEXTO INSTITUCIONAL (RS SCORE): Avalia o RS Score reportado. Se o ativo tiver RS Score de Elite (>= 80), o ressalto beneficia de suporte de fundo forte; se for laggard (< 50), exige cautela redobrada ou desclassificação.\n"
+        "3. VETO FUNDAMENTAL: O motor já filtra penny stocks (<$3), mREITs e RS < 50. Se um ativo detetar EARNINGS = PERIGO ou queda motivada por fraude/falência iminente, emite VETO OBRIGATÓRIO.\n"
         "4. TÁTICA DE SAÍDA (Hit & Run): O alvo de Take-Profit é fixo e cravado na EMA9. Não recomendes o uso de Trailing Stops. O objetivo é comprar barato e largar a ação mal ela toque na linha dos 9 dias.\n"
         "5. TÁTICA DE ENTRADA: Recomenda execução próxima do fecho (para confirmar a vela de absorção) ou o uso de Buy Limit na zona de pânico.\n\n"
         "ESTRUTURA VISUAL OBRIGATÓRIA:\n"
