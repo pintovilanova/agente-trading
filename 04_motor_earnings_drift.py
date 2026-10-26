@@ -9,22 +9,6 @@
 # uma explosão de preço e volume (salto inicial >= 2.0% e RVOL >= 2.0), 
 # calculando o dimensionamento de risco institucional (Método Carver) e 
 # enviando um relatório estruturado por email para triagem de uma IA.
-#
-# Pilares Técnicos e Arquitetura de Execução:
-# 1. Travas de Segurança e Calendário:
-#    - Trava de Fim de Semana: Aborta automaticamente aos sábados e domingos.
-# 2. Gestão de Risco Institucional (Target Volatility - Método Carver):
-#    - Orçamento de flutuação diária calculado sobre o capital total da conta 
-#      lido dinamicamente da tab 'Configs' do Google Sheets.
-#    - Dimensionamento dinâmico baseado no ATR para nivelar o risco real.
-# 3. Anomalia e Filtro PEAD:
-#    - Validação de datas de resultados recentes via yfinance.
-#    - Confirmação de momento de continuação por volume institucional (RVOL).
-#    - Integração do RS Score institucional (Coluna O) para contexto de força.
-# 4. Integração Cloud & LLM:
-#    - Sincronização bidirecional com Google Sheets via Webhook (Aba: Earnings Drift).
-#    - Gravação local ("comboio_earnings_temp.txt") e envio de email com prompt 
-#      anti-alucinação para auditoria autónoma por IA.
 # ===================================================================
 
 import pandas as pd
@@ -41,6 +25,8 @@ import smtplib
 import time
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
+import warnings
+warnings.filterwarnings("ignore")
 
 # ===================================================================
 # 0. TRAVA DE FIM DE SEMANA
@@ -60,6 +46,16 @@ EMAIL_PASS = os.environ.get("EMAIL_PASS")
 SMTP_SERVER = "smtp.gmail.com"
 SMTP_PORT = 587
 
+def limpar_float(val):
+    """Converte com segurança valores numéricos (mesmo com vírgulas) para float."""
+    if val is None: return None
+    try:
+        val_str = str(val).replace(",", ".").strip()
+        if val_str == "" or val_str.lower() in ["nan", "n/a", "none"]: return None
+        return float(val_str)
+    except (ValueError, TypeError):
+        return None
+
 # ===================================================================
 # 2. FUNÇÕES DE REDE (Google Sheets e Email)
 # ===================================================================
@@ -69,7 +65,7 @@ def buscar_watchlist():
         print("[ERRO] WEBHOOK_URL não configurado.")
         return [], {}
     try:
-        resp = requests.get(WEBHOOK_URL)
+        resp = requests.get(WEBHOOK_URL, timeout=15)
         if resp.status_code == 200:
             dados = resp.json()
             if isinstance(dados, dict):
@@ -129,14 +125,34 @@ def enviar_email(conteudo):
 # 3. MOTOR MATEMÁTICO: EARNINGS DRIFT (PEAD)
 # ===================================================================
 def analisar_earnings_drift(ativo_info, vol_alvo_diaria_usd):
-    ticker = ativo_info.get("ticker")
+    ticker = str(ativo_info.get("ticker", "")).strip().upper()
     nome_empresa = ativo_info.get("nome", "N/A")
-    setor = ativo_info.get("setor", "Desconhecido")
+    setor = str(ativo_info.get("setor", "Desconhecido")).strip()
     rs_score = ativo_info.get("rs_score", "N/A")
+
+    if not ticker or ticker == "#N/A" or ticker == "NONE":
+        return None
+
+    # CORREÇÃO 1: Conversão de BRK-A para BRK-B
+    if ticker == "BRK-A":
+        print("[AJUSTE] Ticker BRK-A convertido automaticamente para BRK-B.")
+        ticker = "BRK-B"
+
+    # CORREÇÃO 2: Filtro Anti-Laggard (RS Score >= 50)
+    val_rs_num = limpar_float(rs_score)
+    if val_rs_num is not None and val_rs_num < 50:
+        print(f"[FILTRADO] {ticker} rejeitado por RS Score fraco ({val_rs_num} < 50 - Laggard).")
+        return None
 
     try:
         ticker_obj = yf.Ticker(ticker)
         
+        # CORREÇÃO 3: Fallback automático de setor via yfinance
+        if setor in ["Desconhecido", "N/A", "", "NONE"]:
+            setor_yf = ticker_obj.info.get('sector')
+            if setor_yf:
+                setor = setor_yf
+
         df = ticker_obj.history(period="3mo")
         if df.empty or len(df) < 25:
             return None
@@ -195,32 +211,36 @@ def analisar_earnings_drift(ativo_info, vol_alvo_diaria_usd):
             risco = entrada - stop_loss
             
             if pd.notna(atr) and atr > 0:
-                qtd_acoes = round(vol_alvo_diaria_usd / atr, 2)
+                qtd_calc = round(vol_alvo_diaria_usd / atr, 2)
             else:
-                qtd_acoes = round(vol_alvo_diaria_usd / risco, 2) if risco > 0 else "N/A"
+                qtd_calc = round(vol_alvo_diaria_usd / risco, 2) if risco > 0 else 0
                 
-            if qtd_acoes != "N/A":
-                val_calc = entrada * qtd_acoes
-                valor_investir = f"~{val_calc:.2f} USD"
-            else:
-                valor_investir = "N/A"
+            # CORREÇÃO 4: Trava Anti-Quantidade Zero
+            if qtd_calc <= 0:
+                print(f"[FILTRADO] {ticker} rejeitado por quantidade calculada nula.")
+                return None
+
+            qtd_acoes = qtd_calc
+            val_calc = entrada * qtd_acoes
+            valor_investir = f"~{val_calc:.2f} USD"
         else:
             return None
 
         def limpa(v):
             if pd.isna(v) or v == "N/A": return "N/A"
-            return round(float(v), 2)
+            try:
+                return round(float(v), 2)
+            except:
+                return "N/A"
 
-        # Análise contextual do RS Score (Coluna O)
-        try:
-            val_rs = float(rs_score)
-            if val_rs >= 80:
+        if val_rs_num is not None:
+            if val_rs_num >= 80:
                 status_rs = "🔥 ELITE (RS >= 80 - Vento a Favor)"
-            elif val_rs >= 50:
+            elif val_rs_num >= 50:
                 status_rs = "⚖️ NEUTRO (RS 50-79 - Acompanha o Mercado)"
             else:
                 status_rs = "⚠️ FRACO / LAGGARD (RS < 50 - Vento Contra)"
-        except ValueError:
+        else:
             status_rs = "❓ SEM DADO DE RS"
 
         linha_comboio = (
@@ -264,7 +284,6 @@ def executar_motor():
     if not ativos:
         sys.exit(1)
         
-    # Leitura dinâmica das configurações de risco da tab Configs (com fallback de segurança)
     try:
         capital_total_conta = float(configs.get("CAPITAL_TOTAL_CONTA", 10400.00))
         alvo_volatilidade_anual = float(configs.get("ALVO_VOLATILIDADE_ANUAL", 0.05))
@@ -332,7 +351,7 @@ def executar_motor():
         "🎯 [TICKER] - [Nome da Empresa] ([Setor])\n"
         "- 🚀 CATALISADOR DE EARNINGS: Data do evento: [DataEarnings] | Salto inicial: [VarDia%]\n"
         "- 📊 CONTEXTO INSTITUCIONAL (RS SCORE): [Incluir o RS Score e o respetivo estado institucional reportado]\n"
-        "- 🩸 PEGADA INSTITUCIONAL: RVOL detetado de [RVOL]\n"
+        "- GF PEGADA INSTITUCIONAL: RVOL detetado de [RVOL]\n"
         "- ⚙️ TÁTICA: EARNINGS DRIFT. Surfar tendência com rácio 2:1.\n"
         "- 🔢 DADOS EXATOS: Entrada: X | Stop: X | TP: X | Qtd: X | Valor a Investir: X\n"
         "- 📋 REFERÊNCIA: [Copia e cola a Linha do Comboio exata fornecida abaixo]\n"
