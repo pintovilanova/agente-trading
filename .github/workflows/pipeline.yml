@@ -53,10 +53,10 @@ jobs:
           EMAIL_PASS: ${{ secrets.EMAIL_PASS }}  # <-- ADICIONAR ISTO
         run: python 01_extrator_europa.py
 
-      # ==========================================================
+     # ==========================================================
       # 3. MOTORES DE ESTRATÉGIA (Com tolerância a falhas)
       # ==========================================================
-      - name: 🚀 07 - Executar Motor Breakout
+      - name: 🚀 07 - Executar Motor Breakout (VCP)
         continue-on-error: true
         env:
           WEBHOOK_URL: ${{ secrets.WEBHOOK_URL }}
@@ -95,6 +95,14 @@ jobs:
           EMAIL_USER: ${{ secrets.EMAIL_USER }}
           EMAIL_PASS: ${{ secrets.EMAIL_PASS }}
         run: python 06_motor_fast_trend_carver.py
+
+      - name: 🏆 10 - Executar Motor Holy Grail Pullbacks
+        continue-on-error: true
+        env:
+          WEBHOOK_URL: ${{ secrets.WEBHOOK_URL }}
+          EMAIL_USER: ${{ secrets.EMAIL_USER }}
+          EMAIL_PASS: ${{ secrets.EMAIL_PASS }}
+        run: python 10_motor_holygrail_pullbacks.py
 
       # ==========================================================
       # 4. AUDITORIA FINAL IA (Corre e envia o que foi recolhido)
