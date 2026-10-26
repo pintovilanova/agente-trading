@@ -57,7 +57,8 @@ def enviar_email(assunto, corpo_texto):
         print(f"[ERRO] Falha ao enviar email: {e}")
         return False
 
-def get_yf_data(ticker, period="6mo"):  # Corrigido de "6m" para "6mo"
+# Função corrigida com "1y" por padrão para evitar parâmetros inválidos
+def get_yf_data(ticker, period="1y"):
     for _ in range(3):
         try:
             df = yf.download(ticker, period=period, interval="1d", progress=False, timeout=15)
@@ -76,7 +77,7 @@ def get_yf_data(ticker, period="6mo"):  # Corrigido de "6m" para "6mo"
 print("A executar análise de Rotação Setorial e Fluxo de Capital (Money Flow)...")
 
 try:
-    df_spy = get_yf_data("SPY", "6mo")
+    df_spy = get_yf_data("SPY", "1y")
     if df_spy.empty:
         print("[ERRO CRÍTICO] Não foi possível obter dados do SPY.")
         sys.exit(1)
@@ -87,7 +88,7 @@ try:
     resultados = []
 
     for ticker, nome_setor in ETFS_SETORIAIS.items():
-        df_etf = get_yf_data(ticker, "6m")
+        df_etf = get_yf_data(ticker, "1y")
         if df_etf.empty or len(df_etf) < 60:
             continue
 
