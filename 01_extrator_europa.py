@@ -15,6 +15,8 @@ import numpy as np
 import time
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
+import warnings
+warnings.filterwarnings("ignore")
 
 # ===================================================================
 # 0.1 TRAVA DE FIM DE SEMANA (Não corre ao Sábado e Domingo)
@@ -133,7 +135,7 @@ except (ValueError, TypeError):
 volatilidade_alvo_diaria_usd = (capital_total_conta * alvo_volatilidade_anual) / 16.0
 risco_maximo_dolares = volatilidade_alvo_diaria_usd
 multiplicador_trailing_ts = 1.5
-racio_tp_base = 2.5  # Elevado para 2.5R (Expectativa Matemática Positiva)
+racio_tp_base = 3.0  # OTIMIZAÇÃO: Elevado para 3.0R (Expansão do Payoff)
 
 print(f"[CONFIG] Capital Total da Conta: ${capital_total_conta:,.2f}")
 print(f"[CONFIG] Alvo Volatilidade Anual: {alvo_volatilidade_anual*100:.1f}%")
@@ -180,6 +182,7 @@ for ativo_info in ativos_data:
     ticker = str(ativo_info.get("ticker", "")).strip().upper()
     nome_empresa = ativo_info.get("nome", "N/A")
     rs_score = ativo_info.get("rs_score", "N/A")
+    setor = str(ativo_info.get("setor", "Europa")).strip()
     
     if not ticker or ticker == "#N/A" or ticker == "NONE":
         continue
@@ -199,11 +202,15 @@ for ativo_info in ativos_data:
             continue
 
         alerta_earnings = "OK"
-        setor = "Europa"
         try:
             ticker_obj = yf.Ticker(ticker)
-            setor = ticker_obj.info.get('sector', 'Europa')
             
+            # CORREÇÃO: Fallback automático de setor via yfinance se vier genericamente como Europa/Desconhecido
+            if setor in ["Europa", "Desconhecido", "N/A", "", "NONE"]:
+                setor_yf = ticker_obj.info.get('sector')
+                if setor_yf:
+                    setor = setor_yf
+
             calendario = ticker_obj.calendar
             if isinstance(calendario, dict) and 'Earnings Date' in calendario:
                 proxima_data = calendario['Earnings Date'][0]
@@ -309,10 +316,17 @@ for ativo_info in ativos_data:
             if risco_por_acao > 0:
                 tp_calc = preco_entrada + (risco_por_acao * racio_tp_base)
                 preco_tp = round(tp_calc, 2)
-                qtd_acoes = round(risco_maximo_dolares / risco_por_acao, 2) if risco_por_acao > 0 else "N/A"
-                dist_tp = preco_tp - preco_entrada
-                preco_be = round(preco_entrada + (dist_tp / 2), 2)
-                trailing_final = round(max(trailing_base, preco_stop_calc), 2)
+                qtd_calc = round(risco_maximo_dolares / risco_por_acao, 2) if risco_por_acao > 0 else 0
+                
+                # CORREÇÃO: Veto a quantidades nulas (Qtd <= 0)
+                if qtd_calc <= 0:
+                    recomendacao = "Observar"
+                    qtd_acoes = "N/A"
+                else:
+                    qtd_acoes = qtd_calc
+                    dist_tp = preco_tp - preco_entrada
+                    preco_be = round(preco_entrada + (dist_tp / 2), 2)
+                    trailing_final = round(max(trailing_base, preco_stop_calc), 2)
 
         data_atual = datetime.now(ZoneInfo("Europe/Lisbon")).strftime('%d/%m/%Y %H:%M:%S')
 
@@ -375,7 +389,7 @@ for ativo_info in ativos_data:
             "data": data_atual
         })
         
-        print(f"[OK] {ticker} analisado. Estado: {recomendacao}")
+        print(f"[OK] {ticker} analisado. Setor: {setor} | Estado: {recomendacao}")
 
     except Exception as e:
         print(f"[ERRO] Falha ao processar {ticker}: {e}")
@@ -509,6 +523,7 @@ Regras Operacionais Estritas de Triagem, Carteira e Ataque:
    - Verifica o campo 'PosicaoAtiva' em cada linha do comboio.
    - **REGRA DE OURO:** Se a PosicaoAtiva indicar **SIM**, é **estritamente proibido** sugerir nova entrada ou alocação de capital. O foco é 100% a gestão da posição existente. (Nota: Se indicar 'Gerido pelo modelo FAST', desconsidera para efeitos de gestão de Breakouts).
    - **GESTÃO DO STOP LOSS:** Compara o 'StopAtual' com o 'Trailing'. Se o 'Trailing' for superior, recomenda subir o Stop. Se for igual ou inferior, indica manutenção.
+   - **ATENÇÃO AOS EARNINGS:** Se uma posição ativa apresentar 'EARNINGS = PERIGO', emite um alerta prioritário de liquidação preventiva antes da apresentação dos resultados.
    - Usa obrigatoriamente este template exato:
 
    🇪🇺🎯 [TICKER] - [Nome da Empresa] ([Setor]) [Adicionar tag (SUPLENTE) se aplicável]
