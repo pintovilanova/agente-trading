@@ -127,11 +127,19 @@ try:
                 motivos_bloqueio.append(f"Estresse de Crédito Institucional detetado. Rácio HYG/IEF caiu abaixo do suporte crítico.")
 
     # ===================================================================
-    # 3. VEREDICTO E AÇÃO DO DISJUNTOR
+    # 3. VEREDICTO E AÇÃO DO DISJUNTOR (COM PAINEL VISUAL)
     # ===================================================================
+    
+    # Função auxiliar para desenhar o termómetro
+    def desenhar_barra(valor, maximo=100, tamanho=10):
+        preenchido = int((valor / maximo) * tamanho)
+        preenchido = min(max(preenchido, 0), tamanho) # Limita entre 0 e o tamanho máximo
+        return f"[{'█' * preenchido}{'░' * (tamanho - preenchido)}]"
+
     if motivos_bloqueio:
+        # (O CÓDIGO DE BLOQUEIO MANTÉM-SE IGUAL)
         corpo_email = "🚨 [DISJUNTOR MACRO ATIVADO] - EXECUÇÃO DE PIPELINE ABORTADA\n\n"
-        corpo_email += "O Motor Macro detetou hostilidades sistémicas no mercado norte-americano (Ações, Volatilidade ou Obrigações).\nPara proteger o capital, a abertura de novas posições foi totalmente bloqueada hoje.\n\n"
+        corpo_email += "O Motor Macro detetou hostilidades sistémicas no mercado norte-americano.\nPara proteger o capital, a abertura de novas posições foi totalmente bloqueada hoje.\n\n"
         corpo_email += "MOTIVOS CRÍTICOS DETETADOS:\n"
         for m in motivos_bloqueio:
             corpo_email += f"❌ {m}\n"
@@ -144,20 +152,42 @@ try:
     else:
         print("\n[OK] Mercado Saudável. Disjuntor Macro em verde. Pipeline autorizada.")
         
-        corpo_verde = "✅ [DISJUNTOR MACRO VERDE] - MERCADO SAUDÁVEL\n\n"
-        corpo_verde += "A Análise Intermarket confirmou que a estrutura de liquidez, volatilidade e crédito dos EUA estão saudáveis. A pipeline de trading está autorizada a prosseguir e acionar gatilhos de compra.\n\n"
-        corpo_verde += f"📊 DADOS MACRO DO DIA:\n"
-        corpo_verde += f"📈 SPY Fecho: {preco_spy:.2f} USD (Var: {queda_spy:.2f}% | SMA200: {sma200_spy:.2f})\n"
-        corpo_verde += f"📉 VIX: {vix_hoje:.2f} (Estrutura Normalizada)\n"
+        distancia_sma = ((preco_spy - sma200_spy) / sma200_spy) * 100
         
-        if alertas_amarelos:
-            corpo_verde += "\n⚠️ AVISOS DE ATENÇÃO (NÃO BLOQUEANTES):\n"
-            for a in alertas_amarelos:
-                corpo_verde += f"- {a}\n"
-                
-        corpo_verde += f"\nData/Hora de Execução: {datetime.now(ZoneInfo('Europe/Lisbon')).strftime('%d/%m/%Y %H:%M:%S')}"
+        # Rácio VIX com fallback caso o VIX3M falhe
+        racio_str = f"{razao_vix:.2f}" if vix3m_hoje else "N/A"
+        racio_pct = (razao_vix * 100) if vix3m_hoje else 0
+        
+        estado_vix_curva = "🟢 SAUDÁVEL"
+        if vix3m_hoje and razao_vix > 0.90: estado_vix_curva = "🟡 ALERTA AMARELO"
+        if vix3m_hoje and razao_vix >= 1.00: estado_vix_curva = "🔴 PERIGO (BACKWARDATION)"
+
+        corpo_verde = "✅ [DISJUNTOR MACRO VERDE] - MERCADO SAUDÁVEL\n\n"
+        corpo_verde += "O Motor Intermarket confirmou que o capital institucional continua a suportar o mercado. A pipeline de trading está autorizada a prosseguir.\n\n"
+        corpo_verde += "📊 PAINEL DE CONTROLO MACRO (RADAR INSTITUCIONAL)\n"
+        corpo_verde += "==================================================\n"
+        
+        corpo_verde += f"1. TENDÊNCIA S&P 500 (SPY): 🟢 BULL MARKET\n"
+        corpo_verde += f"Cotação: ${preco_spy:.2f} | Linha de Água (SMA200): ${sma200_spy:.2f}\n"
+        corpo_verde += f"Termómetro: {desenhar_barra(distancia_sma, maximo=10, tamanho=10)} +{distancia_sma:.1f}% acima do suporte longo.\n"
+        corpo_verde += "💡 O que significa: O mercado está acima da sua média de longo prazo. A tendência primária é de alta e favorece estratégias de Breakout e Pullback.\n\n"
+        
+        corpo_verde += f"2. ÍNDICE DE PÂNICO (VIX): {'🟡 ATENÇÃO' if vix_hoje > 20 else '🟢 TRANQUILO'}\n"
+        corpo_verde += f"Valor Atual: {vix_hoje:.2f} (Crítico: > 30.00)\n"
+        corpo_verde += f"Termómetro: {desenhar_barra(vix_hoje, maximo=40, tamanho=10)}\n"
+        corpo_verde += "💡 O que significa: A volatilidade absoluta reflete o medo atual. Abaixo de 20 significa que os fundos estão calmos e a comprar ações de forma orgânica.\n\n"
+        
+        if vix3m_hoje:
+            corpo_verde += f"3. ESTRUTURA DE CURVA (VIX vs VIX3M): {estado_vix_curva}\n"
+            corpo_verde += f"Rácio Atual: {racio_str} (Crítico: >= 1.00)\n"
+            corpo_verde += f"Termómetro: {desenhar_barra(racio_pct, maximo=100, tamanho=10)}\n"
+            corpo_verde += "💡 O que significa: Mede se o medo de curto prazo é superior ao de longo prazo. Acima de 0.90, indica que as instituições estão secretamente a comprar proteções ('puts') contra quedas iminentes.\n"
+        
+        corpo_verde += "==================================================\n"
+        corpo_verde += f"Data/Hora de Execução: {datetime.now(ZoneInfo('Europe/Lisbon')).strftime('%d/%m/%Y %H:%M:%S')}"
+        
         enviar_alerta_macro("tradingRelatorioIA US - ✅ MERCADO SAUDÁVEL", corpo_verde)
-        sys.exit(0)  
+        sys.exit(0) 
 
 except Exception as e:
     print(f"[ERRO CRÍTICO] Falha na auditoria macro: {e}")
