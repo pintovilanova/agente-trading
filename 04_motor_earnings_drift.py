@@ -5,7 +5,7 @@
 # Este script opera como um "Caçador de Earnings Drift" (PEAD - Post-Earnings 
 # Announcement Drift) automatizado na nuvem via GitHub Actions. O seu 
 # objetivo é varrer a Watchlist em busca de empresas que tenham reportado 
-# resultados recentemente (últimos 5 dias), filtrando aquelas que apresentem 
+# resultados recentemente (últimos 5 dias), filtrandoquelas que apresentem 
 # uma explosão de preço e volume (salto inicial >= 2.0% e RVOL >= 2.0), 
 # calculando o dimensionamento de risco institucional (Método Carver) e 
 # enviando um relatório estruturado por email para triagem de uma IA.
@@ -23,6 +23,7 @@ import requests
 import json
 import smtplib
 import time
+import random
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 import warnings
@@ -57,8 +58,32 @@ def limpar_float(val):
         return None
 
 # ===================================================================
-# 2. FUNÇÕES DE REDE (Google Sheets e Email)
+# 2. FUNÇÕES DE REDE E RESILIÊNCIA YAHOO FINANCE
 # ===================================================================
+def get_yf_history_safe(ticker_str, period="6mo"):
+    """Descarrega o histórico com retentativas e pausas aleatórias para evitar HTTP 401/429."""
+    for tentativa in range(3):
+        try:
+            time.sleep(random.uniform(0.8, 1.8))
+            df = yf.download(ticker_str, period=period, interval="1d", progress=False, timeout=15)
+            if not df.empty and len(df) >= 25:
+                if isinstance(df.columns, pd.MultiIndex):
+                    df.columns = df.columns.droplevel(1)
+                return df.dropna(subset=['Close', 'Volume'])
+        except Exception:
+            time.sleep(2.0)
+    return pd.DataFrame()
+
+def obter_earnings_dates_safe(ticker_str):
+    """Obtém o calendário de earnings com tratamento de erro e isolamento de exceção."""
+    try:
+        time.sleep(random.uniform(0.5, 1.2))
+        ticker_obj = yf.Ticker(ticker_str)
+        earnings_df = ticker_obj.earnings_dates
+        return ticker_obj, earnings_df
+    except Exception:
+        return None, None
+
 def buscar_watchlist():
     print("A carregar a Watchlist e Configurações a partir do Google Sheets...")
     if not WEBHOOK_URL: 
@@ -145,20 +170,22 @@ def analisar_earnings_drift(ativo_info, vol_alvo_diaria_usd):
         return None
 
     try:
-        ticker_obj = yf.Ticker(ticker)
-        
-        # CORREÇÃO 3: Fallback automático de setor via yfinance
-        if setor in ["Desconhecido", "N/A", "", "NONE"]:
-            setor_yf = ticker_obj.info.get('sector')
-            if setor_yf:
-                setor = setor_yf
-
-        df = ticker_obj.history(period="3mo")
+        # Obter dados de histórico de forma segura contra 401/429
+        df = get_yf_history_safe(ticker, period="6mo")
         if df.empty or len(df) < 25:
             return None
-            
-        if isinstance(df.columns, pd.MultiIndex):
-            df.columns = df.columns.droplevel(1)
+
+        # Obter datas de earnings com proteção
+        ticker_obj, earnings_df = obter_earnings_dates_safe(ticker)
+
+        # CORREÇÃO 3: Fallback automático de setor via yfinance
+        if setor in ["Desconhecido", "N/A", "", "NONE"] and ticker_obj is not None:
+            try:
+                setor_yf = ticker_obj.info.get('sector')
+                if setor_yf:
+                    setor = setor_yf
+            except Exception:
+                pass
 
         df.ta.atr(length=14, append=True)
         df.ta.sma(length=20, append=True)
@@ -170,23 +197,19 @@ def analisar_earnings_drift(ativo_info, vol_alvo_diaria_usd):
         earnings_recente = False
         data_earnings_str = "N/A"
         
-        try:
-            earnings_df = ticker_obj.earnings_dates
-            if earnings_df is not None and not earnings_df.empty:
-                hoje = datetime.now(ZoneInfo("Europe/Lisbon")).date()
-                for idx, row in earnings_df.head(3).iterrows():
-                    if hasattr(idx, 'date'):
-                        d_earn = idx.date()
-                    else:
-                        d_earn = pd.to_datetime(idx).date()
-                    
-                    dias_passados = (hoje - d_earn).days
-                    if 0 <= dias_passados <= 5:
-                        earnings_recente = True
-                        data_earnings_str = d_earn.strftime('%d/%m/%Y')
-                        break
-        except Exception:
-            pass
+        if earnings_df is not None and not earnings_df.empty:
+            hoje = datetime.now(ZoneInfo("Europe/Lisbon")).date()
+            for idx, row in earnings_df.head(3).iterrows():
+                if hasattr(idx, 'date'):
+                    d_earn = idx.date()
+                else:
+                    d_earn = pd.to_datetime(idx).date()
+                
+                dias_passados = (hoje - d_earn).days
+                if 0 <= dias_passados <= 5:
+                    earnings_recente = True
+                    data_earnings_str = d_earn.strftime('%d/%m/%Y')
+                    break
 
         if not earnings_recente:
             return None
