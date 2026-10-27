@@ -36,52 +36,59 @@ def get_yf_history_safe(ticker, period="3mo"):
     return pd.DataFrame()
 
 # ===================================================================
-# 2. CARREGAMENTO DE POSIÇÕES ATIVAS (SHEETS) (MODO DEBUG)
+# 2. CARREGAMENTO DE POSIÇÕES ATIVAS (SHEETS) - DIÁRIO DE BORDO
 # ===================================================================
 print("A iniciar Motor de Exaustão Climática nas posições ativas...")
-
-# 1. VERIFICAR SE O WEBHOOK ESTÁ CONFIGURADO
-print(f"[DEBUG] A variável WEBHOOK_URL está configurada no Actions? {bool(WEBHOOK_URL)}")
 
 ativos_ativos = []
 if WEBHOOK_URL:
     try:
-        resp = requests.get(WEBHOOK_URL, timeout=15)
-        print(f"[DEBUG] Status Code da resposta do Google: {resp.status_code}")
+        # Força explicitamente a aba correta do Diário de Bordo
+        separador = "&" if "?" in WEBHOOK_URL else "?"
+        url_alvo = f"{WEBHOOK_URL}{separador}aba=Diário de Bordo"
+        
+        resp = requests.get(url_alvo, timeout=15)
         
         if resp.status_code == 200:
-            try:
-                json_data = resp.json()
-                dados = json_data.get("ativos", []) if isinstance(json_data, dict) else (json_data if isinstance(json_data, list) else [])
-                print(f"[DEBUG] Total de linhas extraídas do JSON: {len(dados)}")
+            json_data = resp.json()
+            if isinstance(json_data, dict):
+                # O Webhook costuma exportar as linhas numa chave (ex: "ativos" ou "diario", ou diretamente como lista)
+                # Vamos abranger tanto se vier num dicionário como numa lista direta
+                dados = json_data.get("ativos", json_data.get("diario", json_data.get("linhas", [])))
+                if not dados and isinstance(json_data, dict):
+                    # Se vier em formato de dicionário por chaves (como o posicoesAtivas)
+                    dados = list(json_data.values())
                 
-                # Vamos espreitar a primeira linha para ver a estrutura exata das colunas
-                if len(dados) > 0 and isinstance(dados[0], dict):
-                    chaves_limpas = {str(k).lower().strip(): str(v).strip().upper() for k, v in dados[0].items()}
-                    print(f"[DEBUG] Chaves detetadas na Linha 1: {list(chaves_limpas.keys())}")
-                    print(f"[DEBUG] Valores detetados na Linha 1: {list(chaves_limpas.values())}")
-                
+                if isinstance(json_data, list):
+                    dados = json_data
+
                 for a in dados:
                     if isinstance(a, dict):
-                        # Limpeza absoluta: tira espaços das chaves e converte valores a maiúsculas
                         a_lower = {str(k).lower().strip(): str(v).strip().upper() for k, v in a.items()}
                         
-                        estado = a_lower.get("status", a_lower.get("estado", a_lower.get("posicao_ativa", "")))
+                        # Procura o estado na coluna STATUS ou ESTADO
+                        estado = str(a_lower.get("status", a_lower.get("estado", a_lower.get("posicao_ativa", "")))).strip().upper()
+                        
                         if estado in ["ATIVA", "ATIVA_FAST", "SIM"]:
-                            ativos_ativos.append(a)
+                            # Garante que vai buscar o ticker e a quantidade corretamente
+                            ticker = a_lower.get("ticker", a_lower.get("ativo", ""))
+                            qtd = a_lower.get("quantidade", a_lower.get("qtd", "N/A"))
                             
-            except Exception as parse_err:
-                print(f"[ERRO DEBUG] O Google não devolveu JSON válido. Resposta: {resp.text[:200]}")
+                            if ticker and ticker != "N/A":
+                                ativos_ativos.append({
+                                    "ticker": ticker,
+                                    "qtd": qtd,
+                                    "estado": estado
+                                })
+                                
     except Exception as e:
-        print(f"[ERRO] Falha na ligação ao Webhook: {e}")
-else:
-    print("[ERRO FATAL] O script não recebeu o WEBHOOK_URL do GitHub Actions. Vai abortar.")
+        print(f"[ERRO] Falha ao ler posições ativas do Diário de Bordo: {e}")
 
 if not ativos_ativos:
-    print("Nenhuma posição ativa para monitorizar.")
+    print("Nenhuma posição ativa para monitorizar no Diário de Bordo.")
     exit(0)
 
-print(f"[{len(ativos_ativos)}] Posições em carteira enviadas para auditoria parabólica.")
+print(f"[{len(ativos_ativos)}] Posições ativas encontradas no Diário de Bordo para auditoria parabólica.")
 
 # ===================================================================
 # 3. ANÁLISE MATEMÁTICA DE CLÍMAX (NATIVA PANDAS)
