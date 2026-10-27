@@ -36,59 +36,39 @@ def get_yf_history_safe(ticker, period="3mo"):
     return pd.DataFrame()
 
 # ===================================================================
-# 2. CARREGAMENTO DE POSIÇÕES ATIVAS (SHEETS) - DIÁRIO DE BORDO
+# 2. CARREGAMENTO DE POSIÇÕES ATIVAS (SHEETS VIA WEBHOOK)
 # ===================================================================
 print("A iniciar Motor de Exaustão Climática nas posições ativas...")
 
 ativos_ativos = []
 if WEBHOOK_URL:
     try:
-        # Força explicitamente a aba correta do Diário de Bordo
-        separador = "&" if "?" in WEBHOOK_URL else "?"
-        url_alvo = f"{WEBHOOK_URL}{separador}aba=Diário de Bordo"
-        
-        resp = requests.get(url_alvo, timeout=15)
-        
+        resp = requests.get(WEBHOOK_URL, timeout=15)
         if resp.status_code == 200:
             json_data = resp.json()
             if isinstance(json_data, dict):
-                # O Webhook costuma exportar as linhas numa chave (ex: "ativos" ou "diario", ou diretamente como lista)
-                # Vamos abranger tanto se vier num dicionário como numa lista direta
-                dados = json_data.get("ativos", json_data.get("diario", json_data.get("linhas", [])))
-                if not dados and isinstance(json_data, dict):
-                    # Se vier em formato de dicionário por chaves (como o posicoesAtivas)
-                    dados = list(json_data.values())
+                # O Webhook fornece as posições ativas na chave exata "posicoesAtivas"
+                posicoes_dict = json_data.get("posicoesAtivas", {})
+                print(f"[DEBUG] Chaves em posicoesAtivas: {list(posicoes_dict.keys())}")
                 
-                if isinstance(json_data, list):
-                    dados = json_data
-
-                for a in dados:
-                    if isinstance(a, dict):
-                        a_lower = {str(k).lower().strip(): str(v).strip().upper() for k, v in a.items()}
-                        
-                        # Procura o estado na coluna STATUS ou ESTADO
-                        estado = str(a_lower.get("status", a_lower.get("estado", a_lower.get("posicao_ativa", "")))).strip().upper()
+                for ticker, dados_pos in posicoes_dict.items():
+                    if isinstance(dados_pos, dict):
+                        a_lower = {str(k).lower().strip(): str(v).strip().upper() for k, v in dados_pos.items()}
+                        estado = str(a_lower.get("status", a_lower.get("estado", ""))).strip().upper()
                         
                         if estado in ["ATIVA", "ATIVA_FAST", "SIM"]:
-                            # Garante que vai buscar o ticker e a quantidade corretamente
-                            ticker = a_lower.get("ticker", a_lower.get("ativo", ""))
-                            qtd = a_lower.get("quantidade", a_lower.get("qtd", "N/A"))
+                            dados_pos['ticker'] = ticker
+                            dados_pos['qtd'] = a_lower.get("quantidade", a_lower.get("qtd", "N/A"))
+                            ativos_ativos.append(dados_pos)
                             
-                            if ticker and ticker != "N/A":
-                                ativos_ativos.append({
-                                    "ticker": ticker,
-                                    "qtd": qtd,
-                                    "estado": estado
-                                })
-                                
     except Exception as e:
-        print(f"[ERRO] Falha ao ler posições ativas do Diário de Bordo: {e}")
+        print(f"[ERRO] Falha ao ler posições ativas do Sheets: {e}")
 
 if not ativos_ativos:
-    print("Nenhuma posição ativa para monitorizar no Diário de Bordo.")
+    print("Nenhuma posição ativa para monitorizar.")
     exit(0)
 
-print(f"[{len(ativos_ativos)}] Posições ativas encontradas no Diário de Bordo para auditoria parabólica.")
+print(f"[{len(ativos_ativos)}] Posições em carteira enviadas para auditoria parabólica.")
 
 # ===================================================================
 # 3. ANÁLISE MATEMÁTICA DE CLÍMAX (NATIVA PANDAS)
