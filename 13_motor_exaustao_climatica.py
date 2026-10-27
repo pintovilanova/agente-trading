@@ -43,9 +43,19 @@ if WEBHOOK_URL:
     try:
         resp = requests.get(WEBHOOK_URL, timeout=15)
         if resp.status_code == 200:
-            dados = resp.json().get("ativos", []) if isinstance(resp.json(), dict) else resp.json()
-            # Filtrar estritamente ativos que já estão na carteira
-            ativos_ativos = [a for a in dados if str(a.get("estado", "")).upper() == "ATIVA_FAST" or str(a.get("posicao_ativa", "")).upper() == "SIM"]
+            dados = resp.json().get("ativos", []) if isinstance(resp.json(), dict) else (resp.json() if isinstance(resp.json(), list) else [])
+            
+            for a in dados:
+                # Converter chaves para minúsculas para evitar erros de Case Sensitivity
+                if isinstance(a, dict):
+                    a_lower = {str(k).lower(): v for k, v in a.items()}
+                    # Lê o estado a partir da coluna STATUS, ESTADO ou POSICAO_ATIVA
+                    estado = str(a_lower.get("status", a_lower.get("estado", a_lower.get("posicao_ativa", "")))).strip().upper()
+                    
+                    if estado in ["ATIVA", "ATIVA_FAST", "SIM", "LOSS", "WIN"]:
+                        # Ignoramos as fechadas (LOSS/WIN) mais à frente se quisermos, mas para já garantimos que lê as ativas
+                        if estado in ["ATIVA", "ATIVA_FAST", "SIM"]:
+                            ativos_ativos.append(a)
     except Exception as e:
         print(f"[ERRO] Falha ao ler posições ativas do Sheets: {e}")
 
