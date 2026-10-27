@@ -1,0 +1,29 @@
+name: 14 - 📅 Sazonalidade Institucional
+
+on:
+  schedule:
+    # Executa de segunda a sexta às 13:30 UTC (antes da abertura dos EUA)
+    - cron: '30 13 * * 1-5'
+  workflow_dispatch:
+
+jobs:
+  run-seasonality:
+    runs-on: ubuntu-latest
+    steps:
+      - name: 📥 Clonar Repositório
+        uses: actions/checkout@v4
+        
+      - name: 🐍 Configurar Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          
+      - name: 📦 Instalar Dependências
+        run: |
+          python -m pip install --upgrade pip
+          pip install pandas yfinance requests
+          
+      - name: 🚀 Executar Motor 14 - Sazonalidade
+        env:
+          WEBHOOK_URL: ${{ secrets.WEBHOOK_URL }}
+        run: python 14_motor_sazonalidade.py
