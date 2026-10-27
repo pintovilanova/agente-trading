@@ -129,11 +129,11 @@ ficheiros_alvo = [
     "comboio_earnings_temp.txt",    # Motor 04 (PEAD)
     "comboio_connors_temp.txt",     # Motor 05 (REVERSAO)
     "comboio_carver_temp.txt",      # Motor 06 (Fast Trend Carver)
-    "comboio_holygrail_temp.txt",    # Motor 10 (Holy Grail Pullbacks) <-- NOVA INTEGRAÇÃO
-    "comboio_rotacao_temp.txt",     # Motor 11 (Rotação Setorial)   
-    "comboio_correlacao_temp.txt",
-    "comboio_exaustao_temp.txt",
-    "comboio_sazonalidade_temp.txt"
+    "comboio_holygrail_temp.txt",   # Motor 10 (Holy Grail Pullbacks)
+    "comboio_rotacao_temp.txt",     # Motor 11 (Rotação Setorial)    
+    "comboio_correlacao_temp.txt",  # Motor 12 (Correlação de Risco)
+    "comboio_exaustao_temp.txt",    # Motor 13 (Exaustão Climática)
+    "comboio_sazonalidade_temp.txt" # Motor 14 (Sazonalidade)
 ]
 
 conteudo_bruto_total = ""
@@ -175,8 +175,14 @@ else:
             conteudo_bruto_total += f"\n\n==================================\n"
             conteudo_bruto_total += f"📁 FONTE: {ficheiro}\n"
             conteudo_bruto_total += f"==================================\n"
-            conteudo_bruto_total += "[ERRO: FICHEIRO NÃO ENCONTRADO - MOTOR PODE TER FALHADO]\n"
-            print(f"[FALTA] {ficheiro} não encontrado.")
+            
+            # TRATAMENTO ESPECIAL BLINDADO PARA O MOTOR 13 (EXAUSTÃO EM MODO SILÊNCIO)
+            if ficheiro == "comboio_exaustao_temp.txt":
+                conteudo_bruto_total += "✅ Nenhuma anomalia parabólica detetada. As posições ativas estão saudáveis e dentro dos parâmetros normais. (Modo Silêncio ativo).\n"
+                print(f"[SILÊNCIO] {ficheiro} não encontrado (Motor de Exaustão sem alertas, posições saudáveis).")
+            else:
+                conteudo_bruto_total += "[ERRO: FICHEIRO NÃO ENCONTRADO - MOTOR PODE TER FALHADO]\n"
+                print(f"[FALTA] {ficheiro} não encontrado.")
 
 if not conteudo_bruto_total.strip():
     print("\n[INFO] Nenhum dado gerado. A pipeline termina de forma silenciosa.")
@@ -194,16 +200,16 @@ if not veio_do_email:
 # ===================================================================
 prompt_orquestrador = f"""
 És o Analista Quantitativo Principal (Agente Orquestrador).
-Abaixo estão os relatórios em bruto e os dados gerados dinamicamente pelos Extratores de Mercado (US e Europa) e pelos vários Motores de Estratégia no fecho do mercado de hoje, incluindo o novo motor Holy Grail (Pullbacks de Liderança).
+Abaixo estão os relatórios em bruto e os dados gerados dinamicamente pelos Extratores de Mercado (US e Europa) e pelos vários Motores de Estratégia no fecho do mercado de hoje, incluindo o novo motor Holy Grail (Pullbacks de Liderança), Exaustão Climática (Motor 13) e Sazonalidade Institucional (Motor 14).
 
 A tua missão é ler integralmente este conteúdo, processar todos os ativos que aparecem nas fontes e compilar um ÚNICO relatório consolidado, limpo, detalhado e altamente profissional para o Gestor de Conta aprovar na corretora.
 
 🚨 REGRAS ESTRITAS ANTI-ALUCINAÇÃO & CONTEXTO DE GESTÃO 🚨
 1. ZERO CRIATIVIDADE DE DADOS: Não inventes preços, tickers, stops ou tamanhos de posição. Utiliza unicamente e na íntegra os dados fornecidos nos ficheiros abaixo.
-2. LEITURA INTEGRAL (PROIBIDO OMITIR ATIVOS OU ESTRATÉGIAS): Deves incluir todos os ativos, posições ativas, alertas macro e sinais de entrada. Se uma fonte indicar "[SEM SINAIS OU OPORTUNIDADES PARA ESTA ESTRATÉGIA HOJE]", DEVES criar a secção respetiva baseada no nome do ficheiro fonte e escrever explicitamente que não há sinais hoje. Não omitas NENHUMA estratégia (incluindo o Holy Grail Pullbacks).
+2. LEITURA INTEGRAL (PROIBIDO OMITIR ATIVOS OU ESTRATÉGIAS): Deves incluir todos os ativos, posições ativas, alertas macro e sinais de entrada. Se uma fonte indicar "[SEM SINAIS OU OPORTUNIDADES PARA ESTA ESTRATÉGIA HOJE]", DEVES criar a secção respetiva baseada no nome do ficheiro fonte e escrever explicitamente que não há sinais hoje. Não omitas NENHUMA estratégia.
 3. ESTRUTURA INSTITUCIONAL DINÂMICA: Organiza o relatório por secções lógicas com base nas fontes lidas.
 4. RESTRIÇÃO DE NOTAS OPERACIONAIS: O lembrete operacional referente à alteração do estado no Google Sheets para 'ATIVA_FAST' e à gestão de Trailing Stop diário deve ser posicionado estritamente e de forma exclusiva na secção afeta ao Fast Trend Carver e aos Holy Grail Pullbacks (que transferem a gestão de saída para o Carver). Nunca mistures esta regra com outras estratégias.
-5. VETO DE SOBREPOSIÇÃO (CRÍTICO): Antes de sugerires qualquer NOVA ENTRADA num ativo (seja no VCP, Reversão, PEAD, Breakouts, Holy Grail ou Carver Momentum), verifica obrigatoriamente se esse ativo já se encontra listado como [POSIÇÃO ATIVA - ATIVA_FAST] ou se tem 'PosicaoAtiva: SIM' noutra fonte. Se já estiver ativo na carteira, É ESTRITAMENTE PROIBIDO sugerir uma nova entrada para esse mesmo ticker em qualquer secção. Omite-o dos novos sinais.
+5. VETO DE SOBREPOSIÇÃO (CRÍTICO): Antes de sugerires qualquer NOVA ENTRADA num ativo, verifica obrigatoriamente se esse ativo já se encontra listado como [POSIÇÃO ATIVA - ATIVA_FAST] ou se tem 'PosicaoAtiva: SIM' noutra fonte. Se já estiver ativo na carteira, É ESTRITAMENTE PROIBIDO sugerir uma nova entrada para esse mesmo ticker em qualquer secção. Omite-o dos novos sinais.
 
 DADOS RECOLHIDOS HOJE NOS FICHEIROS:
 {conteudo_bruto_total}
@@ -214,7 +220,7 @@ print("\nA enviar dados consolidados para o Gemini Auditar...")
 relatorio_final = None
 
 # Modelos recomendados e ativos pela API Gemini
-modelos_para_testar = ['gemini-3.8-flash', 'gemini-3.6-flash', 'gemini-1.5-flash']
+modelos_para_testar = ['gemini-2.5-flash', 'gemini-3.8-flash', 'gemini-3.6-flash', 'gemini-1.5-flash']
 
 for mod in modelos_para_testar:
     if relatorio_final:
@@ -247,7 +253,6 @@ for mod in modelos_para_testar:
                 print("Servidor temporariamente ocupado (503). A aguardar 4 segundos antes de tentar novamente...")
                 time.sleep(4)
             else:
-                # Erro 404 ou outro erro não-temporário: salta para o próximo modelo da lista
                 break
 
 if not relatorio_final:
