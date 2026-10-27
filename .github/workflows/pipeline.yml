@@ -122,7 +122,7 @@ jobs:
         env:
           WEBHOOK_URL: ${{ secrets.WEBHOOK_URL }}
         run: python 13_motor_exaustao_climatica.py
-      - name: 🚀 Executar Motor 14 - Sazonalidade
+      - name: 🚀 14 - Executar Motor Sazonalidade
         continue-on-error: true
         env:
           WEBHOOK_URL: ${{ secrets.WEBHOOK_URL }}
