@@ -36,26 +36,46 @@ def get_yf_history_safe(ticker, period="3mo"):
     return pd.DataFrame()
 
 # ===================================================================
-# 2. CARREGAMENTO DE POSIÇÕES ATIVAS (SHEETS)
+# 2. CARREGAMENTO DE POSIÇÕES ATIVAS (SHEETS) (MODO DEBUG)
 # ===================================================================
 print("A iniciar Motor de Exaustão Climática nas posições ativas...")
+
+# 1. VERIFICAR SE O WEBHOOK ESTÁ CONFIGURADO
+print(f"[DEBUG] A variável WEBHOOK_URL está configurada no Actions? {bool(WEBHOOK_URL)}")
 
 ativos_ativos = []
 if WEBHOOK_URL:
     try:
         resp = requests.get(WEBHOOK_URL, timeout=15)
+        print(f"[DEBUG] Status Code da resposta do Google: {resp.status_code}")
+        
         if resp.status_code == 200:
-            dados = resp.json().get("ativos", []) if isinstance(resp.json(), dict) else (resp.json() if isinstance(resp.json(), list) else [])
-            
-            for a in dados:
-                if isinstance(a, dict):
-                    a_lower = {str(k).lower(): v for k, v in a.items()}
-                    estado = str(a_lower.get("status", a_lower.get("estado", a_lower.get("posicao_ativa", "")))).strip().upper()
-                    
-                    if estado in ["ATIVA", "ATIVA_FAST", "SIM"]:
-                        ativos_ativos.append(a)
+            try:
+                json_data = resp.json()
+                dados = json_data.get("ativos", []) if isinstance(json_data, dict) else (json_data if isinstance(json_data, list) else [])
+                print(f"[DEBUG] Total de linhas extraídas do JSON: {len(dados)}")
+                
+                # Vamos espreitar a primeira linha para ver a estrutura exata das colunas
+                if len(dados) > 0 and isinstance(dados[0], dict):
+                    chaves_limpas = {str(k).lower().strip(): str(v).strip().upper() for k, v in dados[0].items()}
+                    print(f"[DEBUG] Chaves detetadas na Linha 1: {list(chaves_limpas.keys())}")
+                    print(f"[DEBUG] Valores detetados na Linha 1: {list(chaves_limpas.values())}")
+                
+                for a in dados:
+                    if isinstance(a, dict):
+                        # Limpeza absoluta: tira espaços das chaves e converte valores a maiúsculas
+                        a_lower = {str(k).lower().strip(): str(v).strip().upper() for k, v in a.items()}
+                        
+                        estado = a_lower.get("status", a_lower.get("estado", a_lower.get("posicao_ativa", "")))
+                        if estado in ["ATIVA", "ATIVA_FAST", "SIM"]:
+                            ativos_ativos.append(a)
+                            
+            except Exception as parse_err:
+                print(f"[ERRO DEBUG] O Google não devolveu JSON válido. Resposta: {resp.text[:200]}")
     except Exception as e:
-        print(f"[ERRO] Falha ao ler posições ativas do Sheets: {e}")
+        print(f"[ERRO] Falha na ligação ao Webhook: {e}")
+else:
+    print("[ERRO FATAL] O script não recebeu o WEBHOOK_URL do GitHub Actions. Vai abortar.")
 
 if not ativos_ativos:
     print("Nenhuma posição ativa para monitorizar.")
