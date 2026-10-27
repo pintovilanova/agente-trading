@@ -110,6 +110,13 @@ jobs:
           EMAIL_USER: ${{ secrets.EMAIL_USER }}
           EMAIL_PASS: ${{ secrets.EMAIL_PASS }}
         run: python 11_motor_rotacao_setorial.py
+      - name: 🛡️ 12 - Executar Escudo de Correlação de Risco
+        continue-on-error: true
+        env:
+          WEBHOOK_URL: ${{ secrets.WEBHOOK_URL }}
+          EMAIL_USER: ${{ secrets.EMAIL_USER }}
+          EMAIL_PASS: ${{ secrets.EMAIL_PASS }}
+        run: python 12_motor_correlacao_risco.py
 
       # ==========================================================
       # 4. AUDITORIA FINAL IA (Corre e envia o que foi recolhido)
