@@ -131,7 +131,8 @@ ficheiros_alvo = [
     "comboio_carver_temp.txt",      # Motor 06 (Fast Trend Carver)
     "comboio_holygrail_temp.txt",    # Motor 10 (Holy Grail Pullbacks) <-- NOVA INTEGRAÇÃO
     "comboio_rotacao_temp.txt",     # Motor 11 (Rotação Setorial)   
-    "comboio_correlacao_temp.txt"
+    "comboio_correlacao_temp.txt",
+    "comboio_exaustao_temp.txt"
 ]
 
 conteudo_bruto_total = ""
