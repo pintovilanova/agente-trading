@@ -47,7 +47,7 @@ if not posicoes_ativas:
     sys.exit(0)
 
 # ===================================================================
-# 2. AUDITORIA DE GAIN & CÁLCULO DE $2R$
+# 2. AUDITORIA DE GAIN & CÁLCULO DE $2R$ COM DADOS EXATOS DE ORDEM
 # ===================================================================
 relatorio_harvest = []
 alertas_colheita = []
@@ -79,7 +79,6 @@ for ticker, pos in posicoes_ativas.items():
         # Matemática de Risco (1R e R-Multiple Atual)
         risco_1r = preco_entrada - stop_inicial
         if risco_1r <= 0:
-            # Posição curta ou stop desalinhado
             risco_1r = preco_entrada * 0.03 # Fallback 3%
             
         r_multiple = (preco_atual - preco_entrada) / risco_1r
@@ -98,7 +97,7 @@ for ticker, pos in posicoes_ativas.items():
             novo_stop_be = max(break_even_calculado, stop_atual)
             
             if stop_atual > break_even_calculado:
-                nota_stop = f"Manter Stop Atual Protegido em ${novo_stop_be}"
+                nota_stop = f"Manter Stop Loss Protegido em ${novo_stop_be}"
             else:
                 nota_stop = f"Subir Stop Loss para Break-Even em ${novo_stop_be}"
             
@@ -108,10 +107,12 @@ for ticker, pos in posicoes_ativas.items():
                 "ticker": ticker,
                 "r_multiple": round(r_multiple, 2),
                 "ganho_pct": round(ganho_pct, 2),
-                "preco_atual": round(preco_atual, 2),
+                "preco_ref_venda": round(preco_atual, 2), # Preço de referência para a venda
                 "preco_entrada": round(preco_entrada, 2),
+                "tipo_ordem_venda": "SELL MARKET (ou SELL LIMIT ao Preço Atual)",
                 "qtd_atual": qtd_atual,
                 "qtd_venda": qtd_venda_parcial,
+                "qtd_restante": round(qtd_atual - qtd_venda_parcial, 2),
                 "novo_stop_be": novo_stop_be,
                 "nota_stop": nota_stop,
                 "lucro_usd": lucro_estimado_usd,
@@ -133,10 +134,11 @@ if alertas_colheita:
     for item in alertas_colheita:
         bloco_texto += (
             f"🎯 TICKER: {item['ticker']} | Retorno: +{item['ganho_pct']}% ({item['r_multiple']}R)\n"
-            f"   - Preço Atual: ${item['preco_atual']} (Entrada: ${item['preco_entrada']})\n"
-            f"   - AÇÃO RECOMENDADA: Fecho Parcial de 50% ({item['qtd_venda']} ações de {item['qtd_atual']})\n"
-            f"   - AÇÃO NO STOP: {item['nota_stop']}\n"
-            f"   - Capital a Colher: ~${item['lucro_usd']} USD | Peso Atual na Carteira: {item['peso_carteira']}%\n"
+            f"   - ORDEM DE VENDA PARCIAL (50%): {item['tipo_ordem_venda']}\n"
+            f"   - Preço de Referência Venda: ${item['preco_ref_venda']} (Entrada original: ${item['preco_entrada']})\n"
+            f"   - Quantidade a Vender: {item['qtd_venda']} ações (de {item['qtd_atual']} totais | Sobram: {item['qtd_restante']})\n"
+            f"   - Capital Realizado a Colher: ~${item['lucro_usd']} USD | Peso Atual na Carteira: {item['peso_carteira']}%\n"
+            f"   - ORDEM DE STOP LOSS (Restantes {item['qtd_restante']} ações): {item['nota_stop']}\n"
             f"--------------------------------------------------\n"
         )
 else:
