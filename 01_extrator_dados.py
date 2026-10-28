@@ -348,12 +348,12 @@ for ativo_info in ativos_data:
 
         data_atual = datetime.now(ZoneInfo("Europe/Lisbon")).strftime('%d/%m/%Y %H:%M:%S')
 
-        # GESTÃO DE POSIÇÃO ATIVA COM FILTRAGEM DE ATIVA_FAST
+        # GESTÃO DE POSIÇÃO ATIVA COM FILTRAGEM DE ATIVA_FAST E ATIVA_SWING
         if ticker in posicoes_ativas:
             pos_info = posicoes_ativas[ticker]
-            status_pos = pos_info.get('status', 'ATIVA')
-            if status_pos == 'ATIVA_FAST':
-                info_carteira = f"NÃO (Gerido pelo modelo FAST - ATIVA_FAST)"
+            status_pos = str(pos_info.get('status', 'ATIVA')).strip().upper()
+            if status_pos in ['ATIVA_FAST', 'ATIVA_SWING']:
+                info_carteira = f"NÃO (Gerido pelo modelo {status_pos.replace('ATIVA_', '')} - {status_pos})"
             else:
                 info_carteira = f"SIM (Entrada: {pos_info.get('precoEntrada', 'N/A')}, StopAtual: {pos_info.get('stopAtual', 'N/A')}, Qtd: {pos_info.get('quantidade', 'N/A')})"
         else:
@@ -539,7 +539,7 @@ Regras Operacionais Estritas de Triagem, Carteira e Ataque:
 
 6. GESTÃO DE POSIÇÕES ATIVAS E ESTRUTURA VISUAL OBRIGATÓRIA (CRÍTICO):
    - Verifica o campo 'PosicaoAtiva' em cada linha do comboio.
-   - **REGRA DE OURO:** Se a PosicaoAtiva indicar **SIM**, é **estritamente proibido** sugerir nova entrada ou alocação de capital. O foco é 100% a gestão da posição existente. (Nota: Se indicar 'Gerido pelo modelo FAST', desconsidera para efeitos de gestão de Breakouts e mantém apenas a nota informativa).
+   - **REGRA DE OURO:** Se a PosicaoAtiva indicar **SIM**, é **estritamente proibido** sugerir nova entrada ou alocação de capital. O foco é 100% a gestão da posição existente. (Nota: Se indicar 'Gerido pelo modelo FAST' ou 'Gerido pelo modelo SWING', desconsidera para efeitos de gestão de Breakouts e mantém apenas a nota informativa).
    - **GESTÃO DO STOP LOSS:** Compara o 'StopAtual' com o 'Trailing'. Se o 'Trailing' for superior, recomenda subir o Stop. Se for igual ou inferior, indica manutenção.
    - **ATENÇÃO AOS EARNINGS:** Se uma posição ativa apresentar 'EARNINGS = PERIGO', emite um alerta prioritário de liquidação preventiva antes da apresentação dos resultados.
    - Usa obrigatoriamente este template exato:
