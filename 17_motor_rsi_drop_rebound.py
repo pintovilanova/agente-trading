@@ -83,35 +83,12 @@ for ticker in TICKERS_ALVO:
                 "take_profit_ema5": preco_tp,
                 "ordem_tipo": "BUY MARKET (no fecho) / BUY LIMIT",
                 "qtd_acoes": qtd_acoes,
-                "valor_investir": valor_a_investir
+                "valor_investir": valor_a_investir,
+                "status_sheets": "ATIVA_SWING"
             })
             
     except Exception as e:
         print(f"[ERRO] Falha ao analisar {ticker} no Motor 17: {e}")
 
 # ===================================================================
-# GERAR FICHEIRO TEMPORÁRIO PARA O ORQUESTRADOR
-# ===================================================================
-data_hoje = datetime.now(ZoneInfo("Europe/Lisbon")).strftime("%d/%m/%Y %H:%M")
-
-if alertas_rebound:
-    bloco_texto = f"⚡ MOTOR 17: 2-DAY RSI DROP & REBOUND ({data_hoje})\n\n"
-    for a in alertas_rebound:
-        bloco_texto += (
-            f"🎯 TICKER: {a['ticker']} | RSI(2): {a['rsi2']} (Extremo Oversold em Tendência de Alta)\n"
-            f"   - Ordem Recomendada: {a['ordem_tipo']}\n"
-            f"   - Preço de Entrada: ${a['preco_atual']}\n"
-            f"   - Stop Loss (Abaixo da Mínima): ${a['stop_loss']}\n"
-            f"   - Take Profit Alvo (EMA5): ${a['take_profit_ema5']}\n"
-            f"   - Qtd. Recomendada: {a['qtd_acoes']} Ações\n"
-            f"   - Valor Estimado do Lote: ~${a['valor_investir']} USD\n"
-            f"   - Horizonte Tático: 48h a 72h\n"
-            f"--------------------------------------------------\n"
-        )
-else:
-    bloco_texto = "✅ Nenhum ativo em retração extrema de 2 dias com RSI(2) < 10 hoje. (Modo Silêncio ativo)."
-
-with open("comboio_rsi_rebound_temp.txt", "w", encoding="utf-8") as f:
-    f.write(bloco_texto)
-
-print(f"[SUCESSO] Motor 17 executado. Alertas de ricochete gerados: {len(alertas_rebound)}")
+# GERAR FICHEIRO TEMPORÁRIO PARA
