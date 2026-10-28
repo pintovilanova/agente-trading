@@ -277,4 +277,16 @@ if not relatorio_final:
     print("[INFO] A pipeline termina sem crash. O e-mail com os DADOS BRUTOS já está disponível para uso manual.")
     
     assunto_erro = f"tradingRelatorioIA - ⚠️ AVISO: FALHA NA IA ({data_hoje})"
-    corpo_erro = f"Ocorreu um erro ao comunicar com a API do Gemini (Alta procura temporária ou limite de quota).\n\nPor favor, utiliza o
+    corpo_erro = f"""Ocorreu um erro ao comunicar com a API do Gemini (Alta procura temporária ou limite de quota).
+
+Por favor, utiliza o e-mail de backup enviado anteriormente com o assunto '[DADOS BRUTOS PARA IA]' e cola o conteúdo no ChatGPT / Claude / Gemini Web para obter o relatório formatado."""
+    
+    enviar_email(assunto_erro, corpo_erro)
+    sys.exit(0)
+
+# ===================================================================
+# 6. ENVIAR EMAIL DO RELATÓRIO FINAL DA IA
+# ===================================================================
+print("\nA preparar envio do Relatório Mestre Formatado pela IA...")
+assunto_final = f"tradingRelatorioIA Global - 🤖 RELATÓRIO MESTRE ({data_hoje})"
+enviar_email(assunto_final, relatorio_final)
