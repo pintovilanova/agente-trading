@@ -119,7 +119,7 @@ def obter_conteudo_ultimo_email_backup():
     return None
 
 # ===================================================================
-# 2. DEFINIR FICHEIROS ALVO DOS MOTORES (ATUALIZADO COM MOTOR 15)
+# 2. DEFINIR FICHEIROS ALVO DOS MOTORES (ATUALIZADO COM MOTOR 15 E 16)
 # ===================================================================
 ficheiros_alvo = [
     "comboio_temp.txt",             # Extrator US
@@ -134,7 +134,8 @@ ficheiros_alvo = [
     "comboio_correlacao_temp.txt",  # Motor 12 (Correlação de Risco)
     "comboio_exaustao_temp.txt",    # Motor 13 (Exaustão Climática)
     "comboio_sazonalidade_temp.txt",# Motor 14 (Sazonalidade)
-    "comboio_harvest_temp.txt"      # Motor 15 (Profit Harvest & Rebalancing)
+    "comboio_harvest_temp.txt",     # Motor 15 (Profit Harvest & Rebalancing)
+    "comboio_vix_temp.txt"          # Motor 16 (Volatility Regime & VIX)
 ]
 
 conteudo_bruto_total = ""
@@ -184,6 +185,9 @@ else:
             elif ficheiro == "comboio_harvest_temp.txt":
                 conteudo_bruto_total += "✅ Nenhuma posição atingiu o patamar de 2R para colheita de lucro hoje. Gestão normal. (Modo Silêncio ativo).\n"
                 print(f"[SILÊNCIO] {ficheiro} não encontrado (Motor 15 sem colheitas ativas).")
+            elif ficheiro == "comboio_vix_temp.txt":
+                conteudo_bruto_total += "📊 VIX em modo padrão/não disponível. Assumir Lote de 100% para novas entradas. (Modo Silêncio ativo).\n"
+                print(f"[SILÊNCIO] {ficheiro} não encontrado (Motor 16 em fallback para 100%).")
             else:
                 conteudo_bruto_total += "[ERRO: FICHEIRO NÃO ENCONTRADO - MOTOR PODE TER FALHADO]\n"
                 print(f"[FALTA] {ficheiro} não encontrado.")
@@ -204,15 +208,16 @@ if not veio_do_email:
 # ===================================================================
 prompt_orquestrador = f"""
 És o Analista Quantitativo Principal (Agente Orquestrador).
-Abaixo estão os relatórios em bruto e os dados gerados dinamicamente pelos Extratores de Mercado (US e Europa) e pelos vários Motores de Estratégia no fecho do mercado de hoje, incluindo os motores de Exaustão, Sazonalidade e o novo Motor 15 (Profit Harvest & Rebalancing).
+Abaixo estão os relatórios em bruto e os dados gerados dinamicamente pelos Extratores de Mercado (US e Europa) e pelos vários Motores de Estratégia no fecho do mercado de hoje, incluindo o Motor 15 (Profit Harvest & Rebalancing) e o Motor 16 (Regime de Volatilidade VIX).
 
 A tua missão é ler integralmente este conteúdo, processar todos os ativos e compilar um ÚNICO relatório consolidado, limpo, detalhado e altamente profissional para o Gestor de Conta aprovar na corretora.
 
 🚨 REGRAS ESTRITAS DE ESTRUTURA E FECHO 🚨
 
-1. ZERO CRIATIVIDADE DE DADOS: Não inventes preços, tickers, stops ou tamanhos de posição. Utiliza unicamente e na íntegra os dados fornecidos.
-2. VETO DE SOBREPOSIÇÃO: Posições ativas na carteira (com 'PosicaoAtiva: SIM') NÃO PODEM ter novas ordens de compra sugeridas.
-3. TABELA FINAL OBRIGATÓRIA (SÍNTESE DE ORDENS):
+1. REGIME DE VOLATILIDADE VIX (MOTOR 16): Lê a diretriz do Motor 16 e indica explicitamente no topo do relatório o Regime do VIX. Aplica a percentagem de lote indicada pelo Motor 16 (100%, 75%, 50% ou 0%) ao calcular o tamanho e alocação de TODAS as novas sugestões de entrada.
+2. ZERO CRIATIVIDADE DE DADOS: Não inventes preços, tickers, stops ou tamanhos de posição. Utiliza unicamente e na íntegra os dados fornecidos.
+3. VETO DE SOBREPOSIÇÃO: Posições ativas na carteira (com 'PosicaoAtiva: SIM') NÃO PODEM ter novas ordens de compra sugeridas.
+4. TABELA FINAL OBRIGATÓRIA (SÍNTESE DE ORDENS):
    É ESTRITAMENTE OBRIGATÓRIO terminar o relatório com uma secção final intitulada "## 12. SÍNTESE DE ORDENS PARA APROVAÇÃO DO GESTOR DE CONTA" contendo uma tabela Markdown formatada exatamente com esta estrutura:
 
    | Ticker | Estratégia | Tipo de Ordem | Preço Entrada | Stop Loss | Take Profit | Qtd | Alocação Est. | Notas Táticas |
@@ -220,7 +225,7 @@ A tua missão é ler integralmente este conteúdo, processar todos os ativos e c
 
    - Inclui TODAS as ordens de colheita parcial de lucro a 2R (Profit Harvest) geradas pelo Motor 15 no topo da tabela.
    - Inclui TODAS as ações ativas em carteira que exijam fecho ou ajuste de stop (ex: fecho por Earnings).
-   - Inclui TODAS as novas ordens aprovadas pelos motores de Breakout (US e Europa), Carver, Reversão, Connors-Chan, PEAD e Holy Grail.
+   - Inclui TODAS as novas ordens aprovadas ajustadas pelo Lote Máximo do VIX (Motor 16).
    - Respeita rigorosamente a moeda de cada ativo (USD ou EUR).
 
 DADOS RECOLHIDOS HOJE NOS FICHEIROS:
@@ -268,17 +273,8 @@ for mod in modelos_para_testar:
                 break
 
 if not relatorio_final:
-    print("\n[ALERTA DE IA] Não foi possible obter resposta de nenhum modelo Gemini.")
+    print("\n[ALERTA DE IA] Não foi possível obter resposta de nenhum modelo Gemini.")
     print("[INFO] A pipeline termina sem crash. O e-mail com os DADOS BRUTOS já está disponível para uso manual.")
     
     assunto_erro = f"tradingRelatorioIA - ⚠️ AVISO: FALHA NA IA ({data_hoje})"
-    corpo_erro = f"Ocorreu um erro ao comunicar com a API do Gemini (Alta procura temporária ou limite de quota).\n\nPor favor, utiliza o e-mail de backup enviado anteriormente com o assunto '[DADOS BRUTOS PARA IA]' e cola o conteúdo no ChatGPT / Claude / Gemini Web para obter o relatório formatado."
-    enviar_email(assunto_erro, corpo_erro)
-    sys.exit(0)
-
-# ===================================================================
-# 6. ENVIAR EMAIL DO RELATÓRIO FINAL DA IA
-# ===================================================================
-print("\nA preparar envio do Relatório Mestre Formatado pela IA...")
-assunto_final = f"tradingRelatorioIA Global - 🤖 RELATÓRIO MESTRE ({data_hoje})"
-enviar_email(assunto_final, relatorio_final)
+    corpo_erro = f"Ocorreu um erro ao comunicar com a API do Gemini (Alta procura temporária ou limite de quota).\n\nPor favor, utiliza o
