@@ -133,6 +133,8 @@ jobs:
         run: python 15_motor_profit_harvest.py
       - name: 🛡️ 16 - Executar Motor Volatility Regime & VIX
         run: python 16_motor_vix_volatility_regime.py
+      - name: ⚡17-  Executar Motor 2-Day RSI Drop & Rebound
+        run: python 17_motor_rsi_drop_rebound.py
 
       # ==========================================================
       # 4. AUDITORIA FINAL IA (Corre e envia o que foi recolhido)
