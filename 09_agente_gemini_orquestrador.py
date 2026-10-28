@@ -119,7 +119,7 @@ def obter_conteudo_ultimo_email_backup():
     return None
 
 # ===================================================================
-# 2. DEFINIR FICHEIROS ALVO DOS MOTORES (ATUALIZADO)
+# 2. DEFINIR FICHEIROS ALVO DOS MOTORES (ATUALIZADO COM MOTOR 15)
 # ===================================================================
 ficheiros_alvo = [
     "comboio_temp.txt",             # Extrator US
@@ -133,8 +133,8 @@ ficheiros_alvo = [
     "comboio_rotacao_temp.txt",     # Motor 11 (Rotação Setorial)    
     "comboio_correlacao_temp.txt",  # Motor 12 (Correlação de Risco)
     "comboio_exaustao_temp.txt",    # Motor 13 (Exaustão Climática)
-    "comboio_sazonalidade_temp.txt", # Motor 14 (Sazonalidade)
-    "comboio_harvest_temp.txt" # <-- MOTOR 15
+    "comboio_sazonalidade_temp.txt",# Motor 14 (Sazonalidade)
+    "comboio_harvest_temp.txt"      # Motor 15 (Profit Harvest & Rebalancing)
 ]
 
 conteudo_bruto_total = ""
@@ -177,10 +177,13 @@ else:
             conteudo_bruto_total += f"📁 FONTE: {ficheiro}\n"
             conteudo_bruto_total += f"==================================\n"
             
-            # TRATAMENTO ESPECIAL BLINDADO PARA O MOTOR 13 (EXAUSTÃO EM MODO SILÊNCIO)
+            # TRATAMENTO ESPECIAL BLINDADO PARA MOTORES EM MODO SILÊNCIO
             if ficheiro == "comboio_exaustao_temp.txt":
                 conteudo_bruto_total += "✅ Nenhuma anomalia parabólica detetada. As posições ativas estão saudáveis e dentro dos parâmetros normais. (Modo Silêncio ativo).\n"
                 print(f"[SILÊNCIO] {ficheiro} não encontrado (Motor de Exaustão sem alertas, posições saudáveis).")
+            elif ficheiro == "comboio_harvest_temp.txt":
+                conteudo_bruto_total += "✅ Nenhuma posição atingiu o patamar de 2R para colheita de lucro hoje. Gestão normal. (Modo Silêncio ativo).\n"
+                print(f"[SILÊNCIO] {ficheiro} não encontrado (Motor 15 sem colheitas ativas).")
             else:
                 conteudo_bruto_total += "[ERRO: FICHEIRO NÃO ENCONTRADO - MOTOR PODE TER FALHADO]\n"
                 print(f"[FALTA] {ficheiro} não encontrado.")
@@ -201,7 +204,7 @@ if not veio_do_email:
 # ===================================================================
 prompt_orquestrador = f"""
 És o Analista Quantitativo Principal (Agente Orquestrador).
-Abaixo estão os relatórios em bruto e os dados gerados dinamicamente pelos Extratores de Mercado (US e Europa) e pelos vários Motores de Estratégia no fecho do mercado de hoje.
+Abaixo estão os relatórios em bruto e os dados gerados dinamicamente pelos Extratores de Mercado (US e Europa) e pelos vários Motores de Estratégia no fecho do mercado de hoje, incluindo os motores de Exaustão, Sazonalidade e o novo Motor 15 (Profit Harvest & Rebalancing).
 
 A tua missão é ler integralmente este conteúdo, processar todos os ativos e compilar um ÚNICO relatório consolidado, limpo, detalhado e altamente profissional para o Gestor de Conta aprovar na corretora.
 
@@ -215,6 +218,7 @@ A tua missão é ler integralmente este conteúdo, processar todos os ativos e c
    | Ticker | Estratégia | Tipo de Ordem | Preço Entrada | Stop Loss | Take Profit | Qtd | Alocação Est. | Notas Táticas |
    | :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- |
 
+   - Inclui TODAS as ordens de colheita parcial de lucro a 2R (Profit Harvest) geradas pelo Motor 15 no topo da tabela.
    - Inclui TODAS as ações ativas em carteira que exijam fecho ou ajuste de stop (ex: fecho por Earnings).
    - Inclui TODAS as novas ordens aprovadas pelos motores de Breakout (US e Europa), Carver, Reversão, Connors-Chan, PEAD e Holy Grail.
    - Respeita rigorosamente a moeda de cada ativo (USD ou EUR).
@@ -264,7 +268,7 @@ for mod in modelos_para_testar:
                 break
 
 if not relatorio_final:
-    print("\n[ALERTA DE IA] Não foi possível obter resposta de nenhum modelo Gemini.")
+    print("\n[ALERTA DE IA] Não foi possible obter resposta de nenhum modelo Gemini.")
     print("[INFO] A pipeline termina sem crash. O e-mail com os DADOS BRUTOS já está disponível para uso manual.")
     
     assunto_erro = f"tradingRelatorioIA - ⚠️ AVISO: FALHA NA IA ({data_hoje})"
