@@ -131,6 +131,8 @@ jobs:
         env:
           WEBHOOK_URL: ${{ secrets.WEBHOOK_URL }}
         run: python 15_motor_profit_harvest.py
+      - name: 🛡️ 16 - Executar Motor Volatility Regime & VIX
+        run: python 16_motor_vix_volatility_regime.py
 
       # ==========================================================
       # 4. AUDITORIA FINAL IA (Corre e envia o que foi recolhido)
