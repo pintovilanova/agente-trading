@@ -127,6 +127,10 @@ jobs:
         env:
           WEBHOOK_URL: ${{ secrets.WEBHOOK_URL }}
         run: python 14_motor_sazonalidade.py
+      - name: ✂️ Executar Motor 15 - Profit Harvest & Rebalancing
+        env:
+          WEBHOOK_URL: ${{ secrets.WEBHOOK_URL }}
+        run: python 15_motor_profit_harvest.py
 
       # ==========================================================
       # 4. AUDITORIA FINAL IA (Corre e envia o que foi recolhido)
