@@ -135,7 +135,8 @@ ficheiros_alvo = [
     "comboio_exaustao_temp.txt",    # Motor 13 (Exaustão Climática)
     "comboio_sazonalidade_temp.txt",# Motor 14 (Sazonalidade)
     "comboio_harvest_temp.txt",     # Motor 15 (Profit Harvest & Rebalancing)
-    "comboio_vix_temp.txt"          # Motor 16 (Volatility Regime & VIX)
+    "comboio_vix_temp.txt",          # Motor 16 (Volatility Regime & VIX)
+    "comboio_rsi_rebound_temp.txt"
 ]
 
 conteudo_bruto_total = ""
@@ -188,9 +189,13 @@ else:
             elif ficheiro == "comboio_vix_temp.txt":
                 conteudo_bruto_total += "📊 VIX em modo padrão/não disponível. Assumir Lote de 100% para novas entradas. (Modo Silêncio ativo).\n"
                 print(f"[SILÊNCIO] {ficheiro} não encontrado (Motor 16 em fallback para 100%).")
+            elif ficheiro == "comboio_rsi_rebound_temp.txt":
+                conteudo_bruto_total += "✅ Nenhum ativo em retração extrema de 2 dias com RSI(2) < 10 hoje. (Modo Silêncio ativo).\n"
+                print(f"[SILÊNCIO] {ficheiro} não encontrado (Motor 17 sem sinais ativos hoje).")
             else:
                 conteudo_bruto_total += "[ERRO: FICHEIRO NÃO ENCONTRADO - MOTOR PODE TER FALHADO]\n"
                 print(f"[FALTA] {ficheiro} não encontrado.")
+                
 
 if not conteudo_bruto_total.strip():
     print("\n[INFO] Nenhum dado gerado. A pipeline termina de forma silenciosa.")
