@@ -90,7 +90,18 @@ for ticker, pos in posicoes_ativas.items():
         # CONDICIONAL: GATILHO DE COLHEITA A 2R OU SUPERIOR
         if r_multiple >= 2.0:
             qtd_venda_parcial = round(qtd_atual / 2.0, 2)
-            novo_stop_be = round(preco_entrada * 1.001, 2) # Break-Even + 0.1% para taxas
+            
+            # ===================================================================
+            # REGRA DE INÉRCIA DE STOP LOSS (NUNCA RECUAR UM STOP JÁ SUBIDO)
+            # ===================================================================
+            break_even_calculado = round(preco_entrada * 1.001, 2) # Entrada + 0.1% para taxas
+            novo_stop_be = max(break_even_calculado, stop_atual)
+            
+            if stop_atual > break_even_calculado:
+                nota_stop = f"Manter Stop Atual Protegido em ${novo_stop_be}"
+            else:
+                nota_stop = f"Subir Stop Loss para Break-Even em ${novo_stop_be}"
+            
             lucro_estimado_usd = round((preco_atual - preco_entrada) * qtd_venda_parcial, 2)
             
             alertas_colheita.append({
@@ -102,6 +113,7 @@ for ticker, pos in posicoes_ativas.items():
                 "qtd_atual": qtd_atual,
                 "qtd_venda": qtd_venda_parcial,
                 "novo_stop_be": novo_stop_be,
+                "nota_stop": nota_stop,
                 "lucro_usd": lucro_estimado_usd,
                 "peso_carteira": round(peso_carteira_pct, 2)
             })
@@ -123,7 +135,7 @@ if alertas_colheita:
             f"🎯 TICKER: {item['ticker']} | Retorno: +{item['ganho_pct']}% ({item['r_multiple']}R)\n"
             f"   - Preço Atual: ${item['preco_atual']} (Entrada: ${item['preco_entrada']})\n"
             f"   - AÇÃO RECOMENDADA: Fecho Parcial de 50% ({item['qtd_venda']} ações de {item['qtd_atual']})\n"
-            f"   - AÇÃO NO STOP: Subir Stop Loss dos restantes 50% para Break-Even em ${item['novo_stop_be']}\n"
+            f"   - AÇÃO NO STOP: {item['nota_stop']}\n"
             f"   - Capital a Colher: ~${item['lucro_usd']} USD | Peso Atual na Carteira: {item['peso_carteira']}%\n"
             f"--------------------------------------------------\n"
         )
