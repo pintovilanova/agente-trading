@@ -305,6 +305,16 @@ for ativo_info in ativos_data:
         else:
             recomendacao = "Observar"
 
+        # ===================================================================
+        # FILTRO DE SEGURANÇA: PREÇO FUGIDO (GAP > 1% DA ENTRADA)
+        # ===================================================================
+        if recomendacao != "Observar" and isinstance(preco_entrada, (int, float)):
+            variacao_pct_entrada = ((preco - preco_entrada) / preco_entrada) * 100
+            if variacao_pct_entrada > 1.0:
+                print(f"[FUGIDA / GAP > 1%] {ticker} desqualificado: Preço atual ({preco:.2f}) está {variacao_pct_entrada:.2f}% acima da entrada ({preco_entrada:.2f}).")
+                recomendacao = "Observar"
+                preco_entrada = "N/A"
+
         if recomendacao != "Observar" and preco_entrada != "N/A":
             preco_stop_calc = preco_entrada - (atr * multiplicador_atr)
             if preco_stop_calc > sma20 and preco > sma20:
