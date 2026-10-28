@@ -213,7 +213,7 @@ if not veio_do_email:
 # ===================================================================
 prompt_orquestrador = f"""
 És o Analista Quantitativo Principal (Agente Orquestrador).
-Abaixo estão os relatórios em bruto e os dados gerados dinamicamente pelos Extratores de Mercado (US e Europa) e pelos vários Motores de Estratégia no fecho do mercado de hoje, incluindo o Motor 15 (Profit Harvest & Rebalancing) e o Motor 16 (Regime de Volatilidade VIX).
+Abaixo estão os relatórios em bruto e os dados gerados dinamicamente pelos Extratores de Mercado (US e Europa) e pelos vários Motores de Estratégia no fecho do mercado de hoje, incluindo o Motor 15 (Profit Harvest & Rebalancing), o Motor 16 (Regime de Volatilidade VIX) e o Motor 17 (2-Day RSI Drop & Rebound).
 
 A tua missão é ler integralmente este conteúdo, processar todos os ativos e compilar um ÚNICO relatório consolidado, limpo, detalhado e altamente profissional para o Gestor de Conta aprovar na corretora.
 
@@ -231,6 +231,7 @@ A tua missão é ler integralmente este conteúdo, processar todos os ativos e c
    - Inclui TODAS as ordens de colheita parcial de lucro a 2R (Profit Harvest) geradas pelo Motor 15 no topo da tabela.
    - Inclui TODAS as ações ativas em carteira que exijam fecho ou ajuste de stop (ex: fecho por Earnings).
    - Inclui TODAS as novas ordens aprovadas ajustadas pelo Lote Máximo do VIX (Motor 16).
+   - Inclui os sinais do Motor 17 (2-Day RSI Drop & Rebound) indicando o alvo rápido da EMA5.
    - Respeita rigorosamente a moeda de cada ativo (USD ou EUR).
 
 DADOS RECOLHIDOS HOJE NOS FICHEIROS:
