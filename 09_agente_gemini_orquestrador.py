@@ -133,7 +133,8 @@ ficheiros_alvo = [
     "comboio_rotacao_temp.txt",     # Motor 11 (Rotação Setorial)    
     "comboio_correlacao_temp.txt",  # Motor 12 (Correlação de Risco)
     "comboio_exaustao_temp.txt",    # Motor 13 (Exaustão Climática)
-    "comboio_sazonalidade_temp.txt" # Motor 14 (Sazonalidade)
+    "comboio_sazonalidade_temp.txt", # Motor 14 (Sazonalidade)
+    "comboio_harvest_temp.txt" # <-- MOTOR 15
 ]
 
 conteudo_bruto_total = ""
