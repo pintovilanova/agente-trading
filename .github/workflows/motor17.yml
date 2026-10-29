@@ -1,4 +1,4 @@
-name: ⚡ Motor 17 - RSI Drop & Rebound (Swing)
+name: 17 -⚡ RSI Drop & Rebound (Swing)
 
 on:
   workflow_dispatch: # Permite disparar manualmente no GitHub Actions
