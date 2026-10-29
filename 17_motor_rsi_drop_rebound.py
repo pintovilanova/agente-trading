@@ -16,7 +16,7 @@ from zoneinfo import ZoneInfo
 import warnings
 warnings.filterwarnings("ignore")
 
-print("A iniciar Motor 17 - 2-Day RSI Drop & Rebound (Swing 48h-72h)...")
+print("A iniciar Motor 17 - 2-Day RSI Drop & Rebound (Hit & Run 48h-72h)...")
 
 # ===================================================================
 # 1. CONFIGURAÇÕES E CREDENCIAIS (GitHub Secrets)
@@ -80,7 +80,7 @@ pct_risco = limpar_float(configs_dict.get("RISCO_SWING_PCT")) or limpar_float(co
 
 VALOR_RISCO_USD = capital_total * pct_risco
 
-print(f"[CONFIG] Capital Total: ${capital_total:,.2f} | Risco/Trade (Swing): {pct_risco*100:.1f}% (${VALOR_RISCO_USD:,.2f} USD)")
+print(f"[CONFIG] Capital Total: ${capital_total:,.2f} \vert{} Risco/Trade: {pct_risco*100:.1f}\% (${VALOR_RISCO_USD:,.2f} USD)")
 
 # Tickers conhecidos por estarem deslistados ou causarem falhas no Yahoo Finance
 TICKERS_EXCLUIDOS = {"NVVE"}
@@ -108,11 +108,12 @@ else:
 tickers_watchlist = list(dict.fromkeys(tickers_watchlist))
 
 # ===================================================================
-# 4. AUDITAR POSIÇÕES EM CARTEIRA (STATUS: ATIVA_SWING / ATIVA_M17)
+# 4. AUDITAR POSIÇÕES EM CARTEIRA (STATUS: ATIVA_M17 / ATIVA_SWING)
 # ===================================================================
 bloco_posicoes_ativas = ""
 for ticker, info in posicoes_ativas_dict.items():
     status = str(info.get("status", "")).strip().upper()
+    # Adicionado ATIVA_M17 e mantido ATIVA_SWING por retrocompatibilidade
     if status in ["ATIVA_SWING", "ATIVA_M17"]:
         try:
             df_pos = yf.download(ticker, period="1mo", interval="1d", progress=False)
@@ -159,7 +160,7 @@ for ticker, info in posicoes_ativas_dict.items():
                 
                 bloco_posicoes_ativas += (
                     f"📌 [POSIÇÃO ATIVA - {status}] {ticker} | Qtd: {qtd} | Entrada: ${entrada} | "
-                    f"Preço Atual: ${preco_atual} | Alvo EMA5: ${ema5_atual} | Stop Fixo: ${stop} | "
+                    f"Preço Atual: ${preco_atual} | Alvo EMA5: ${ema5_atual} \vert{} Stop Fixo:${stop} | "
                     f"AÇÃO: {acao}\n"
                 )
         except Exception as e:
@@ -233,14 +234,14 @@ for ticker in tickers_watchlist:
                 "ordem_tipo": "BUY MARKET (no fecho) / BUY LIMIT",
                 "qtd_acoes": qtd_acoes,
                 "valor_investir": valor_a_investir,
-                "status_sheets": "ATIVA_SWING"
+                "status_sheets": "ATIVA_M17"
             })
             
     except Exception as e:
         print(f"[ERRO] Falha ao analisar {ticker} no Motor 17: {e}")
 
 # ===================================================================
-# 6. RELATÓRIO, FICHEIRO TEMPORÁRIO, EMAIL & TELEGRAM
+# 6. RELATÓRIO, FICHEIRO TEMPORÁRIO E TELEGRAM
 # ===================================================================
 data_hoje = datetime.now(ZoneInfo("Europe/Lisbon")).strftime("%d/%m/%Y %H:%M")
 
@@ -265,6 +266,7 @@ if alertas_rebound:
             f"   - Qtd. Recomendada: {a['qtd_acoes']} Ações\n"
             f"   - Valor Estimado do Lote: ~${a['valor_investir']} USD\n"
             f"   - Horizonte Tático: 48h a 72h\n"
+            f"   - 🔄 PASSAGEM DE TESTEMUNHO: ⚠️ ATENÇÃO: Operação HIT AND RUN. Assim que executada, regista o estado no Sheets como 'ATIVA_M17'. Logo que a EMA5 for tocada, fecha a posição integralmente.\n"
             f"--------------------------------------------------\n"
         )
 else:
@@ -276,7 +278,7 @@ with open("comboio_rsi_rebound_temp.txt", "w", encoding="utf-8") as f:
 
 print(f"[SUCESSO] Ficheiro temporário gerado.")
 
-# 📧 Envio de E-mail Direto
+# 📧 Envio de E-mail Direto (Ativo)
 if EMAIL_USER and EMAIL_PASS:
     try:
         print("A enviar e-mail direto do Motor 17...")
@@ -294,26 +296,4 @@ if EMAIL_USER and EMAIL_PASS:
         print(f"[AVISO] Falha ao enviar e-mail direto: {e}")
 
 # 📱 Envio de Notificação Telegram (Controlado pelo Sheets)
-telegram_ativado = str(configs_dict.get("TELEGRAM_NOTIFICATIONS", "true")).strip().lower() in ["true", "1", "sim", "yes"]
-
-if not telegram_ativado:
-    print("[INFO] Notificações de Telegram desativadas no Google Sheets (TELEGRAM_NOTIFICATIONS = false).")
-elif TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID:
-    try:
-        print("A enviar notificação para o Telegram...")
-        url_tg = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
-        payload_tg = {
-            "chat_id": TELEGRAM_CHAT_ID,
-            "text": f"🎯 *MOTOR 17 (2-DAY RSI DROP & REBOUND)*\n\n✅ Execução concluída com sucesso. Verifica o e-mail para consultar os sinais detetados."
-        }
-        resp_tg = requests.post(url_tg, json=payload_tg, timeout=10)
-        if resp_tg.status_code == 200:
-            print("[SUCESSO] Alerta enviado via Telegram com sucesso!")
-        else:
-            print(f"[AVISO] Falha ao enviar Telegram: {resp_tg.text}")
-    except Exception as e:
-        print(f"[ERRO] Erro de rede ao enviar Telegram: {e}")
-else:
-    print("[AVISO] Credenciais de Telegram não configuradas. Notificação ignorada.")
-
-print(f"[SUCESSO] Ciclo completo do Motor 17 concluído.")
+telegram_ativado = str(configs_dict.get("TELEGRAM
