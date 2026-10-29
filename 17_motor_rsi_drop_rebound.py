@@ -24,6 +24,8 @@ print("A iniciar Motor 17 - 2-Day RSI Drop & Rebound (Swing 48h-72h)...")
 WEBHOOK_URL = os.environ.get('WEBHOOK_URL')
 EMAIL_USER = os.environ.get('EMAIL_USER')
 EMAIL_PASS = os.environ.get('EMAIL_PASS')
+TELEGRAM_BOT_TOKEN = os.environ.get('TELEGRAM_BOT_TOKEN')
+TELEGRAM_CHAT_ID = os.environ.get('TELEGRAM_CHAT_ID')
 
 def limpar_float(val):
     """Converte com segurança valores numéricos para float."""
@@ -73,7 +75,6 @@ def buscar_dados_completos():
 # ===================================================================
 ativos_sheets, posicoes_ativas_dict, configs_dict = buscar_dados_completos()
 
-# Leitura dinâmica do Capital e do Risco por Trade a partir da aba Configs
 capital_total = limpar_float(configs_dict.get("CAPITAL_TOTAL_CONTA")) or 10000.00
 pct_risco = limpar_float(configs_dict.get("RISCO_SWING_PCT")) or limpar_float(configs_dict.get("RISCO_POR_TRADE")) or 0.01
 
@@ -81,7 +82,6 @@ VALOR_RISCO_USD = capital_total * pct_risco
 
 print(f"[CONFIG] Capital Total: ${capital_total:,.2f} | Risco/Trade (Swing): {pct_risco*100:.1f}% (${VALOR_RISCO_USD:,.2f} USD)")
 
-# Montagem da Watchlist Dinâmica
 tickers_watchlist = []
 for item in ativos_sheets:
     if isinstance(item, dict):
@@ -89,7 +89,6 @@ for item in ativos_sheets:
         if t and str(t).strip() not in ["", "#N/A", "NONE", "N/A"]:
             tickers_watchlist.append(str(t).strip().upper())
 
-# Fallback de segurança caso a Watchlist no Sheets esteja vazia
 if not tickers_watchlist:
     print("[INFO] Watchlist vazia no Sheets. A carregar lista de fallback de alta liquidez.")
     tickers_watchlist = [
@@ -109,13 +108,11 @@ for ticker, info in posicoes_ativas_dict.items():
     status = str(info.get("status", "")).strip().upper()
     if status in ["ATIVA_SWING", "ATIVA_M17"]:
         try:
-            # 1. Download Diário (Apenas para as EMAs e Stops)
             df_pos = yf.download(ticker, period="1mo", interval="1d", progress=False)
             if not df_pos.empty:
                 if isinstance(df_pos.columns, pd.MultiIndex):
                     df_pos.columns = df_pos.columns.droplevel(1)
                 
-                # Proteção Anti-Bug do Yahoo (Apaga a vela fantasma da madrugada)
                 if len(df_pos) > 1:
                     ult = df_pos.iloc[-1]
                     if ult['Open'] == ult['High'] == ult['Low'] == ult['Close']:
@@ -125,22 +122,18 @@ for ticker, info in posicoes_ativas_dict.items():
                 ema5_atual = round(float(df_pos['EMA_5'].iloc[-1]), 2)
                 stop = limpar_float(info.get("stopAtual")) or 0.0
                 
-                # 2. Download Intradiário (1m) COM PRE-MARKET (prepost=True)
                 try:
                     df_intra = yf.download(ticker, period="2d", interval="1m", prepost=True, progress=False)
                     if isinstance(df_intra.columns, pd.MultiIndex):
                         df_intra.columns = df_intra.columns.droplevel(1)
                     
                     preco_atual = round(float(df_intra['Close'].iloc[-1]), 2)
-                    
-                    # Filtra apenas a máxima/mínima do dia atual de forma precisa
                     ultimo_dia_str = df_intra.index[-1].strftime('%Y-%m-%d')
                     df_hoje = df_intra[df_intra.index.strftime('%Y-%m-%d') == ultimo_dia_str]
                     
                     maxima_hoje = round(float(df_hoje['High'].max()), 2)
                     minima_hoje = round(float(df_hoje['Low'].min()), 2)
                 except Exception:
-                    # Fallback de segurança
                     preco_atual = round(float(df_pos['Close'].iloc[-1]), 2)
                     maxima_hoje = round(float(df_pos['High'].iloc[-1]), 2)
                     minima_hoje = round(float(df_pos['Low'].iloc[-1]), 2)
@@ -171,7 +164,6 @@ for ticker, info in posicoes_ativas_dict.items():
 alertas_rebound = []
 
 for ticker in tickers_watchlist:
-    # Ignora se já for uma posição ativa em carteira
     if ticker in posicoes_ativas_dict:
         continue
 
@@ -183,11 +175,10 @@ for ticker in tickers_watchlist:
         if isinstance(df.columns, pd.MultiIndex):
             df.columns = df.columns.droplevel(1)
 
-        # 🛡️ PROTEÇÃO ANTI-BUG DO YAHOO: Remove a vela fantasma se O=H=L=C (fora de horas)
         if len(df) > 1:
             ult = df.iloc[-1]
             if ult['Open'] == ult['High'] == ult['Low'] == ult['Close']:
-                df = df.iloc[:-1] # Descarta a vela corrompida
+                df = df.iloc[:-1]
             
         df.ta.sma(length=50, append=True)
         df.ta.ema(length=5, append=True)
@@ -196,7 +187,6 @@ for ticker in tickers_watchlist:
         ultimo_dia = df.iloc[-1]
         dia_anterior = df.iloc[-2]
         
-        # 🎯 Busca o preço real consolidado via vela de 1m (fallback mais seguro que fast_info na madrugada)
         try:
             df_intra = yf.download(ticker, period="1d", interval="1m", progress=False)
             if isinstance(df_intra.columns, pd.MultiIndex):
@@ -214,7 +204,6 @@ for ticker in tickers_watchlist:
         
         dois_dias_queda = (preco_atual < fecho_ontem) and (fecho_ontem < fecho_anteontem)
         
-        # Filtro de Entrada: Tendência de Alta + RSI(2) Oversold + 2 Dias Consecutivos de Queda
         if preco_atual > sma50 and rsi2 <= 10.0 and dois_dias_queda:
             preco_entrada = round(preco_atual, 2)
             preco_stop = round(float(ultimo_dia['Low']) * 0.99, 2)
@@ -244,7 +233,7 @@ for ticker in tickers_watchlist:
         print(f"[ERRO] Falha ao analisar {ticker} no Motor 17: {e}")
 
 # ===================================================================
-# 6. GERAR FICHEIRO TEMPORÁRIO PARA O ORQUESTRADOR & ENVIAR EMAIL DIRETO
+# 6. RELATÓRIO, FICHEIRO TEMPORÁRIO, EMAIL & TELEGRAM
 # ===================================================================
 data_hoje = datetime.now(ZoneInfo("Europe/Lisbon")).strftime("%d/%m/%Y %H:%M")
 
@@ -274,32 +263,47 @@ if alertas_rebound:
 else:
     bloco_texto += "✅ Nenhum novo sinal de entrada hoje. (Modo Silêncio ativo para novas ordens).\n"
 
-# Grava o ficheiro temporário para o Orquestrador ler a seguir
+# Grava o ficheiro temporário para o Orquestrador
 with open("comboio_rsi_rebound_temp.txt", "w", encoding="utf-8") as f:
     f.write(bloco_texto)
 
 print(f"[SUCESSO] Ficheiro temporário gerado.")
 
-# 📧 Envio de E-mail Direto (Independente do Orquestrador)
+# 📧 Envio de E-mail Direto
 if EMAIL_USER and EMAIL_PASS:
     try:
         print("A enviar e-mail direto do Motor 17...")
         msg = MIMEMultipart()
         msg['From'] = EMAIL_USER
-        msg['To'] = EMAIL_USER  # Envia para a tua própria caixa de correio
+        msg['To'] = EMAIL_USER
         msg['Subject'] = f"⚡ Relatório Direto - Motor 17 (RSI Drop & Rebound) [{data_hoje}]"
-        
         msg.attach(MIMEText(bloco_texto, 'plain', 'utf-8'))
         
-        # Configuração padrão para Gmail (SMTP SSL/TLS)
         with smtplib.SMTP_SSL('smtp.gmail.com', 465) as server:
             server.login(EMAIL_USER, EMAIL_PASS)
             server.sendmail(EMAIL_USER, EMAIL_USER, msg.as_string())
-            
         print("[SUCESSO] E-mail direto enviado com sucesso!")
     except Exception as e:
         print(f"[AVISO] Falha ao enviar e-mail direto: {e}")
+
+# 📱 Envio de Notificação Telegram
+if TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID:
+    try:
+        print("A enviar notificação para o Telegram...")
+        url_tg = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
+        payload_tg = {
+            "chat_id": TELEGRAM_CHAT_ID,
+            "text": bloco_texto,
+            "parse_mode": "Markdown"
+        }
+        resp_tg = requests.post(url_tg, json=payload_tg, timeout=10)
+        if resp_tg.status_code == 200:
+            print("[SUCESSO] Alerta enviado via Telegram com sucesso!")
+        else:
+            print(f"[AVISO] Falha ao enviar Telegram: {resp_tg.text}")
+    except Exception as e:
+        print(f"[ERRO] Erro de rede ao enviar Telegram: {e}")
 else:
-    print("[AVISO] Credenciais de e-mail (EMAIL_USER / EMAIL_PASS) não detetadas. Envio direto ignorado.")
+    print("[AVISO] Credenciais de Telegram não configuradas. Notificação ignorada.")
 
 print(f"[SUCESSO] Ciclo completo do Motor 17 concluído.")
