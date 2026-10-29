@@ -136,6 +136,8 @@ jobs:
       - name: ⚡17-  Executar Motor 2-Day RSI Drop & Rebound
         env:
           WEBHOOK_URL: ${{ secrets.WEBHOOK_URL }}
+          TELEGRAM_BOT_TOKEN_GERAL: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
         run: python 17_motor_rsi_drop_rebound.py
 
       # ==========================================================
@@ -147,4 +149,6 @@ jobs:
           EMAIL_USER: ${{ secrets.EMAIL_USER }}
           EMAIL_PASS: ${{ secrets.EMAIL_PASS }}
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }} 
+          TELEGRAM_BOT_TOKEN_GERAL: ${{ secrets.TELEGRAM_BOT_TOKEN_GERAL }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
         run: python 09_agente_gemini_orquestrador.py
