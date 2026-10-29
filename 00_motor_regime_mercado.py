@@ -80,8 +80,8 @@ def enviar_alerta_macro(assunto, corpo):
         print("[INFO] Notificações de Telegram desativadas no Google Sheets (TELEGRAM_NOTIFICATIONS = false).")
     else:
         print("A enviar notificação macro para o Telegram...")
-        # Formata uma mensagem limpa e direta para o Telegram
-        mensagem_tg = f"🛡️ *DISJUNTOR MACRO US*\n\n*{assunto}*\n\n{corpo[:500]}...\n\n*(Ver email para detalhes completos)*"
+        # Mensagem simples a avisar que o processo vai iniciar
+        mensagem_tg = "🛡️ *DISJUNTOR MACRO US*\n\n⏳ O processo de auditoria macro vai iniciar..."
         enviar_alerta(mensagem_tg)
 
 # Função robusta de extração para evitar bloqueios do Yahoo Finance
