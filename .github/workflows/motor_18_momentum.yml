@@ -8,7 +8,7 @@ on:
 
 jobs:
   run-rsi-rebound-engine:
-    name: ⚙️ Execução Motor 17 Isolada
+    name: ⚙️ Execução Motor 18 Isolada
     runs-on: ubuntu-latest
 
     steps:
