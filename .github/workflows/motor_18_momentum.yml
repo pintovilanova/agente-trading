@@ -7,21 +7,25 @@ on:
   workflow_dispatch: # Permite execução manual no GitHub
 
 jobs:
-  run-momentum-motor:
+  run-rsi-rebound-engine:
+    name: ⚙️ Execução Motor 17 Isolada
     runs-on: ubuntu-latest
 
     steps:
-      - name: Checkout do Repositório
-        uses: actions/checkout@v3
+      - name: 📥 Fazer o Checkout do Código
+        uses: actions/checkout@v4
 
-      - name: Configurar Python
-        uses: actions/setup-python@v4
+      - name: 🐍 Configurar o Python
+        uses: actions/setup-python@v5
         with:
-          python-version: '3.10'
+          python-version: '3.12'
+          cache: 'pip'
 
-      - name: Instalar Dependências
+      - name: 📦 Instalar Dependências
         run: |
-          pip install pandas yfinance pandas_ta requests
+          python -m pip install --upgrade pip
+          pip install yfinance pandas requests
+          pip install pandas-ta==0.4.71b0
 
       - name: Executar Motor 18
         env:
