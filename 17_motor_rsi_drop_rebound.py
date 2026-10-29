@@ -82,12 +82,19 @@ VALOR_RISCO_USD = capital_total * pct_risco
 
 print(f"[CONFIG] Capital Total: ${capital_total:,.2f} | Risco/Trade (Swing): {pct_risco*100:.1f}% (${VALOR_RISCO_USD:,.2f} USD)")
 
+# Tickers conhecidos por estarem deslistados ou causarem falhas no Yahoo Finance
+TICKERS_EXCLUIDOS = {"NVVE"}
+
 tickers_watchlist = []
 for item in ativos_sheets:
     if isinstance(item, dict):
         t = item.get("ticker")
         if t and str(t).strip() not in ["", "#N/A", "NONE", "N/A"]:
-            tickers_watchlist.append(str(t).strip().upper())
+            ticker_limpo = str(t).strip().upper()
+            if ticker_limpo not in TICKERS_EXCLUIDOS:
+                tickers_watchlist.append(ticker_limpo)
+            else:
+                print(f"[AVISO] Ticker ignorado por estar na lista de exclusão: {ticker_limpo}")
 
 if not tickers_watchlist:
     print("[INFO] Watchlist vazia no Sheets. A carregar lista de fallback de alta liquidez.")
