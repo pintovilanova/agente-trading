@@ -3,6 +3,7 @@ import pandas as pd
 import os
 import sys
 import smtplib
+import requests
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 from datetime import datetime
@@ -11,6 +12,9 @@ import time
 import random
 import warnings
 warnings.filterwarnings("ignore")
+
+# Importação da função modular de notificação do Telegram
+from F01_notificador_telegram import enviar_alerta
 
 # ===================================================================
 # 0. TRAVA DE FIM DE SEMANA
@@ -25,29 +29,60 @@ if dia_da_semana >= 5:
 # ===================================================================
 EMAIL_USER = os.environ.get("EMAIL_USER")
 EMAIL_PASS = os.environ.get("EMAIL_PASS")
+WEBHOOK_URL = os.environ.get("WEBHOOK_URL")
 SMTP_SERVER = "smtp.gmail.com"
 SMTP_PORT = 587
 
+# Função para buscar configurações do Google Sheets (para ler o TELEGRAM_NOTIFICATIONS)
+def buscar_configs_sheets():
+    if not WEBHOOK_URL: 
+        return {}
+    try:
+        url_alvo = WEBHOOK_URL if "?" in WEBHOOK_URL else f"{WEBHOOK_URL}?aba=Analise Compra"
+        resp = requests.get(url_alvo, timeout=15)
+        if resp.status_code == 200:
+            dados = resp.json()
+            if isinstance(dados, dict):
+                return dados.get("configs", {})
+    except Exception as e:
+        print(f"[AVISO] Não foi possível carregar configs do Sheets: {e}")
+    return {}
+
+configs_dict = buscar_configs_sheets()
+
 def enviar_alerta_macro(assunto, corpo):
     print(f"\nA enviar alerta macro (Assunto: '{assunto}')...")
+    
+    # 1. Envio por E-mail
     if not EMAIL_USER or not EMAIL_PASS:
-        print("[AVISO] Credenciais de email em falta. A saltar envio.")
-        return
-    try:
-        msg = MIMEMultipart()
-        msg['From'] = EMAIL_USER
-        msg['To'] = EMAIL_USER
-        msg['Subject'] = assunto
-        msg.attach(MIMEText(corpo, 'plain', 'utf-8'))
-        
-        server = smtplib.SMTP(SMTP_SERVER, SMTP_PORT)
-        server.starttls()
-        server.login(EMAIL_USER, EMAIL_PASS)
-        server.sendmail(EMAIL_USER, EMAIL_USER, msg.as_string())
-        server.quit()
-        print("[SUCESSO] Alerta macro enviado!")
-    except Exception as e:
-        print(f"[ERRO] Falha ao enviar email macro: {e}")
+        print("[AVISO] Credenciais de email em falta. A saltar envio por email.")
+    else:
+        try:
+            msg = MIMEMultipart()
+            msg['From'] = EMAIL_USER
+            msg['To'] = EMAIL_USER
+            msg['Subject'] = assunto
+            msg.attach(MIMEText(corpo, 'plain', 'utf-8'))
+            
+            server = smtplib.SMTP(SMTP_SERVER, SMTP_PORT)
+            server.starttls()
+            server.login(EMAIL_USER, EMAIL_PASS)
+            server.sendmail(EMAIL_USER, EMAIL_USER, msg.as_string())
+            server.quit()
+            print("[SUCESSO] Alerta macro enviado por e-mail!")
+        except Exception as e:
+            print(f"[ERRO] Falha ao enviar email macro: {e}")
+
+    # 2. Envio por Telegram (Respeitando o interruptor do Google Sheets)
+    telegram_ativado = str(configs_dict.get("TELEGRAM_NOTIFICATIONS", "true")).strip().lower() in ["true", "1", "sim", "yes"]
+    
+    if not telegram_ativado:
+        print("[INFO] Notificações de Telegram desativadas no Google Sheets (TELEGRAM_NOTIFICATIONS = false).")
+    else:
+        print("A enviar notificação macro para o Telegram...")
+        # Formata uma mensagem limpa e direta para o Telegram
+        mensagem_tg = f"🛡️ *DISJUNTOR MACRO US*\n\n*{assunto}*\n\n{corpo[:500]}...\n\n*(Ver email para detalhes completos)*"
+        enviar_alerta(mensagem_tg)
 
 # Função robusta de extração para evitar bloqueios do Yahoo Finance
 def get_yf_data(ticker, period="1y"):
@@ -137,7 +172,6 @@ try:
         return f"[{'█' * preenchido}{'░' * (tamanho - preenchido)}]"
 
     if motivos_bloqueio:
-        # (O CÓDIGO DE BLOQUEIO MANTÉM-SE IGUAL)
         corpo_email = "🚨 [DISJUNTOR MACRO ATIVADO] - EXECUÇÃO DE PIPELINE ABORTADA\n\n"
         corpo_email += "O Motor Macro detetou hostilidades sistémicas no mercado norte-americano.\nPara proteger o capital, a abertura de novas posições foi totalmente bloqueada hoje.\n\n"
         corpo_email += "MOTIVOS CRÍTICOS DETETADOS:\n"
