@@ -24,7 +24,7 @@ print("A iniciar Motor 17 - 2-Day RSI Drop & Rebound (Hit & Run 48h-72h)...")
 WEBHOOK_URL = os.environ.get('WEBHOOK_URL')
 EMAIL_USER = os.environ.get('EMAIL_USER')
 EMAIL_PASS = os.environ.get('EMAIL_PASS')
-TELEGRAM_BOT_TOKEN = os.environ.get('TELEGRAM_BOT_TOKEN')
+TELEGRAM_BOT_TOKEN_GERAL = os.environ.get('TELEGRAM_BOT_TOKEN_GERAL')
 TELEGRAM_CHAT_ID = os.environ.get('TELEGRAM_CHAT_ID')
 
 def limpar_float(val):
