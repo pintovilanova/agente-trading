@@ -74,7 +74,7 @@ pct_risco = limpar_float(configs_dict.get("RISCO_SWING_PCT")) or limpar_float(co
 
 VALOR_RISCO_USD = capital_total * pct_risco
 
-print(f"[CONFIG] Capital Total: ${capital_total:,.2f} \vert{} Risco/Trade (Swing): {pct_risco*100:.1f}\% (${VALOR_RISCO_USD:,.2f} USD)")
+print(f"[CONFIG] Capital Total: ${capital_total:,.2f} | Risco/Trade (Swing): {pct_risco*100:.1f}% (${VALOR_RISCO_USD:,.2f} USD)")
 
 # Montagem da Watchlist Dinâmica
 tickers_watchlist = []
@@ -149,7 +149,7 @@ for ticker, info in posicoes_ativas_dict.items():
                 
                 bloco_posicoes_ativas += (
                     f"📌 [POSIÇÃO ATIVA - {status}] {ticker} | Qtd: {qtd} | Entrada: ${entrada} | "
-                    f"Preço Atual: ${preco_atual} | Alvo EMA5: ${ema5_atual} \vert{} Stop Fixo:${stop} | "
+                    f"Preço Atual: ${preco_atual} | Alvo EMA5: ${ema5_atual} | Stop Fixo: ${stop} | "
                     f"AÇÃO: {acao}\n"
                 )
         except Exception as e:
@@ -220,4 +220,51 @@ for ticker in tickers_watchlist:
             
             alertas_rebound.append({
                 "ticker": ticker,
-                "preco_atual": preco_
+                "preco_atual": preco_entrada,
+                "rsi2": round(rsi2, 2),
+                "stop_loss": preco_stop,
+                "take_profit_ema5": preco_tp,
+                "ordem_tipo": "BUY MARKET (no fecho) / BUY LIMIT",
+                "qtd_acoes": qtd_acoes,
+                "valor_investir": valor_a_investir,
+                "status_sheets": "ATIVA_SWING"
+            })
+            
+    except Exception as e:
+        print(f"[ERRO] Falha ao analisar {ticker} no Motor 17: {e}")
+
+# ===================================================================
+# 6. GERAR FICHEIRO TEMPORÁRIO PARA O ORQUESTRADOR
+# ===================================================================
+data_hoje = datetime.now(ZoneInfo("Europe/Lisbon")).strftime("%d/%m/%Y %H:%M")
+
+bloco_texto = f"⚡ MOTOR 17: 2-DAY RSI DROP & REBOUND ({data_hoje})\n\n"
+
+if bloco_posicoes_ativas:
+    bloco_texto += "--------------------------------------------------\n"
+    bloco_texto += "GESTÃO DE POSIÇÕES ATIVAS (MOTOR 17 - SWING REBOUND):\n\n"
+    bloco_texto += bloco_posicoes_ativas
+    bloco_texto += "--------------------------------------------------\n\n"
+
+if alertas_rebound:
+    bloco_texto += "NOVOS SINAIS DE ENTRADA DETETADOS:\n\n"
+    for a in alertas_rebound:
+        bloco_texto += (
+            f"🎯 TICKER: {a['ticker']} | RSI(2): {a['rsi2']} (Extremo Oversold em Tendência de Alta)\n"
+            f"   - Estratégia / Tag Sheets: {a['status_sheets']}\n"
+            f"   - Ordem Recomendada: {a['ordem_tipo']}\n"
+            f"   - Preço de Entrada: ${a['preco_atual']}\n"
+            f"   - Stop Loss (Abaixo da Mínima): ${a['stop_loss']}\n"
+            f"   - Take Profit Alvo (EMA5): ${a['take_profit_ema5']}\n"
+            f"   - Qtd. Recomendada: {a['qtd_acoes']} Ações\n"
+            f"   - Valor Estimado do Lote: ~${a['valor_investir']} USD\n"
+            f"   - Horizonte Tático: 48h a 72h\n"
+            f"--------------------------------------------------\n"
+        )
+else:
+    bloco_texto += "✅ Nenhum novo sinal de entrada hoje. (Modo Silêncio ativo para novas ordens).\n"
+
+with open("comboio_rsi_rebound_temp.txt", "w", encoding="utf-8") as f:
+    f.write(bloco_texto)
+
+print(f"[SUCESSO] Motor 17 executado com sucesso.")
