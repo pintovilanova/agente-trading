@@ -304,7 +304,7 @@ elif TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID:
         url_tg = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
         payload_tg = {
             "chat_id": TELEGRAM_CHAT_ID,
-            "text": bloco_texto
+            "text": f"🎯 *MOTOR 17 (2-DAY RSI DROP & REBOUND)*\n\n✅ Execução concluída com sucesso. Verifica o e-mail para consultar os sinais detetados."
         }
         resp_tg = requests.post(url_tg, json=payload_tg, timeout=10)
         if resp_tg.status_code == 200:
