@@ -303,7 +303,7 @@ if not telegram_ativado:
 elif TELEGRAM_BOT_TOKEN_GERAL and TELEGRAM_CHAT_ID:
     try:
         print("A enviar notificação para o Telegram...")
-        url_tg = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
+        url_tg = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN_GERAL}/sendMessage"
         payload_tg = {
             "chat_id": TELEGRAM_CHAT_ID,
             "text": f"🎯 *MOTOR 17 (2-DAY RSI DROP & REBOUND)*\n\n✅ Execução concluída com sucesso. Verifica o e-mail para consultar os sinais detetados."
