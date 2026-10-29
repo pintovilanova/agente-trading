@@ -142,6 +142,18 @@ jobs:
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
         run: python 17_motor_rsi_drop_rebound.py
 
+        # ==========================================================
+      # AUDITORIA HIT AND RUN (MOMENTUM BURST)
+      # ==========================================================
+      - name: 🚀 18 - Executar Motor Momentum Burst (Explosão de Volume)
+        env:
+          WEBHOOK_URL: ${{ secrets.WEBHOOK_URL }}
+          EMAIL_USER: ${{ secrets.EMAIL_USER }}
+          EMAIL_PASS: ${{ secrets.EMAIL_PASS }}
+          TELEGRAM_BOT_TOKEN_GERAL: ${{ secrets.TELEGRAM_BOT_TOKEN_GERAL }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+        run: python 18_motor_momentum_burst.py
+
       # ==========================================================
       # 4. AUDITORIA FINAL IA (Corre e envia o que foi recolhido)
       # ==========================================================
