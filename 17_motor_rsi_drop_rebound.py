@@ -293,15 +293,18 @@ if EMAIL_USER and EMAIL_PASS:
     except Exception as e:
         print(f"[AVISO] Falha ao enviar e-mail direto: {e}")
 
-# 📱 Envio de Notificação Telegram
-if TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID:
+# 📱 Envio de Notificação Telegram (Controlado pelo Sheets)
+telegram_ativado = str(configs_dict.get("TELEGRAM_NOTIFICATIONS", "true")).strip().lower() in ["true", "1", "sim", "yes"]
+
+if not telegram_ativado:
+    print("[INFO] Notificações de Telegram desativadas no Google Sheets (TELEGRAM_NOTIFICATIONS = false).")
+elif TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID:
     try:
         print("A enviar notificação para o Telegram...")
         url_tg = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
         payload_tg = {
             "chat_id": TELEGRAM_CHAT_ID,
             "text": bloco_texto
-            # Removido o "parse_mode": "Markdown" para evitar conflitos com carateres especiais
         }
         resp_tg = requests.post(url_tg, json=payload_tg, timeout=10)
         if resp_tg.status_code == 200:
