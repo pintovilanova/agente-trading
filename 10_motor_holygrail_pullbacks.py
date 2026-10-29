@@ -298,7 +298,7 @@ ESTRUTURA OBRIGATÓRIA:
 - 📊 CONTEXTO INSTITUCIONAL: RS Score de Elite (Vento a Favor).
 - ⚙️ TÁTICA DE EXECUÇÃO: Colocar ordem pendente Buy Stop no Gatilho de [Entrada]. 
 - 🛡️ RISCO E ALVO: Stop cravado em [Stop] (Abaixo da média/mínimo) | Alvo: [TP] (Limitado ao teto técnico/máximo de 52 semanas) | Qtd: [X] | Alocação: [Valor] USD.
-- 🔄 PASSAGEM DE TESTEMUNHO: Adiciona: "⚠️ ATENÇÃO: Assim que executada, altera o estado no Sheets para 'ATIVA_FAST'. O Motor Carver assumirá a gestão."
+- 🔄 PASSAGEM DE TESTEMUNHO: Adiciona: "⚠️ ATENÇÃO: Assim que executada, altera o estado no Sheets para 'ATIVA_SWING' (ou 'ATIVA_M10'). Gerir posição com Trailing Stop ou fechar no alvo estático."
 """
     
     bloco = f"📊 RELATÓRIO PULLBACKS DE LIDERANÇA (HOLY GRAIL) 🏆\n\n{prompt_ia}\n\n--------------------------------------------------\n"
@@ -313,7 +313,7 @@ ESTRUTURA OBRIGATÓRIA:
     with open("comboio_holygrail_temp.txt", "w", encoding="utf-8") as f:
         f.write(bloco)
         
-    envia_email(bloco)
+    enviar_email(bloco) # Correção: A tua função chama-se 'enviar_email' e não 'envia_email'
 
 if __name__ == "__main__":
     executar_motor()
