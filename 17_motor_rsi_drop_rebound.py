@@ -24,18 +24,41 @@ RISCO_POR_TRADE = 0.01     # 1% de risco por trade
 VALOR_RISCO_USD = BANCA_TOTAL_USD * RISCO_POR_TRADE
 
 # ===================================================================
-# 1. LER POSIÇÕES ATIVAS DO GOOGLE SHEETS VIA WEBHOOK
+# 1. LER POSIÇÕES ATIVAS E WATCHLIST DO GOOGLE SHEETS VIA WEBHOOK
 # ===================================================================
 posicoes_ativas = {}
+tickers_watchlist = []
+
 if WEBHOOK_URL:
     try:
         res = requests.get(WEBHOOK_URL, timeout=15)
         if res.status_code == 200:
             dados = res.json()
             if isinstance(dados, dict):
+                # Posições ativas no Diário de Bordo
                 posicoes_ativas = dados.get("posicoesAtivas", {})
+                
+                # Watchlist vinda da aba "Analise Compra"
+                ativos_sheets = dados.get("ativos", [])
+                for a in ativos_sheets:
+                    t = a.get("ticker")
+                    if t and str(t).strip() not in ["", "#N/A", "NONE", "N/A"]:
+                        tickers_watchlist.append(str(t).strip().upper())
     except Exception as e:
-        print(f"[AVISO] Falha ao carregar posições ativas do Sheets: {e}")
+        print(f"[AVISO] Falha ao carregar dados do Sheets: {e}")
+
+# Fallback de segurança caso a conexão ao Webhook falhe ou a lista venha vazia
+if not tickers_watchlist:
+    print("[INFO] A usar lista de ativos de fallback (S&P 100 / Nasdaq 100).")
+    tickers_watchlist = [
+        "NVDA", "AAPL", "MSFT", "AMZN", "GOOGL", "META", "TSLA", "AMD", 
+        "NFLX", "AVGO", "COST", "PEP", "QCOM", "TXN", "AMAT", "CRM"
+    ]
+else:
+    print(f"[SUCESSO] {len(tickers_watchlist)} ativos carregados dinamicamente da Watchlist do Sheets.")
+
+# Remove duplicados mantendo a ordem
+tickers_watchlist = list(dict.fromkeys(tickers_watchlist))
 
 # ===================================================================
 # 2. AUDITAR POSIÇÕES EM CARTEIRA (STATUS: ATIVA_SWING / ATIVA_M17)
@@ -78,16 +101,11 @@ for ticker, info in posicoes_ativas.items():
             print(f"[ERRO] Falha ao auditar posição ativa {ticker}: {e}")
 
 # ===================================================================
-# 3. RASTREAR NOVOS SINAIS DE ENTRADA (WATCHLIST)
+# 3. RASTREAR NOVOS SINAIS DE ENTRADA (WATCHLIST DINÂMICA)
 # ===================================================================
-TICKERS_ALVO = [
-    "NVDA", "AAPL", "MSFT", "AMZN", "GOOGL", "META", "TSLA", "AMD", 
-    "NFLX", "AVGO", "COST", "PEP", "QCOM", "TXN", "AMAT", "CRM"
-]
-
 alertas_rebound = []
 
-for ticker in TICKERS_ALVO:
+for ticker in tickers_watchlist:
     try:
         df = yf.download(ticker, period="3mo", interval="1d", progress=False)
         if df.empty or len(df) < 30:
