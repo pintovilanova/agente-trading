@@ -257,7 +257,7 @@ ESTRUTURA OBRIGATÓRIA:
 - 🚀 DIAGNÓSTICO DE MOMENTO: Explosão de volume detetada (RVOL elevado) com quebra de máximos de curto prazo.
 - ⚙️ TÁTICA DE EXECUÇÃO: Colocar ordem Buy Stop no Gatilho de [Entrada].
 - 🛡️ RISCO E ALVO: Stop em [Stop] | Alvo: [TP] | Qtd: [X] | Alocação: [Valor] USD.
-- 🔄 PASSAGEM DE TESTEMUNHO: Adiciona: "⚠️ ATENÇÃO: Operação puramente HIT AND RUN. Assim que o Alvo (TP) for atingido, fechar posição integralmente e atualizar o estado no Sheets para 'WIN'."
+- 🔄 PASSAGEM DE TESTEMUNHO: Adiciona: "⚠️ ATENÇÃO: Operação puramente HIT AND RUN. Assim que executada, regista o estado no Sheets como 'ATIVA_M18'. Logo que atinja o Alvo (TP), fecha a posição integralmente para libertar capital."
 """
 
     bloco = f"⚡ RELATÓRIO MOTOR 18 - MOMENTUM BURST 🚀\n\n{prompt_ia}\n\n--------------------------------------------------\n"
