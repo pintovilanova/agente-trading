@@ -111,7 +111,13 @@ for ticker, info in posicoes_ativas_dict.items():
                 df_pos.ta.ema(length=5, append=True)
                 
                 ultimo = df_pos.iloc[-1]
-                preco_atual = round(float(ultimo['Close']), 2)
+                
+                # Busca o preço real consolidado via fast_info em vez de confiar no Close da vela diária
+                try:
+                    preco_atual = round(yf.Ticker(ticker).fast_info['last_price'], 2)
+                except Exception:
+                    preco_atual = round(float(ultimo['Close']), 2)
+                
                 maxima_hoje = round(float(ultimo['High']), 2)
                 minima_hoje = round(float(ultimo['Low']), 2)
                 ema5_atual = round(float(df_pos['EMA_5'].iloc[-1]), 2)
@@ -121,7 +127,10 @@ for ticker, info in posicoes_ativas_dict.items():
                 qtd = info.get("quantidade", "N/A")
                 
                 # Regras de Auditoria Tática (EMA5 = Take Profit / Stop = Defesa)
-                if maxima_hoje >= ema5_atual:
+                # Adicionada proteção: se o preço atual ultrapassar a máxima diária (gap overnight), usa o preço atual
+                maxima_efetiva = max(maxima_hoje, preco_atual)
+                
+                if maxima_efetiva >= ema5_atual:
                     acao = f"🎯 ALVO ALCANÇADO (EMA5 em ${ema5_atual})! Recomendado FECHAR POSIÇÃO com Lucro (WIN)."
                 elif minima_hoje <= stop and stop > 0:
                     acao = f"🚨 STOP LOSS ATINGIDO (${stop})! Recomendado LIQUIDAR POSIÇÃO (LOSS)."
@@ -161,7 +170,12 @@ for ticker in tickers_watchlist:
         ultimo_dia = df.iloc[-1]
         dia_anterior = df.iloc[-2]
         
-        preco_atual = float(ultimo_dia['Close'])
+        # Busca o preço real consolidado via fast_info em vez de confiar no Close da vela diária
+        try:
+            preco_atual = float(yf.Ticker(ticker).fast_info['last_price'])
+        except Exception:
+            preco_atual = float(ultimo_dia['Close'])
+            
         sma50 = float(df['SMA_50'].iloc[-1])
         ema5 = float(df['EMA_5'].iloc[-1])
         rsi2 = float(df['RSI_2'].iloc[-1])
