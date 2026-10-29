@@ -7,7 +7,7 @@ def enviar_alerta(mensagem, parse_mode=None):
     Função genérica para enviar mensagens para o Telegram.
     Lê o Token e o Chat ID das variáveis de ambiente do sistema/GitHub Secrets.
     """
-    token = os.environ.get('TELEGRAM_BOT_TOKEN')
+    token = os.environ.get('TELEGRAM_BOT_TOKEN_GERAL')
     chat_id = os.environ.get('TELEGRAM_CHAT_ID')
     
     if not token or not chat_id:
