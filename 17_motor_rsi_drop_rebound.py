@@ -16,55 +16,91 @@ warnings.filterwarnings("ignore")
 print("A iniciar Motor 17 - 2-Day RSI Drop & Rebound (Swing 48h-72h)...")
 
 # ===================================================================
-# PARÂMETROS E CREDENCIAIS
+# 1. CONFIGURAÇÕES E CREDENCIAIS (GitHub Secrets)
 # ===================================================================
 WEBHOOK_URL = os.environ.get('WEBHOOK_URL')
-BANCA_TOTAL_USD = 10000.0  # Substitui pelo valor da tua banca real
-RISCO_POR_TRADE = 0.01     # 1% de risco por trade
-VALOR_RISCO_USD = BANCA_TOTAL_USD * RISCO_POR_TRADE
 
-# ===================================================================
-# 1. LER POSIÇÕES ATIVAS E WATCHLIST DO GOOGLE SHEETS VIA WEBHOOK
-# ===================================================================
-posicoes_ativas = {}
-tickers_watchlist = []
-
-if WEBHOOK_URL:
+def limpar_float(val):
+    """Converte com segurança valores numéricos para float."""
+    if val is None: return None
     try:
-        res = requests.get(WEBHOOK_URL, timeout=15)
-        if res.status_code == 200:
-            dados = res.json()
-            if isinstance(dados, dict):
-                # Posições ativas no Diário de Bordo
-                posicoes_ativas = dados.get("posicoesAtivas", {})
-                
-                # Watchlist vinda da aba "Analise Compra"
-                ativos_sheets = dados.get("ativos", [])
-                for a in ativos_sheets:
-                    t = a.get("ticker")
-                    if t and str(t).strip() not in ["", "#N/A", "NONE", "N/A"]:
-                        tickers_watchlist.append(str(t).strip().upper())
-    except Exception as e:
-        print(f"[AVISO] Falha ao carregar dados do Sheets: {e}")
+        val_str = str(val).replace(",", ".").strip()
+        if val_str == "" or val_str.lower() in ["nan", "n/a", "none"]: return None
+        return float(val_str)
+    except (ValueError, TypeError):
+        return None
 
-# Fallback de segurança caso a conexão ao Webhook falhe ou a lista venha vazia
+# ===================================================================
+# 2. FUNÇÃO DE REDE: LER DADOS DO GOOGLE SHEETS VIA WEBHOOK
+# ===================================================================
+def buscar_dados_completos():
+    print("A carregar Watchlist, Posições Ativas e Configs a partir do Google Sheets...")
+    if not WEBHOOK_URL: 
+        print("[AVISO] WEBHOOK_URL não configurado.")
+        return [], {}, {}
+    try:
+        url_alvo = WEBHOOK_URL if "?" in WEBHOOK_URL else f"{WEBHOOK_URL}?aba=Analise Compra"
+        resp = requests.get(url_alvo, timeout=15)
+        
+        if resp.status_code == 200:
+            try:
+                dados = resp.json()
+            except json.JSONDecodeError:
+                print(f"[ERRO] O Webhook não retornou um JSON válido. Resposta: {resp.text[:200]}")
+                return [], {}, {}
+
+            if isinstance(dados, dict):
+                ativos = dados.get("ativos", [])
+                posicoes = dados.get("posicoesAtivas", {})
+                configs = dados.get("configs", {})
+                return ativos, posicoes, configs
+            elif isinstance(dados, list):
+                return dados, {}, {}
+                
+        print(f"[AVISO] Webhook retornou status {resp.status_code}.")
+        return [], {}, {}
+    except Exception as e:
+        print(f"[ERRO CRÍTICO] Falha ao ligar ao Google Sheets: {e}")
+        return [], {}, {}
+
+# ===================================================================
+# 3. EXECUÇÃO DA CARGA DE DADOS E PARAMETRIZAÇÃO DE RISCO
+# ===================================================================
+ativos_sheets, posicoes_ativas_dict, configs_dict = buscar_dados_completos()
+
+# Leitura dinâmica do Capital e do Risco por Trade a partir da aba Configs
+capital_total = limpar_float(configs_dict.get("CAPITAL_TOTAL_CONTA")) or 10000.00
+pct_risco = limpar_float(configs_dict.get("RISCO_SWING_PCT")) or limpar_float(configs_dict.get("RISCO_POR_TRADE")) or 0.01
+
+VALOR_RISCO_USD = capital_total * pct_risco
+
+print(f"[CONFIG] Capital Total: ${capital_total:,.2f} | Risco/Trade (Swing): {pct_risco*100:.1f}% (${VALOR_RISCO_USD:,.2f} USD)")
+
+# Montagem da Watchlist Dinâmica
+tickers_watchlist = []
+for item in ativos_sheets:
+    if isinstance(item, dict):
+        t = item.get("ticker")
+        if t and str(t).strip() not in ["", "#N/A", "NONE", "N/A"]:
+            tickers_watchlist.append(str(t).strip().upper())
+
+# Fallback de segurança caso a Watchlist no Sheets esteja vazia
 if not tickers_watchlist:
-    print("[INFO] A usar lista de ativos de fallback (S&P 100 / Nasdaq 100).")
+    print("[INFO] Watchlist vazia no Sheets. A carregar lista de fallback de alta liquidez.")
     tickers_watchlist = [
         "NVDA", "AAPL", "MSFT", "AMZN", "GOOGL", "META", "TSLA", "AMD", 
         "NFLX", "AVGO", "COST", "PEP", "QCOM", "TXN", "AMAT", "CRM"
     ]
 else:
-    print(f"[SUCESSO] {len(tickers_watchlist)} ativos carregados dinamicamente da Watchlist do Sheets.")
+    print(f"[SUCESSO] {len(tickers_watchlist)} ativos carregados da Watchlist do Sheets.")
 
-# Remove duplicados mantendo a ordem
 tickers_watchlist = list(dict.fromkeys(tickers_watchlist))
 
 # ===================================================================
-# 2. AUDITAR POSIÇÕES EM CARTEIRA (STATUS: ATIVA_SWING / ATIVA_M17)
+# 4. AUDITAR POSIÇÕES EM CARTEIRA (STATUS: ATIVA_SWING / ATIVA_M17)
 # ===================================================================
 bloco_posicoes_ativas = ""
-for ticker, info in posicoes_ativas.items():
+for ticker, info in posicoes_ativas_dict.items():
     status = str(info.get("status", "")).strip().upper()
     if status in ["ATIVA_SWING", "ATIVA_M17"]:
         try:
@@ -80,8 +116,8 @@ for ticker, info in posicoes_ativas.items():
                 minima_hoje = round(float(ultimo['Low']), 2)
                 ema5_atual = round(float(df_pos['EMA_5'].iloc[-1]), 2)
                 
-                entrada = float(info.get("precoEntrada", preco_atual))
-                stop = float(info.get("stopAtual", 0))
+                entrada = limpar_float(info.get("precoEntrada")) or preco_atual
+                stop = limpar_float(info.get("stopAtual")) or 0.0
                 qtd = info.get("quantidade", "N/A")
                 
                 # Regras de Auditoria Tática (EMA5 = Take Profit / Stop = Defesa)
@@ -101,11 +137,15 @@ for ticker, info in posicoes_ativas.items():
             print(f"[ERRO] Falha ao auditar posição ativa {ticker}: {e}")
 
 # ===================================================================
-# 3. RASTREAR NOVOS SINAIS DE ENTRADA (WATCHLIST DINÂMICA)
+# 5. RASTREAR NOVOS SINAIS DE ENTRADA (WATCHLIST DINÂMICA)
 # ===================================================================
 alertas_rebound = []
 
 for ticker in tickers_watchlist:
+    # Ignora se já for uma posição ativa em carteira
+    if ticker in posicoes_ativas_dict:
+        continue
+
     try:
         df = yf.download(ticker, period="3mo", interval="1d", progress=False)
         if df.empty or len(df) < 30:
@@ -131,6 +171,7 @@ for ticker in tickers_watchlist:
         
         dois_dias_queda = (preco_atual < fecho_ontem) and (fecho_ontem < fecho_anteontem)
         
+        # Filtro de Entrada: Tendência de Alta + RSI(2) Oversold + 2 Dias Consecutivos de Queda
         if preco_atual > sma50 and rsi2 <= 10.0 and dois_dias_queda:
             preco_entrada = round(preco_atual, 2)
             preco_stop = round(float(ultimo_dia['Low']) * 0.99, 2)
@@ -160,7 +201,7 @@ for ticker in tickers_watchlist:
         print(f"[ERRO] Falha ao analisar {ticker} no Motor 17: {e}")
 
 # ===================================================================
-# 4. GERAR FICHEIRO TEMPORÁRIO PARA O ORQUESTRADOR
+# 6. GERAR FICHEIRO TEMPORÁRIO PARA O ORQUESTRADOR
 # ===================================================================
 data_hoje = datetime.now(ZoneInfo("Europe/Lisbon")).strftime("%d/%m/%Y %H:%M")
 
