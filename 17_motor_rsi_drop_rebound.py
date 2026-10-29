@@ -104,7 +104,7 @@ for ticker, info in posicoes_ativas_dict.items():
     status = str(info.get("status", "")).strip().upper()
     if status in ["ATIVA_SWING", "ATIVA_M17"]:
         try:
-            # 1. Download de Dados Diários (Apenas para as EMAs e Stops)
+            # 1. Download Diário (Apenas para as EMAs e Stops)
             df_pos = yf.download(ticker, period="1mo", interval="1d", progress=False)
             if not df_pos.empty:
                 if isinstance(df_pos.columns, pd.MultiIndex):
@@ -120,25 +120,22 @@ for ticker, info in posicoes_ativas_dict.items():
                 ema5_atual = round(float(df_pos['EMA_5'].iloc[-1]), 2)
                 stop = limpar_float(info.get("stopAtual")) or 0.0
                 
-                # 2. Download Intradiário (1 minuto) EXCLUSIVO para Preço Atual e Máxima
+                # 2. Download Intradiário (1m) COM PRE-MARKET (prepost=True)
                 try:
-                    df_intra = yf.download(ticker, period="5d", interval="1m", progress=False)
+                    df_intra = yf.download(ticker, period="2d", interval="1m", prepost=True, progress=False)
                     if isinstance(df_intra.columns, pd.MultiIndex):
                         df_intra.columns = df_intra.columns.droplevel(1)
                     
-                    # Puxa os dados reais consolidados de 1m
                     preco_atual = round(float(df_intra['Close'].iloc[-1]), 2)
                     
-                    # A máxima de hoje baseada nos últimos 400 minutos de mercado (1 dia útil)
-                    if len(df_intra) >= 390:
-                        maxima_hoje = round(float(df_intra['High'].tail(390).max()), 2)
-                    else:
-                        maxima_hoje = round(float(df_intra['High'].max()), 2)
-                        
-                    minima_hoje = round(float(df_intra['Low'].tail(390).min()) if len(df_intra) >= 390 else float(df_intra['Low'].min()), 2)
-
+                    # Filtra apenas a máxima/mínima do dia atual de forma precisa
+                    ultimo_dia_str = df_intra.index[-1].strftime('%Y-%m-%d')
+                    df_hoje = df_intra[df_intra.index.strftime('%Y-%m-%d') == ultimo_dia_str]
+                    
+                    maxima_hoje = round(float(df_hoje['High'].max()), 2)
+                    minima_hoje = round(float(df_hoje['Low'].min()), 2)
                 except Exception:
-                    # Fallback caso falhe o download de 1m
+                    # Fallback de segurança
                     preco_atual = round(float(df_pos['Close'].iloc[-1]), 2)
                     maxima_hoje = round(float(df_pos['High'].iloc[-1]), 2)
                     minima_hoje = round(float(df_pos['Low'].iloc[-1]), 2)
@@ -146,7 +143,6 @@ for ticker, info in posicoes_ativas_dict.items():
                 entrada = limpar_float(info.get("precoEntrada")) or preco_atual
                 qtd = info.get("quantidade", "N/A")
                 
-                # Regras de Auditoria Tática (Garante que se o preço atual der um gap superior à máxima, conta o preço atual)
                 maxima_efetiva = max(maxima_hoje, preco_atual)
                 
                 if maxima_efetiva >= ema5_atual:
