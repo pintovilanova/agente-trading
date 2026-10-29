@@ -102,7 +102,7 @@ def enviar_email(conteudo):
             if tentativa < 2: time.sleep(5)
 
 # ===================================================================
-# 3. MOTOR MATEMÁTICO: HOLY GRAIL (PULLBACK À EMA20)
+# 3. MOTOR MATEMÁTICO: HOLY GRAIL (PULLBACK À EMA20) COM TETO TÉCNICO
 # ===================================================================
 def analisar_holy_grail(ativo_info, vol_alvo_diaria_usd):
     try:
@@ -119,15 +119,20 @@ def analisar_holy_grail(ativo_info, vol_alvo_diaria_usd):
         if val_rs_num is None or val_rs_num < MIN_RS_SCORE_HOLY_GRAIL:
             return None
 
-        # Pausa aleatória curta para evitar o bloqueio 401 do Yahoo Finance
+        # Pausa aleatória curta para evitar bloqueios do Yahoo Finance
         time.sleep(random.uniform(0.8, 1.8))
 
-        # 2. CALENDÁRIO DE EARNINGS (Trava de Segurança)
+        # 2. CALENDÁRIO DE EARNINGS E DADOS FUNDAMENTAIS (Obtenção do Máximo 52 Semanas)
         alerta_earnings = "OK"
+        max_52s = None
         try:
             ticker_obj = yf.Ticker(ticker)
+            info_dados = ticker_obj.info
+            
             if setor in ["Desconhecido", "N/A", "", "NONE"]:
-                setor = ticker_obj.info.get('sector', setor)
+                setor = info_dados.get('sector', setor)
+                
+            max_52s = info_dados.get('fiftyTwoWeekHigh', None)
 
             calendario = ticker_obj.calendar
             if isinstance(calendario, dict) and 'Earnings Date' in calendario:
@@ -161,18 +166,15 @@ def analisar_holy_grail(ativo_info, vol_alvo_diaria_usd):
         df['EMA_50'] = df['Close'].ewm(span=50, adjust=False).mean()
         df['SMA_200'] = df['Close'].rolling(window=200).mean()
         
-        # ADX (Medidor da força da tendência)
         adx_df = df.ta.adx(length=14)
         if adx_df is not None and not adx_df.empty:
             df = pd.concat([df, adx_df], axis=1)
         else:
             return None
             
-        # ATR para Risco
         df.ta.atr(length=14, append=True)
         df['Vol_SMA_50'] = df['Volume'].rolling(window=50).mean()
 
-        # Detetar colunas do ADX e ATR (lidar com nomes dinâmicos do pandas_ta)
         col_adx = [c for c in df.columns if str(c).startswith('ADX_')][0]
         col_atr = [c for c in df.columns if str(c).startswith('ATRr_') or str(c).startswith('ATR_')][0]
         
@@ -189,33 +191,38 @@ def analisar_holy_grail(ativo_info, vol_alvo_diaria_usd):
         vol_atual = float(ultimo['Volume'])
 
         # 5. MATEMÁTICA DO PULLBACK (HOLY GRAIL GATILHOS)
-        # Condição A: Forte Tendência de Alta (Preço no longo prazo subiu, ADX alto)
         trend_alta = (ema20 > ema50) and (ema50 > sma200) and (adx > 25.0)
         
-        # Condição B: O Pullback (Preço testou a zona da EMA 20, mas não colapsou abaixo da EMA 50)
         minimo_hoje = float(ultimo['Low'])
-        zona_inferior = ema20 * 0.985 # Pode escorregar até 1.5% abaixo da EMA20
-        zona_superior = ema20 * 1.025 # Não pode estar mais de 2.5% acima da EMA20 (tem de estar a testar)
+        zona_inferior = ema20 * 0.985 
+        zona_superior = ema20 * 1.025 
         
         pullback_valido = (minimo_hoje >= zona_inferior) and (minimo_hoje <= zona_superior) and (preco > ema50)
-
-        # Condição C: Contração de Volume (Falta de convicção vendedora)
         seca_volume = vol_atual < (vol_sma50 * 0.8)
 
         if trend_alta and pullback_valido and seca_volume:
             estado = "HOLY GRAIL PULLBACK - Retração à EMA20"
             
-            # Gatilho de compra: Superar a máxima do dia anterior ou máxima de hoje
             maximo_hoje = float(ultimo['High'])
             maximo_ontem = float(df['High'].iloc[-2])
             
             entrada_gatilho = round(max(maximo_hoje, maximo_ontem) * 1.002, 2)
-            
-            # Stop Loss Matemático: Abaixo do mínimo do pullback ou de 1 ATR abaixo da EMA20
             stop_loss = round(min(minimo_hoje * 0.99, ema20 - atr), 2)
             
+            # Cálculo base de risco e rácio RR de 2.5x
             risco = entrada_gatilho - stop_loss
-            alvo_tp = round(entrada_gatilho + (risco * 2.5), 2) # RR de 2.5x
+            alvo_tp = round(entrada_gatilho + (risco * 2.5), 2) 
+
+            # 🛡️ TRAVÃO TÉCNICO DE REALIDADE: Respeitar o Máximo de 52 Semanas
+            if max_52s and max_52s > 0:
+                # Se o alvo projetado ultrapassar o teto de 52 semanas, limitamos ao valor máximo histórico 
+                # para garantir que o Take Profit faz sentido técnico e estrutural.
+                if alvo_tp > max_52s:
+                    alvo_tp = round(max_52s, 2)
+                    
+            # Garantir que o alvo fica sempre acima da entrada caso o teto ficasse comprimido
+            if alvo_tp <= entrada_gatilho:
+                alvo_tp = round(entrada_gatilho + (risco * 1.5), 2)
             
             if atr > 0:
                 qtd_calc = round(vol_alvo_diaria_usd / atr, 2)
@@ -283,14 +290,14 @@ O teu mandato é auditar ações de força relativa ELITE (RS >= 80) que sofrera
 REGRAS ESTRITAS:
 1. O ativo não deve ser comprado a mercado. A entrada é SEMPRE validada via "Buy Stop" acima da máxima do pullback, garantindo que o fluxo comprador retomou o controlo.
 2. Veto Fundamental: Se detetares "Earnings: PERIGO", desclassifica o sinal imediatamente.
-3. Risco Assimétrico: Destaca a precisão deste trade. Ao comprar na EMA 20, o stop fica curto, permitindo alto retorno.
+3. Risco Assimétrico: Destaca a precisão deste trade. Ao comprar na EMA 20, o stop fica curto, permitindo alto retorno, limitado estruturalmente ao teto de 52 semanas.
 
 ESTRUTURA OBRIGATÓRIA:
 🏆 [TICKER] - [Nome da Empresa] ([Setor])
 - 📉 DIAGNÓSTICO DO PULLBACK: Teste à EMA 20 concluído com seca de volume. (ADX a [Valor] confirma força da tendência maior).
 - 📊 CONTEXTO INSTITUCIONAL: RS Score de Elite (Vento a Favor).
 - ⚙️ TÁTICA DE EXECUÇÃO: Colocar ordem pendente Buy Stop no Gatilho de [Entrada]. 
-- 🛡️ RISCO E ALVO: Stop cravado em [Stop] (Abaixo da média/mínimo) | Alvo: [TP] | Qtd: [X] | Alocação: [Valor] USD.
+- 🛡️ RISCO E ALVO: Stop cravado em [Stop] (Abaixo da média/mínimo) | Alvo: [TP] (Limitado ao teto técnico/máximo de 52 semanas) | Qtd: [X] | Alocação: [Valor] USD.
 - 🔄 PASSAGEM DE TESTEMUNHO: Adiciona: "⚠️ ATENÇÃO: Assim que executada, altera o estado no Sheets para 'ATIVA_FAST'. O Motor Carver assumirá a gestão."
 """
     
@@ -306,7 +313,7 @@ ESTRUTURA OBRIGATÓRIA:
     with open("comboio_holygrail_temp.txt", "w", encoding="utf-8") as f:
         f.write(bloco)
         
-    enviar_email(bloco)
+    envia_email(bloco)
 
 if __name__ == "__main__":
     executar_motor()
