@@ -8,6 +8,9 @@ import pandas as pd
 import pandas_ta as ta
 import requests
 import json
+import smtplib
+from email.mime.text import MIMEText
+from email.mime.multipart import MIMEMultipart
 from datetime import datetime
 from zoneinfo import ZoneInfo
 import warnings
@@ -19,6 +22,8 @@ print("A iniciar Motor 17 - 2-Day RSI Drop & Rebound (Swing 48h-72h)...")
 # 1. CONFIGURAÇÕES E CREDENCIAIS (GitHub Secrets)
 # ===================================================================
 WEBHOOK_URL = os.environ.get('WEBHOOK_URL')
+EMAIL_USER = os.environ.get('EMAIL_USER')
+EMAIL_PASS = os.environ.get('EMAIL_PASS')
 
 def limpar_float(val):
     """Converte com segurança valores numéricos para float."""
@@ -239,7 +244,7 @@ for ticker in tickers_watchlist:
         print(f"[ERRO] Falha ao analisar {ticker} no Motor 17: {e}")
 
 # ===================================================================
-# 6. GERAR FICHEIRO TEMPORÁRIO PARA O ORQUESTRADOR
+# 6. GERAR FICHEIRO TEMPORÁRIO PARA O ORQUESTRADOR & ENVIAR EMAIL DIRETO
 # ===================================================================
 data_hoje = datetime.now(ZoneInfo("Europe/Lisbon")).strftime("%d/%m/%Y %H:%M")
 
@@ -269,7 +274,32 @@ if alertas_rebound:
 else:
     bloco_texto += "✅ Nenhum novo sinal de entrada hoje. (Modo Silêncio ativo para novas ordens).\n"
 
+# Grava o ficheiro temporário para o Orquestrador ler a seguir
 with open("comboio_rsi_rebound_temp.txt", "w", encoding="utf-8") as f:
     f.write(bloco_texto)
 
-print(f"[SUCESSO] Motor 17 executado com sucesso.")
+print(f"[SUCESSO] Ficheiro temporário gerado.")
+
+# 📧 Envio de E-mail Direto (Independente do Orquestrador)
+if EMAIL_USER and EMAIL_PASS:
+    try:
+        print("A enviar e-mail direto do Motor 17...")
+        msg = MIMEMultipart()
+        msg['From'] = EMAIL_USER
+        msg['To'] = EMAIL_USER  # Envia para a tua própria caixa de correio
+        msg['Subject'] = f"⚡ Relatório Direto - Motor 17 (RSI Drop & Rebound) [{data_hoje}]"
+        
+        msg.attach(MIMEText(bloco_texto, 'plain', 'utf-8'))
+        
+        # Configuração padrão para Gmail (SMTP SSL/TLS)
+        with smtplib.SMTP_SSL('smtp.gmail.com', 465) as server:
+            server.login(EMAIL_USER, EMAIL_PASS)
+            server.sendmail(EMAIL_USER, EMAIL_USER, msg.as_string())
+            
+        print("[SUCESSO] E-mail direto enviado com sucesso!")
+    except Exception as e:
+        print(f"[AVISO] Falha ao enviar e-mail direto: {e}")
+else:
+    print("[AVISO] Credenciais de e-mail (EMAIL_USER / EMAIL_PASS) não detetadas. Envio direto ignorado.")
+
+print(f"[SUCESSO] Ciclo completo do Motor 17 concluído.")
