@@ -1,4 +1,4 @@
-name: 18 - 🚀Motor Momentum Burst (Hit and Run)
+name: 17 e 18⚡ Pipeline Tática - Hit and Run
 
 on:
   schedule:
@@ -8,7 +8,7 @@ on:
 
 jobs:
   run-rsi-rebound-engine:
-    name: ⚙️ Execução Motor 18 Isolada
+    name: ⚙️ Execução Pipeline Hit & Run (M17 + M18)
     runs-on: ubuntu-latest
 
     steps:
@@ -27,7 +27,16 @@ jobs:
           pip install yfinance pandas requests
           pip install pandas-ta==0.4.71b0
 
-      - name: Executar Motor 18
+      - name: 🚀 17 - Executar Motor RSI Drop & Rebound
+        env:
+          WEBHOOK_URL: ${{ secrets.WEBHOOK_URL }}
+          EMAIL_USER: ${{ secrets.EMAIL_USER }}
+          EMAIL_PASS: ${{ secrets.EMAIL_PASS }}
+          TELEGRAM_BOT_TOKEN_GERAL: ${{ secrets.TELEGRAM_BOT_TOKEN_GERAL }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+        run: python 17_motor_rsi_rebound.py
+
+      - name: 🚀 18 - Executar Motor Momentum Burst
         env:
           WEBHOOK_URL: ${{ secrets.WEBHOOK_URL }}
           EMAIL_USER: ${{ secrets.EMAIL_USER }}
@@ -35,3 +44,13 @@ jobs:
           TELEGRAM_BOT_TOKEN_GERAL: ${{ secrets.TELEGRAM_BOT_TOKEN_GERAL }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
         run: python 18_motor_momentum_burst.py
+
+      - name: 🤖 09 - Orquestrador IA (Síntese Final)
+        env:
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          WEBHOOK_URL: ${{ secrets.WEBHOOK_URL }}
+          EMAIL_USER: ${{ secrets.EMAIL_USER }}
+          EMAIL_PASS: ${{ secrets.EMAIL_PASS }}
+          TELEGRAM_BOT_TOKEN_GERAL: ${{ secrets.TELEGRAM_BOT_TOKEN_GERAL }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+        run: python 09_agente_gemini_orquestrador.py
