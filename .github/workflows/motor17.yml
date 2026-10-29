@@ -1,7 +1,17 @@
 name: 17 - ⚡ Motor RSI Drop & Rebound (Swing)
 
 on:
+  # 1. Permite testar e executar manualmente a qualquer momento
   workflow_dispatch:
+  
+  # 2. Agendamento Automático (Golden Window - 20 minutos antes do fecho de Wall St)
+  schedule:
+    # 🕒 HORÁRIO DE INVERNO: Corre às 20h40 (Novembro a Março)
+    - cron: '40 20 * * 1-5'
+    
+    # ☀️ NOTA PARA O VERÃO: 
+    # Quando a hora mudar no final de março, deves vir aqui alterar o cron para:
+    # - cron: '40 19 * * 1-5' (que será 19h40 UTC = 20h40 em Portugal)
 
 jobs:
   run-rsi-rebound-engine:
