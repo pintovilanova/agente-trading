@@ -1,0 +1,33 @@
+name: 🚀 Motor 18 - Momentum Burst (Hit and Run)
+
+on:
+  schedule:
+    # Executa de Segunda a Sexta às 21:15 (Hora de Lisboa / 21:15 UTC no Inverno)
+    - cron: '15 21 * * 1-5'
+  workflow_dispatch: # Permite execução manual no GitHub
+
+jobs:
+  run-momentum-motor:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout do Repositório
+        uses: actions/checkout@v3
+
+      - name: Configurar Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.10'
+
+      - name: Instalar Dependências
+        run: |
+          pip install pandas yfinance pandas_ta requests
+
+      - name: Executar Motor 18
+        env:
+          WEBHOOK_URL: ${{ secrets.WEBHOOK_URL }}
+          EMAIL_USER: ${{ secrets.EMAIL_USER }}
+          EMAIL_PASS: ${{ secrets.EMAIL_PASS }}
+          TELEGRAM_BOT_TOKEN_GERAL: ${{ secrets.TELEGRAM_BOT_TOKEN_GERAL }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+        run: python 18_motor_momentum_burst.py
