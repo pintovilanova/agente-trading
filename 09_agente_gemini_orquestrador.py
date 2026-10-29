@@ -155,13 +155,14 @@ ficheiros_alvo = [
     "comboio_connors_temp.txt",     # Motor 05 (REVERSAO)
     "comboio_carver_temp.txt",      # Motor 06 (Fast Trend Carver)
     "comboio_holygrail_temp.txt",   # Motor 10 (Holy Grail Pullbacks)
-    "comboio_rotacao_temp.txt",     # Motor 11 (Rotação Setorial)    
+    "comboio_rotacao_temp.txt",     # Motor 11 (Rotação Setorial)   
     "comboio_correlacao_temp.txt",  # Motor 12 (Correlação de Risco)
     "comboio_exaustao_temp.txt",    # Motor 13 (Exaustão Climática)
     "comboio_sazonalidade_temp.txt",# Motor 14 (Sazonalidade)
     "comboio_harvest_temp.txt",     # Motor 15 (Profit Harvest & Rebalancing)
     "comboio_vix_temp.txt",         # Motor 16 (Volatility Regime & VIX)
-    "comboio_rsi_rebound_temp.txt"  # Motor 17 (2-Day RSI Drop & Rebound)
+    "comboio_rsi_rebound_temp.txt", # Motor 17 (2-Day RSI Drop & Rebound)
+    "comboio_momentumburst_temp.txt"# Motor 18 (Momentum Burst & Volume Surge)
 ]
 
 conteudo_bruto_total = ""
@@ -212,6 +213,8 @@ else:
                 conteudo_bruto_total += "📊 VIX em modo padrão/não disponível. Assumir Lote de 100% para novas entradas. (Modo Silêncio ativo).\n"
             elif ficheiro == "comboio_rsi_rebound_temp.txt":
                 conteudo_bruto_total += "✅ Nenhum ativo em retração extrema de 2 dias com RSI(2) < 10 hoje. (Modo Silêncio ativo).\n"
+            elif ficheiro == "comboio_momentumburst_temp.txt":
+                conteudo_bruto_total += "✅ Nenhum ativo apresenta explosão de volume e momento hoje. (Modo Silêncio ativo).\n"
             else:
                 conteudo_bruto_total += "[ERRO: FICHEIRO NÃO ENCONTRADO - MOTOR PODE TER FALHADO]\n"
 
@@ -231,7 +234,7 @@ if not veio_do_email:
 # ===================================================================
 prompt_orquestrador = f"""
 És o Analista Quantitativo Principal (Agente Orquestrador).
-Abaixo estão os relatórios em bruto e os dados gerados dinamicamente pelos Extratores de Mercado (US e Europa) e pelos vários Motores de Estratégia no fecho do mercado de hoje, incluindo o Motor 15 (Profit Harvest & Rebalancing), o Motor 16 (Regime de Volatilidade VIX) e o Motor 17 (2-Day RSI Drop & Rebound).
+Abaixo estão os relatórios em bruto e os dados gerados dinamicamente pelos Extratores de Mercado (US e Europa) e pelos vários Motores de Estratégia no fecho do mercado de hoje, incluindo o Motor 15 (Profit Harvest & Rebalancing), o Motor 16 (Regime de Volatilidade VIX), o Motor 17 (2-Day RSI Drop & Rebound) e o Motor 18 (Momentum Burst).
 
 A tua missão é ler integralmente este conteúdo, processar todos os ativos e compilar um ÚNICO relatório consolidado, limpo, detalhado e altamente profissional para o Gestor de Conta aprovar na corretora.
 
@@ -240,8 +243,13 @@ A tua missão é ler integralmente este conteúdo, processar todos os ativos e c
 1. REGIME DE VOLATILIDADE VIX (MOTOR 16): Lê a diretriz do Motor 16 e indica explicitamente no topo do relatório o Regime do VIX. Aplica a percentagem de lote indicada pelo Motor 16 (100%, 75%, 50% ou 0%) ao calcular o tamanho e alocação de TODAS as novas sugestões de entrada.
 2. ZERO CRIATIVIDADE DE DADOS: Não inventes preços, tickers, stops ou tamanhos de posição. Utiliza unicamente e na íntegra os dados fornecidos.
 3. VETO DE SOBREPOSIÇÃO: Posições ativas na carteira (com 'PosicaoAtiva: SIM') NÃO PODEM ter novas ordens de compra sugeridas.
-4. TABELA FINAL OBRIGATÓRIA (SÍNTESE DE ORDENS):
-    É ESTRITAMENTE OBRIGATÓRIO terminar o relatório com uma secção final intitulada "## 12. SÍNTESE DE ORDENS PARA APROVAÇÃO DO GESTOR DE CONTA" contendo uma tabela Markdown formatada exatamente com esta estrutura:
+4. ⚡ TÁTICA HIT AND RUN (MOTOR 18 - MOMENTUM BURST):
+   Se o ficheiro correspondente ao Motor 18 apresentar ativos com explosão de volume (RVOL elevado), cria uma secção dedicada.
+   Usa o formato:
+   - [TICKER]: Entrada a [X], Stop a [Y], Alvo [Z]. (Motivo: RVOL [W]x com quebra de máxima).
+   Se não houver sinais do Motor 18, refere brevemente a ausência de momento extremo.
+5. TABELA FINAL OBRIGATÓRIA (SÍNTESE DE ORDENS):
+   É ESTRITAMENTE OBRIGATÓRIO terminar o relatório com uma secção final intitulada "## 12. SÍNTESE DE ORDENS PARA APROVAÇÃO DO GESTOR DE CONTA" contendo uma tabela Markdown formatada exatamente com esta estrutura:
 
    | Ticker | Estratégia | Tipo de Ordem | Preço Entrada | Stop Loss | Take Profit | Qtd | Alocação Est. | Notas Táticas |
    | :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- |
@@ -250,6 +258,7 @@ A tua missão é ler integralmente este conteúdo, processar todos os ativos e c
    - Inclui TODAS as ações ativas em carteira que exijam fecho ou ajuste de stop.
    - Inclui TODAS as novas ordens aprovadas ajustadas pelo Lote Máximo do VIX (Motor 16).
    - Inclui os sinais do Motor 17 (2-Day RSI Drop & Rebound) indicando o alvo rápido da EMA5.
+   - Inclui os sinais do Motor 18 (Momentum Burst) com indicação do respetivo alvo rápido.
    - Respeita rigorosamente a moeda de cada ativo (USD ou EUR).
 
 DADOS RECOLHIDOS HOJE NOS FICHEIROS:
