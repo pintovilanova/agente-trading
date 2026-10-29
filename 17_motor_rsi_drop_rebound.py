@@ -104,40 +104,49 @@ for ticker, info in posicoes_ativas_dict.items():
     status = str(info.get("status", "")).strip().upper()
     if status in ["ATIVA_SWING", "ATIVA_M17"]:
         try:
+            # 1. Download de Dados Diários (Apenas para as EMAs e Stops)
             df_pos = yf.download(ticker, period="1mo", interval="1d", progress=False)
             if not df_pos.empty:
                 if isinstance(df_pos.columns, pd.MultiIndex):
                     df_pos.columns = df_pos.columns.droplevel(1)
                 
-                # 🛡️ PROTEÇÃO ANTI-BUG DO YAHOO: Remove a vela fantasma se O=H=L=C (fora de horas)
+                # Proteção Anti-Bug do Yahoo (Apaga a vela fantasma da madrugada)
                 if len(df_pos) > 1:
                     ult = df_pos.iloc[-1]
                     if ult['Open'] == ult['High'] == ult['Low'] == ult['Close']:
-                        df_pos = df_pos.iloc[:-1] # Descarta a vela corrompida
+                        df_pos = df_pos.iloc[:-1]
 
                 df_pos.ta.ema(length=5, append=True)
-                ultimo = df_pos.iloc[-1]
+                ema5_atual = round(float(df_pos['EMA_5'].iloc[-1]), 2)
+                stop = limpar_float(info.get("stopAtual")) or 0.0
                 
-                # 🎯 Busca o preço real através do último minuto negociado (Ignora bugs diários)
+                # 2. Download Intradiário (1 minuto) EXCLUSIVO para Preço Atual e Máxima
                 try:
                     df_intra = yf.download(ticker, period="5d", interval="1m", progress=False)
                     if isinstance(df_intra.columns, pd.MultiIndex):
                         df_intra.columns = df_intra.columns.droplevel(1)
+                    
+                    # Puxa os dados reais consolidados de 1m
                     preco_atual = round(float(df_intra['Close'].iloc[-1]), 2)
-                    max_intra = round(float(df_intra['High'].max()), 2)
+                    
+                    # A máxima de hoje baseada nos últimos 400 minutos de mercado (1 dia útil)
+                    if len(df_intra) >= 390:
+                        maxima_hoje = round(float(df_intra['High'].tail(390).max()), 2)
+                    else:
+                        maxima_hoje = round(float(df_intra['High'].max()), 2)
+                        
+                    minima_hoje = round(float(df_intra['Low'].tail(390).min()) if len(df_intra) >= 390 else float(df_intra['Low'].min()), 2)
+
                 except Exception:
-                    preco_atual = round(float(ultimo['Close']), 2)
-                    max_intra = preco_atual
-                
-                maxima_hoje = max(round(float(ultimo['High']), 2), max_intra)
-                minima_hoje = round(float(ultimo['Low']), 2)
-                ema5_atual = round(float(df_pos['EMA_5'].iloc[-1]), 2)
+                    # Fallback caso falhe o download de 1m
+                    preco_atual = round(float(df_pos['Close'].iloc[-1]), 2)
+                    maxima_hoje = round(float(df_pos['High'].iloc[-1]), 2)
+                    minima_hoje = round(float(df_pos['Low'].iloc[-1]), 2)
                 
                 entrada = limpar_float(info.get("precoEntrada")) or preco_atual
-                stop = limpar_float(info.get("stopAtual")) or 0.0
                 qtd = info.get("quantidade", "N/A")
                 
-                # Regras de Auditoria Tática
+                # Regras de Auditoria Tática (Garante que se o preço atual der um gap superior à máxima, conta o preço atual)
                 maxima_efetiva = max(maxima_hoje, preco_atual)
                 
                 if maxima_efetiva >= ema5_atual:
