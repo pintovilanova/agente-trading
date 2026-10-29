@@ -291,8 +291,37 @@ Por favor, utiliza o e-mail de backup enviado anteriormente com o assunto '[DADO
     sys.exit(0)
 
 # ===================================================================
-# 6. ENVIAR EMAIL DO RELATÓRIO FINAL DA IA
+# 6. ENVIAR EMAIL E NOTIFICAÇÃO SIMPLES NO TELEGRAM
 # ===================================================================
 print("\nA preparar envio do Relatório Mestre Formatado pela IA...")
 assunto_final = f"tradingRelatorioIA Global - 🤖 RELATÓRIO MESTRE ({data_hoje})"
+
+# Envio por E-mail do Relatório Completo
 enviar_email(assunto_final, relatorio_final)
+
+# Envio por Telegram de Notificação Curta (Controlado pelo Sheets: TELEGRAM_NOTIFICATIONS)
+telegram_ativado = str(configs_dict.get("TELEGRAM_NOTIFICATIONS", "true")).strip().lower() in ["true", "1", "sim", "yes"]
+
+if not telegram_ativado:
+    print("[INFO] Notificações de Telegram desativadas no Google Sheets (TELEGRAM_NOTIFICATIONS = false).")
+elif TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID:
+    try:
+        print("A enviar notificação de conclusão para o Telegram...")
+        url_tg = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
+        
+        mensagem_curta = f"🤖 *RELATÓRIO MESTRE GLOBAL ({data_hoje})*\n\n✅ O relatório de trading foi gerado com sucesso e já se encontra disponível na tua caixa de e-mail."
+        
+        payload_tg = {
+            "chat_id": TELEGRAM_CHAT_ID,
+            "text": mensagem_curta
+        }
+        
+        resp_tg = requests.post(url_tg, json=payload_tg, timeout=10)
+        if resp_tg.status_code == 200:
+            print("[SUCESSO] Notificação enviada via Telegram com sucesso!")
+        else:
+            print(f"[AVISO] Falha ao enviar Telegram: {resp_tg.text}")
+    except Exception as e:
+        print(f"[ERRO] Erro de rede ao enviar Telegram: {e}")
+else:
+    print("[AVISO] Credenciais de Telegram não configuradas no GitHub Secrets.")
