@@ -174,9 +174,6 @@ def analisar_momentum_burst(ativo_info, vol_alvo_diaria_usd):
         maximo_hoje = float(ultimo['High'])
 
         # Condições de Entrada (Burst de Momento e Volume)
-        # 1. RVOL >= 2.0 (Volume duplicado face à média)
-        # 2. Preço atual rompe a máxima dos últimos 5 dias
-        # 3. Tendência de suporte (Preço acima da EMA20)
         cond_rvol = rvol >= 2.0
         cond_rompimento = maximo_hoje >= max_5d
         cond_tendencia = preco > ema20
@@ -193,6 +190,10 @@ def analisar_momentum_burst(ativo_info, vol_alvo_diaria_usd):
             # Travão de Teto Técnico (Máximo 52 semanas)
             if max_52s and max_52s > 0 and alvo_tp > max_52s:
                 alvo_tp = round(max_52s, 2)
+
+            # 🛡️ Validação de segurança: garantir estritamente que o Take Profit fica acima do gatilho
+            if alvo_tp <= entrada_gatilho:
+                alvo_tp = round(entrada_gatilho + (risco * 1.5), 2)
 
             if risco > 0:
                 qtd_calc = round(vol_alvo_diaria_usd / risco, 2)
