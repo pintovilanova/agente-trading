@@ -1,6 +1,8 @@
 import os
 import sys
 import time
+import json
+import requests
 import smtplib
 import imaplib
 import email
@@ -10,6 +12,9 @@ from datetime import datetime
 from zoneinfo import ZoneInfo
 import warnings
 warnings.filterwarnings("ignore")
+
+# Importação da função modular de notificação do Telegram
+from F01_notificador_telegram import enviar_alerta
 
 # Importação da biblioteca Gemini com suporte a nova e antiga API
 try:
@@ -27,6 +32,8 @@ except ImportError:
 EMAIL_USER = os.environ.get("EMAIL_USER")
 EMAIL_PASS = os.environ.get("EMAIL_PASS")
 GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY")
+WEBHOOK_URL = os.environ.get("WEBHOOK_URL")
+
 SMTP_SERVER = "smtp.gmail.com"
 SMTP_PORT = 587
 IMAP_SERVER = "imap.gmail.com"
@@ -34,6 +41,24 @@ IMAP_SERVER = "imap.gmail.com"
 if not GEMINI_API_KEY:
     print("[ERRO] GEMINI_API_KEY não encontrada nas variáveis de ambiente.")
     sys.exit(1)
+
+# Função para buscar configurações do Google Sheets
+def buscar_configs_sheets():
+    print("A carregar configurações do Google Sheets...")
+    if not WEBHOOK_URL: 
+        return {}
+    try:
+        url_alvo = WEBHOOK_URL if "?" in WEBHOOK_URL else f"{WEBHOOK_URL}?aba=Analise Compra"
+        resp = requests.get(url_alvo, timeout=15)
+        if resp.status_code == 200:
+            dados = resp.json()
+            if isinstance(dados, dict):
+                return dados.get("configs", {})
+    except Exception as e:
+        print(f"[AVISO] Não foi possível carregar configs do Sheets: {e}")
+    return {}
+
+configs_dict = buscar_configs_sheets()
 
 # Função Auxiliar de Envio de Email (SMTP)
 def enviar_email(assunto, corpo_texto):
@@ -119,7 +144,7 @@ def obter_conteudo_ultimo_email_backup():
     return None
 
 # ===================================================================
-# 2. DEFINIR FICHEIROS ALVO DOS MOTORES (ATUALIZADO COM MOTOR 15 E 16)
+# 2. DEFINIR FICHEIROS ALVO DOS MOTORES
 # ===================================================================
 ficheiros_alvo = [
     "comboio_temp.txt",             # Extrator US
@@ -135,8 +160,8 @@ ficheiros_alvo = [
     "comboio_exaustao_temp.txt",    # Motor 13 (Exaustão Climática)
     "comboio_sazonalidade_temp.txt",# Motor 14 (Sazonalidade)
     "comboio_harvest_temp.txt",     # Motor 15 (Profit Harvest & Rebalancing)
-    "comboio_vix_temp.txt",          # Motor 16 (Volatility Regime & VIX)
-    "comboio_rsi_rebound_temp.txt"
+    "comboio_vix_temp.txt",         # Motor 16 (Volatility Regime & VIX)
+    "comboio_rsi_rebound_temp.txt"  # Motor 17 (2-Day RSI Drop & Rebound)
 ]
 
 conteudo_bruto_total = ""
@@ -179,23 +204,16 @@ else:
             conteudo_bruto_total += f"📁 FONTE: {ficheiro}\n"
             conteudo_bruto_total += f"==================================\n"
             
-            # TRATAMENTO ESPECIAL BLINDADO PARA MOTORES EM MODO SILÊNCIO
             if ficheiro == "comboio_exaustao_temp.txt":
                 conteudo_bruto_total += "✅ Nenhuma anomalia parabólica detetada. As posições ativas estão saudáveis e dentro dos parâmetros normais. (Modo Silêncio ativo).\n"
-                print(f"[SILÊNCIO] {ficheiro} não encontrado (Motor de Exaustão sem alertas, posições saudáveis).")
             elif ficheiro == "comboio_harvest_temp.txt":
                 conteudo_bruto_total += "✅ Nenhuma posição atingiu o patamar de 2R para colheita de lucro hoje. Gestão normal. (Modo Silêncio ativo).\n"
-                print(f"[SILÊNCIO] {ficheiro} não encontrado (Motor 15 sem colheitas ativas).")
             elif ficheiro == "comboio_vix_temp.txt":
                 conteudo_bruto_total += "📊 VIX em modo padrão/não disponível. Assumir Lote de 100% para novas entradas. (Modo Silêncio ativo).\n"
-                print(f"[SILÊNCIO] {ficheiro} não encontrado (Motor 16 em fallback para 100%).")
             elif ficheiro == "comboio_rsi_rebound_temp.txt":
                 conteudo_bruto_total += "✅ Nenhum ativo em retração extrema de 2 dias com RSI(2) < 10 hoje. (Modo Silêncio ativo).\n"
-                print(f"[SILÊNCIO] {ficheiro} não encontrado (Motor 17 sem sinais ativos hoje).")
             else:
                 conteudo_bruto_total += "[ERRO: FICHEIRO NÃO ENCONTRADO - MOTOR PODE TER FALHADO]\n"
-                print(f"[FALTA] {ficheiro} não encontrado.")
-                
 
 if not conteudo_bruto_total.strip():
     print("\n[INFO] Nenhum dado gerado. A pipeline termina de forma silenciosa.")
@@ -223,13 +241,13 @@ A tua missão é ler integralmente este conteúdo, processar todos os ativos e c
 2. ZERO CRIATIVIDADE DE DADOS: Não inventes preços, tickers, stops ou tamanhos de posição. Utiliza unicamente e na íntegra os dados fornecidos.
 3. VETO DE SOBREPOSIÇÃO: Posições ativas na carteira (com 'PosicaoAtiva: SIM') NÃO PODEM ter novas ordens de compra sugeridas.
 4. TABELA FINAL OBRIGATÓRIA (SÍNTESE DE ORDENS):
-   É ESTRITAMENTE OBRIGATÓRIO terminar o relatório com uma secção final intitulada "## 12. SÍNTESE DE ORDENS PARA APROVAÇÃO DO GESTOR DE CONTA" contendo uma tabela Markdown formatada exatamente com esta estrutura:
+    É ESTRITAMENTE OBRIGATÓRIO terminar o relatório com uma secção final intitulada "## 12. SÍNTESE DE ORDENS PARA APROVAÇÃO DO GESTOR DE CONTA" contendo uma tabela Markdown formatada exatamente com esta estrutura:
 
    | Ticker | Estratégia | Tipo de Ordem | Preço Entrada | Stop Loss | Take Profit | Qtd | Alocação Est. | Notas Táticas |
    | :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- |
 
    - Inclui TODAS as ordens de colheita parcial de lucro a 2R (Profit Harvest) geradas pelo Motor 15 no topo da tabela.
-   - Inclui TODAS as ações ativas em carteira que exijam fecho ou ajuste de stop (ex: fecho por Earnings).
+   - Inclui TODAS as ações ativas em carteira que exijam fecho ou ajuste de stop.
    - Inclui TODAS as novas ordens aprovadas ajustadas pelo Lote Máximo do VIX (Motor 16).
    - Inclui os sinais do Motor 17 (2-Day RSI Drop & Rebound) indicando o alvo rápido da EMA5.
    - Respeita rigorosamente a moeda de cada ativo (USD ou EUR).
@@ -241,8 +259,6 @@ DADOS RECOLHIDOS HOJE NOS FICHEIROS:
 print("\nA enviar dados consolidados para o Gemini Auditar...")
 
 relatorio_final = None
-
-# Modelos recomendados e ativos pela API Gemini
 modelos_para_testar = ['gemini-2.5-flash', 'gemini-3.8-flash', 'gemini-3.6-flash', 'gemini-1.5-flash']
 
 for mod in modelos_para_testar:
@@ -251,7 +267,6 @@ for mod in modelos_para_testar:
         
     print(f"\nA testar modelo Gemini: {mod}...")
     
-    # Tenta até 3 vezes por modelo para superar erros 503 de alta procura
     for tentativa in range(1, 4):
         try:
             if USE_NEW_GENAI:
@@ -273,25 +288,19 @@ for mod in modelos_para_testar:
             err_msg = str(e)
             print(f"[AVISO] Tentativa {tentativa} no modelo {mod} falhou: {err_msg}")
             if "503" in err_msg or "UNAVAILABLE" in err_msg:
-                print("Servidor temporariamente ocupado (503). A aguardar 4 segundos antes de tentar novamente...")
                 time.sleep(4)
             else:
                 break
 
 if not relatorio_final:
     print("\n[ALERTA DE IA] Não foi possível obter resposta de nenhum modelo Gemini.")
-    print("[INFO] A pipeline termina sem crash. O e-mail com os DADOS BRUTOS já está disponível para uso manual.")
-    
     assunto_erro = f"tradingRelatorioIA - ⚠️ AVISO: FALHA NA IA ({data_hoje})"
-    corpo_erro = f"""Ocorreu um erro ao comunicar com a API do Gemini (Alta procura temporária ou limite de quota).
-
-Por favor, utiliza o e-mail de backup enviado anteriormente com o assunto '[DADOS BRUTOS PARA IA]' e cola o conteúdo no ChatGPT / Claude / Gemini Web para obter o relatório formatado."""
-    
+    corpo_erro = "Ocorreu um erro ao comunicar com a API do Gemini."
     enviar_email(assunto_erro, corpo_erro)
     sys.exit(0)
 
 # ===================================================================
-# 6. ENVIAR EMAIL E NOTIFICAÇÃO SIMPLES NO TELEGRAM
+# 6. ENVIAR EMAIL E NOTIFICAÇÃO CURTA NO TELEGRAM (VIA F01_notificador_telegram)
 # ===================================================================
 print("\nA preparar envio do Relatório Mestre Formatado pela IA...")
 assunto_final = f"tradingRelatorioIA Global - 🤖 RELATÓRIO MESTRE ({data_hoje})"
@@ -304,24 +313,7 @@ telegram_ativado = str(configs_dict.get("TELEGRAM_NOTIFICATIONS", "true")).strip
 
 if not telegram_ativado:
     print("[INFO] Notificações de Telegram desativadas no Google Sheets (TELEGRAM_NOTIFICATIONS = false).")
-elif TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID:
-    try:
-        print("A enviar notificação de conclusão para o Telegram...")
-        url_tg = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
-        
-        mensagem_curta = f"🤖 *RELATÓRIO MESTRE GLOBAL ({data_hoje})*\n\n✅ O relatório de trading foi gerado com sucesso e já se encontra disponível na tua caixa de e-mail."
-        
-        payload_tg = {
-            "chat_id": TELEGRAM_CHAT_ID,
-            "text": mensagem_curta
-        }
-        
-        resp_tg = requests.post(url_tg, json=payload_tg, timeout=10)
-        if resp_tg.status_code == 200:
-            print("[SUCESSO] Notificação enviada via Telegram com sucesso!")
-        else:
-            print(f"[AVISO] Falha ao enviar Telegram: {resp_tg.text}")
-    except Exception as e:
-        print(f"[ERRO] Erro de rede ao enviar Telegram: {e}")
 else:
-    print("[AVISO] Credenciais de Telegram não configuradas no GitHub Secrets.")
+    print("A enviar notificação curta de conclusão para o Telegram...")
+    mensagem_curta = f"🤖 *RELATÓRIO MESTRE GLOBAL ({data_hoje})*\n\n✅ O relatório de trading foi gerado com sucesso e já se encontra disponível na tua caixa de e-mail."
+    enviar_alerta(mensagem_curta)
