@@ -80,7 +80,7 @@ pct_risco = limpar_float(configs_dict.get("RISCO_SWING_PCT")) or limpar_float(co
 
 VALOR_RISCO_USD = capital_total * pct_risco
 
-print(f"[CONFIG] Capital Total: ${capital_total:,.2f} \vert{} Risco/Trade: {pct_risco*100:.1f}\% (${VALOR_RISCO_USD:,.2f} USD)")
+print(f"[CONFIG] Capital Total: ${capital_total:,.2f} | Risco/Trade: {pct_risco*100:.1f}% (${VALOR_RISCO_USD:,.2f} USD)")
 
 # Tickers conhecidos por estarem deslistados ou causarem falhas no Yahoo Finance
 TICKERS_EXCLUIDOS = {"NVVE"}
@@ -160,7 +160,7 @@ for ticker, info in posicoes_ativas_dict.items():
                 
                 bloco_posicoes_ativas += (
                     f"📌 [POSIÇÃO ATIVA - {status}] {ticker} | Qtd: {qtd} | Entrada: ${entrada} | "
-                    f"Preço Atual: ${preco_atual} | Alvo EMA5: ${ema5_atual} \vert{} Stop Fixo:${stop} | "
+                    f"Preço Atual: ${preco_atual} | Alvo EMA5: ${ema5_atual} | Stop Fixo: ${stop} | "
                     f"AÇÃO: {acao}\n"
                 )
         except Exception as e:
@@ -296,4 +296,26 @@ if EMAIL_USER and EMAIL_PASS:
         print(f"[AVISO] Falha ao enviar e-mail direto: {e}")
 
 # 📱 Envio de Notificação Telegram (Controlado pelo Sheets)
-telegram_ativado = str(configs_dict.get("TELEGRAM
+telegram_ativado = str(configs_dict.get("TELEGRAM_NOTIFICATIONS", "true")).strip().lower() in ["true", "1", "sim", "yes"]
+
+if not telegram_ativado:
+    print("[INFO] Notificações de Telegram desativadas no Google Sheets (TELEGRAM_NOTIFICATIONS = false).")
+elif TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID:
+    try:
+        print("A enviar notificação para o Telegram...")
+        url_tg = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
+        payload_tg = {
+            "chat_id": TELEGRAM_CHAT_ID,
+            "text": f"🎯 *MOTOR 17 (2-DAY RSI DROP & REBOUND)*\n\n✅ Execução concluída com sucesso. Verifica o e-mail para consultar os sinais detetados."
+        }
+        resp_tg = requests.post(url_tg, json=payload_tg, timeout=10)
+        if resp_tg.status_code == 200:
+            print("[SUCESSO] Alerta enviado via Telegram com sucesso!")
+        else:
+            print(f"[AVISO] Falha ao enviar Telegram: {resp_tg.text}")
+    except Exception as e:
+        print(f"[ERRO] Erro de rede ao enviar Telegram: {e}")
+else:
+    print("[AVISO] Credenciais de Telegram não configuradas. Notificação ignorada.")
+
+print(f"[SUCESSO] Ciclo completo do Motor 17 concluído.")
