@@ -1,7 +1,6 @@
 name: 17 - ⚡ Motor RSI Drop & Rebound (Swing)
 
 on:
-  # Permite testar e executar manualmente a qualquer momento no GitHub
   workflow_dispatch:
 
 jobs:
@@ -23,11 +22,10 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           pip install yfinance pandas requests google-generativeai google-genai
-          pip install https://github.com/twopirllc/pandas-ta/archive/refs/tags/v0.3.14b0.zip
+          pip install pandas-ta==0.3.14b0 --no-build-isolation
 
       - name: ⚡ Executar Motor 17 (RSI Drop & Rebound)
         env:
-          # Credenciais seguras guardadas no GitHub Secrets
           WEBHOOK_URL: ${{ secrets.WEBHOOK_URL }}
           EMAIL_USER: ${{ secrets.EMAIL_USER }}
           EMAIL_PASS: ${{ secrets.EMAIL_PASS }}
@@ -35,7 +33,6 @@ jobs:
 
       - name: 🤖 Executar Agente IA Orquestrador (Auditoria e Envio de E-mail)
         env:
-          # O Orquestrador vai ler o ficheiro comboio_rsi_rebound_temp.txt gerado no passo anterior
           WEBHOOK_URL: ${{ secrets.WEBHOOK_URL }}
           EMAIL_USER: ${{ secrets.EMAIL_USER }}
           EMAIL_PASS: ${{ secrets.EMAIL_PASS }}
