@@ -1,3 +1,6 @@
+# ===================================================================
+# SISTEMA DE TRADING INSTITUCIONAL - MOTOR 11 (ROTAÇÃO SETORIAL)
+# ===================================================================
 import yfinance as yf
 import pandas as pd
 import numpy as np
@@ -10,6 +13,7 @@ from datetime import datetime
 from zoneinfo import ZoneInfo
 import time
 import random
+import requests
 import warnings
 warnings.filterwarnings("ignore")
 
@@ -89,8 +93,10 @@ try:
     spy_ret_1m = ((df_spy['Close'].iloc[-1] - df_spy['Close'].iloc[-21]) / df_spy['Close'].iloc[-21]) * 100
 
     resultados = []
+    total_analisados = 0
 
     for ticker, nome_setor in ETFS_SETORIAIS.items():
+        total_analisados += 1
         df_etf = get_yf_data(ticker, "1y")
         if df_etf.empty or len(df_etf) < 60:
             continue
@@ -158,10 +164,9 @@ try:
     # ===================================================================
     # 4. NOTIFICAÇÃO TELEGRAM DEBUG (CONTROLADA PELA FLAG DE CONFIGS)
     # ===================================================================
-    # Tenta carregar configs adicionais se existirem ou define padrão seguro
     debug_telegram_ativado = False
+    configs_dict = {}
     try:
-        # Se houver um endpoint configurado, podemos tentar obter as configs, caso contrário assume false ou lê de env
         webhook_url = os.environ.get('WEBHOOK_URL')
         if webhook_url:
             resp_cfg = requests.get(webhook_url, timeout=5)
@@ -175,7 +180,13 @@ try:
 
     if debug_telegram_ativado:
         print("A enviar notificação de Debug para o Telegram via função modular...")
-        mensagem_debug = f"11🏆 *(ROTAÇÃO SETORIAL)*\n\n🔍 [DEBUG] Execução concluída com sucesso. Análise de fluxo de capital e rotação gerada e enviada por e-mail."
+        total_acionados = len(df_res)
+        mensagem_debug = (
+            f"11 🏆 *ROTAÇÃO SETORIAL*\n\n"
+            f"🔍 [DEBUG] Execução concluída com sucesso.\n"
+            f"📊 Setores analisados: *{total_analisados}* | Processados: *{total_acionados}*\n"
+            f"✉️ Relatório de fluxo de capital gerado e enviado por e-mail."
+        )
         enviar_alerta(mensagem_debug)
 
 except Exception as e:
