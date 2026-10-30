@@ -128,7 +128,7 @@ else:
 tickers_watchlist = list(dict.fromkeys(tickers_watchlist))
 
 # ===================================================================
-# 4. AUDITAR POSIÇÕES EM CARTEIRA (CORREÇÃO DE ALVO EMA5)
+# 4. AUDITAR POSIÇÕES EM CARTEIRA (CORREÇÃO RIGOROSA DO PREÇO ATUAL)
 # ===================================================================
 bloco_posicoes_ativas = ""
 for chave_pos, info in posicoes_ativas_dict.items():
@@ -154,18 +154,16 @@ for chave_pos, info in posicoes_ativas_dict.items():
                     if isinstance(df_intra.columns, pd.MultiIndex):
                         df_intra.columns = df_intra.columns.droplevel(1)
                     preco_atual = round(float(df_intra['Close'].iloc[-1]), 2)
-                    maxima_hoje = round(float(df_intra['High'].max()), 2)
                     minima_hoje = round(float(df_intra['Low'].min()), 2)
                 except Exception:
                     preco_atual = round(float(df_pos['Close'].iloc[-1]), 2)
-                    maxima_hoje = round(float(df_pos['High'].iloc[-1]), 2)
                     minima_hoje = round(float(df_pos['Low'].iloc[-1]), 2)
                 
                 entrada = limpar_float(info.get("precoEntrada")) or preco_atual
                 qtd = info.get("quantidade", "N/A")
                 
-                # CORREÇÃO: O alvo só é atingido se o preço atual ou a máxima cruzarem a EMA5 de forma consistente
-                if preco_atual >= ema5_atual or maxima_hoje >= ema5_atual:
+                # CORREÇÃO DEFINITIVA: O alvo só é atingido se o PREÇO ATUAL cruzar a EMA5
+                if preco_atual >= ema5_atual:
                     acao = f"🎯 ALVO ALCANÇADO (EMA5 em ${ema5_atual})! FECHAR POSIÇÃO."
                 elif minima_hoje <= stop and stop > 0:
                     acao = f"🚨 STOP LOSS ATINGIDO (${stop})! LIQUIDAR POSIÇÃO."
