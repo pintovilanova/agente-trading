@@ -214,18 +214,18 @@ if alertas_rebound:
 else:
     bloco_texto += "✅ Nenhum novo sinal hoje.\n"
 
-# Envio Telegram Direto para o Chat Pessoal/Geral configurado
+# 📱 Envio de Notificação Telegram (Apenas aviso de envio para o e-mail)
 telegram_ativado = str(configs_dict.get("TELEGRAM_NOTIFICATIONS", "true")).strip().lower() in ["true", "1", "sim", "yes"]
 
 if not telegram_ativado:
     print("[INFO] Notificações de Telegram desativadas no Sheets.")
 elif TELEGRAM_BOT_TOKEN_GERAL and TELEGRAM_CHAT_ID:
     try:
-        print("A enviar notificação para o Telegram (Chat Geral/Pessoal)...")
+        print("A enviar notificação curta para o Telegram...")
         url_tg = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN_GERAL}/sendMessage"
         payload_tg = {
             "chat_id": TELEGRAM_CHAT_ID,
-            "text": f"🎯 *MOTOR 17 (2-DAY RSI DROP & REBOUND)*\n\n{bloco_texto}"
+            "text": f"🎯 *MOTOR 17 (2-DAY RSI DROP & REBOUND)*\n\n✅ Relatório enviado com sucesso para o e-mail!"
         }
         resp_tg = requests.post(url_tg, json=payload_tg, timeout=10)
         if resp_tg.status_code == 200:
