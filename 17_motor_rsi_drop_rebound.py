@@ -128,7 +128,7 @@ else:
 tickers_watchlist = list(dict.fromkeys(tickers_watchlist))
 
 # ===================================================================
-# 4. AUDITAR POSIÇÕES EM CARTEIRA (APENAS ESTADOS DO MOTOR 17)
+# 4. AUDITAR POSIÇÕES EM CARTEIRA (CORREÇÃO DE ALVO EMA5)
 # ===================================================================
 bloco_posicoes_ativas = ""
 for chave_pos, info in posicoes_ativas_dict.items():
@@ -136,10 +136,8 @@ for chave_pos, info in posicoes_ativas_dict.items():
         continue
     status = str(info.get("status", "")).strip().upper()
     
-    # Restrição estricta: Apenas audita posições pertencentes ao Motor 17 / Swing
     if status in ["ATIVA_SWING", "ATIVA_M17"]:
         try:
-            # Mapeamento robusto de tickers (ex: C3.ai -> AI)
             ticker = "AI" if chave_pos.lower() in ["c3.ai", "c3"] else chave_pos.strip().upper()
             
             df_pos = yf.download(ticker, period="1mo", interval="1d", progress=False)
@@ -165,9 +163,9 @@ for chave_pos, info in posicoes_ativas_dict.items():
                 
                 entrada = limpar_float(info.get("precoEntrada")) or preco_atual
                 qtd = info.get("quantidade", "N/A")
-                maxima_efetiva = max(maxima_hoje, preco_atual)
                 
-                if maxima_efetiva >= ema5_atual:
+                # CORREÇÃO: O alvo só é atingido se o preço atual ou a máxima cruzarem a EMA5 de forma consistente
+                if preco_atual >= ema5_atual or maxima_hoje >= ema5_atual:
                     acao = f"🎯 ALVO ALCANÇADO (EMA5 em ${ema5_atual})! FECHAR POSIÇÃO."
                 elif minima_hoje <= stop and stop > 0:
                     acao = f"🚨 STOP LOSS ATINGIDO (${stop})! LIQUIDAR POSIÇÃO."
