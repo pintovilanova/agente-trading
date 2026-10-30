@@ -109,5 +109,5 @@ debug_telegram_ativado = str(configs_dict.get("TELEGRAM_NOTIFICATIONS_DEBUG", "f
 
 if debug_telegram_ativado:
     print("A enviar notificação de Debug para o Telegram via função modular...")
-    mensagem_debug = f"📈 *MOTOR 16 (REGIME VIX)*\n\n🔍 [DEBUG] Execução concluída.\nVIX: {vix_atual:.2f} | Regime: {regime_nome}\nRelatório de volatilidade gerado."
+    mensagem_debug = f"16 📈 *(REGIME VIX)*\n\n🔍 [DEBUG] Execução concluída.\nVIX: {vix_atual:.2f} | Regime: {regime_nome}\nRelatório de volatilidade gerado."
     enviar_alerta(mensagem_debug)
