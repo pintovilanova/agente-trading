@@ -12,6 +12,9 @@ from zoneinfo import ZoneInfo
 import warnings
 warnings.filterwarnings("ignore")
 
+# Importação da função modular de notificação do Telegram
+from F01_notificador_telegram import enviar_alerta
+
 # ===================================================================
 # 0. CONFIGURAÇÕES E CREDENCIAIS
 # ===================================================================
@@ -26,6 +29,7 @@ print("A iniciar Motor 15 - Portfolio Rebalancing & Profit Harvest...")
 # ===================================================================
 # 1. OBTER POSIÇÕES ATIVAS DO GOOGLE SHEETS
 # ===================================================================
+configs_dict = {}
 try:
     resposta = requests.get(WEBHOOK_URL, timeout=15)
     if resposta.status_code != 200:
@@ -34,9 +38,9 @@ try:
         
     dados_webhook = resposta.json()
     posicoes_ativas = dados_webhook.get("posicoesAtivas", {})
-    configs = dados_webhook.get("configs", {})
+    configs_dict = dados_webhook.get("configs", {})
     
-    capital_total = float(configs.get("CAPITAL_TOTAL_CONTA", 10400.00))
+    capital_total = float(configs_dict.get("CAPITAL_TOTAL_CONTA", 10400.00))
     
 except Exception as e:
     print(f"[ERRO CRÍTICO] Falha de comunicação: {e}")
@@ -148,3 +152,14 @@ with open("comboio_harvest_temp.txt", "w", encoding="utf-8") as f:
     f.write(bloco_texto)
 
 print(f"[SUCESSO] Auditoria de Profit Harvest concluída. Alertas gerados: {len(alertas_colheita)}")
+
+# ===================================================================
+# 4. NOTIFICAÇÃO TELEGRAM DEBUG (CONTROLADA PELA FLAG DE CONFIGS)
+# ===================================================================
+debug_telegram_ativado = str(configs_dict.get("TELEGRAM_NOTIFICATIONS_DEBUG", "false")).strip().lower() in ["true", "1", "sim", "yes"]
+
+if debug_telegram_ativado:
+    print("A enviar notificação de Debug para o Telegram via função modular...")
+    status_msg = f"✂️ {len(alertas_colheita)} Oportunidades de Colheita (>= 2R)" if alertas_colheita else "✅ Nenhuma Posição em 2R para Colheita"
+    mensagem_debug = f"✂️ *MOTOR 15 (PROFIT HARVEST)*\n\n🔍 [DEBUG] Execução concluída.\nEstado: {status_msg}\nAuditoria de rebalanceamento finalizada."
+    enviar_alerta(mensagem_debug)
