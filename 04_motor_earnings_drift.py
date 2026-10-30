@@ -317,10 +317,12 @@ def executar_motor():
     print(f"[CONFIG] Alvo Volatilidade Anual: {alvo_volatilidade_anual*100:.1f}%")
     print(f"[CONFIG] Orçamento Diário de Volatilidade: ${volatilidade_alvo_diaria_usd:.2f}\n")
 
+    total_analisados = 0
     for ativo_info in ativos:
         ticker = ativo_info.get("ticker")
         if not ticker or ticker == "#N/A": continue
         
+        total_analisados += 1
         res = analisar_earnings_drift(ativo_info, volatilidade_alvo_diaria_usd)
         
         if res:
@@ -398,7 +400,13 @@ def executar_motor():
 
     if debug_telegram_ativado:
         print("A enviar notificação de Debug para o Telegram via função modular...")
-        mensagem_debug = "04 📊 *MOTOR DE EARNINGS DRIFT (PEAD)*\n\n🔍 [DEBUG] Execução concluída com sucesso. Relatório de Earnings gerado e enviado por e-mail."
+        total_acionados = len(comboio_ia)
+        mensagem_debug = (
+            f"04 📊 *MOTOR DE EARNINGS DRIFT (PEAD)*\n\n"
+            f"🔍 [DEBUG] Execução concluída com sucesso.\n"
+            f"📊 Ativos analisados: *{total_analisados}* | Acionados: *{total_acionados}*\n"
+            f"✉️ Relatório de Earnings gerado e enviado por e-mail."
+        )
         enviar_alerta(mensagem_debug)
 
 if __name__ == "__main__":
