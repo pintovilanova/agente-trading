@@ -135,5 +135,5 @@ debug_telegram_ativado = str(configs_dict.get("TELEGRAM_NOTIFICATIONS_DEBUG", "f
 if debug_telegram_ativado:
     print("A enviar notificação de Debug para o Telegram via função modular...")
     status_msg = f"🌟 {len(sinais_sazonalidade)} Ativos com Sazonalidade Favorável" if sinais_sazonalidade else "⚖️ Sem Janelas Sazonais Ativas"
-    mensagem_debug = f"📅 *MOTOR 14 (SAZONALIDADE INSTITUCIONAL)*\n\n🔍 [DEBUG] Execução concluída.\nEstado: {status_msg}\nRelatório temporal gerado."
+    mensagem_debug = f"14 📅 *MOTOR 14 (SAZONALIDADE INSTITUCIONAL)*\n\n🔍 [DEBUG] Execução concluída.\nEstado: {status_msg}\nRelatório temporal gerado."
     enviar_alerta(mensagem_debug)
