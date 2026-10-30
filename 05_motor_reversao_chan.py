@@ -371,7 +371,7 @@ Estrutura Visual Obrigatória:
 
     if debug_telegram_ativado:
         print("A enviar notificação de Debug para o Telegram via função modular...")
-        mensagem_debug = "🧲 *MOTOR CONNORS-CHAN (REVERSÃO)*\n\n🔍 [DEBUG] Execução concluída com sucesso. Relatório Connors-Chan gerado e enviado por e-mail."
+        mensagem_debug = "05 🧲 *MOTOR CONNORS-CHAN (REVERSÃO)*\n\n🔍 [DEBUG] Execução concluída com sucesso. Relatório Connors-Chan gerado e enviado por e-mail."
         enviar_alerta(mensagem_debug)
 
 if __name__ == "__main__":
