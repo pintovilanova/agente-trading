@@ -3,7 +3,8 @@
 # ===================================================================================
 # Descrição Geral:
 # Identifica ativos de alta liquidez a sofrer uma explosão de volume institucional 
-# (RVOL >= 2.0) acompanhada de um rompimento direcional de curto prazo (Hit and Run).
+# (RVOL >= 2.0) acompanhada de um rompimento direcional de curto prazo (Hit and Run),
+# auditando em simultâneo as posições ativas em carteira (ATIVA_M18).
 # ===================================================================================
 
 import pandas as pd
@@ -20,6 +21,7 @@ import time
 import random
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
+import json
 import warnings
 warnings.filterwarnings("ignore")
 
@@ -54,27 +56,35 @@ def limpar_float(val):
         return None
 
 # ===================================================================
-# 2. FUNÇÕES DE REDE E CONFIGS
+# 2. FUNÇÕES DE REDE E CONFIGS (LEITURA COMPLETA DO SHEETS)
 # ===================================================================
-def buscar_watchlist():
-    print("A carregar a Watchlist do Google Sheets...")
+def buscar_dados_completos():
+    print("A carregar Watchlist, Posições Ativas e Configs a partir do Google Sheets...")
     if not WEBHOOK_URL: 
         print("[ERRO] WEBHOOK_URL não configurado.")
-        return [], {}
+        return [], {}, {}
     try:
         url_alvo = WEBHOOK_URL if "?" in WEBHOOK_URL else f"{WEBHOOK_URL}?aba=Analise Compra"
         resp = requests.get(url_alvo, timeout=15)
         
         if resp.status_code == 200:
-            dados = resp.json()
+            try:
+                dados = resp.json()
+            except json.JSONDecodeError:
+                print(f"[ERRO] O Webhook não retornou um JSON válido. Resposta: {resp.text[:200]}")
+                return [], {}, {}
+
             if isinstance(dados, dict):
-                return dados.get("ativos", []), dados.get("configs", {})
+                ativos = dados.get("ativos", [])
+                posicoes = dados.get("posicoesAtivas", {})
+                configs = dados.get("configs", {})
+                return ativos, posicoes, configs
             elif isinstance(dados, list):
-                return dados, {}
-        return [], {}
+                return dados, {}, {}
+        return [], {}, {}
     except Exception as e:
         print(f"[ERRO CRÍTICO] Sheets: {e}")
-        return [], {}
+        return [], {}, {}
 
 def enviar_email(conteudo):
     print("\nA enviar email do Motor 18 para o Agente IA...")
@@ -99,21 +109,81 @@ def enviar_email(conteudo):
             if tentativa < 2: time.sleep(5)
 
 # ===================================================================
-# 3. MOTOR MATEMÁTICO: MOMENTUM BURST & RVOL
+# 3. CARGA DE DADOS E PARAMETRIZAÇÃO
 # ===================================================================
-def analisar_momentum_burst(ativo_info, vol_alvo_diaria_usd):
+ativos_sheets, posicoes_ativas_dict, configs_dict = buscar_dados_completos()
+
+try:
+    capital = float(configs_dict.get("CAPITAL_TOTAL_CONTA", 10400.00))
+    vol_anual = float(configs_dict.get("ALVO_VOLATILIDADE_ANUAL", 0.05))
+except (ValueError, TypeError):
+    capital, vol_anual = 10400.00, 0.05
+
+vol_diaria_usd = (capital * vol_anual) / 16.0
+print(f"[CONFIG] Orçamento Diário de Volatilidade: ${vol_diaria_usd:.2f}\n")
+
+# ===================================================================
+# 4. AUDITAR POSIÇÕES EM CARTEIRA (ESTADO: ATIVA_M18)
+# ===================================================================
+bloco_posicoes_ativas = ""
+for ticker, info in posicoes_ativas_dict.items():
+    status = str(info.get("status", "")).strip().upper()
+    if status in ["ATIVA_M18", "ATIVA_SWING"]:
+        try:
+            df_pos = yf.download(ticker, period="1mo", interval="1d", progress=False)
+            if not df_pos.empty:
+                if isinstance(df_pos.columns, pd.MultiIndex):
+                    df_pos.columns = df_pos.columns.droplevel(1)
+                
+                stop = limpar_float(info.get("stopAtual")) or limpar_float(info.get("stopLoss")) or 0.0
+                alvo_tp = limpar_float(info.get("alvoTp")) or limpar_float(info.get("takeProfit")) or 0.0
+                
+                try:
+                    df_intra = yf.download(ticker, period="2d", interval="1m", prepost=True, progress=False)
+                    if isinstance(df_intra.columns, pd.MultiIndex):
+                        df_intra.columns = df_intra.columns.droplevel(1)
+                    preco_atual = round(float(df_intra['Close'].iloc[-1]), 2)
+                    maxima_hoje = round(float(df_intra['High'].max()), 2)
+                    minima_hoje = round(float(df_intra['Low'].min()), 2)
+                except Exception:
+                    preco_atual = round(float(df_pos['Close'].iloc[-1]), 2)
+                    maxima_hoje = round(float(df_pos['High'].iloc[-1]), 2)
+                    minima_hoje = round(float(df_pos['Low'].iloc[-1]), 2)
+                
+                entrada = limpar_float(info.get("precoEntrada")) or preco_atual
+                qtd = info.get("quantidade", "N/A")
+                maxima_efetiva = max(maxima_hoje, preco_atual)
+                
+                if alvo_tp > 0 and maxima_efetiva >= alvo_tp:
+                    acao = f"🎯 ALVO ALCANÇADO (TP em ${alvo_tp})! Recomendado FECHAR POSIÇÃO com Lucro (WIN)."
+                elif stop > 0 and minima_hoje <= stop:
+                    acao = f"🚨 STOP LOSS ATINGIDO (${stop})! Recomendado LIQUIDAR POSIÇÃO (LOSS)."
+                else:
+                    acao = f"⏳ MANTER POSIÇÃO (Hit and Run). Alvo TP: ${alvo_tp} | Stop Fixo/Trail: ${stop}."
+                
+                bloco_posicoes_ativas += (
+                    f"📌 [POSIÇÃO ATIVA - {status}] {ticker} | Qtd: {qtd} | Entrada: ${entrada} | "
+                    f"Preço Atual: ${preco_atual} | Alvo: ${alvo_tp} | Stop: ${stop} | "
+                    f"AÇÃO: {acao}\n"
+                )
+        except Exception as e:
+            print(f"[ERRO] Falha ao auditar posição ativa {ticker}: {e}")
+
+# ===================================================================
+# 5. MOTOR MATEMÁTICO: MOMENTUM BURST & RVOL (NOVOS SINAIS)
+# ===================================================================
+def analisar_momentum_burst(ativo_info):
     try:
         ticker = str(ativo_info.get("ticker", "")).strip().upper()
         nome_empresa = ativo_info.get("nome", "N/A")
         setor = str(ativo_info.get("setor", "Desconhecido")).strip()
-        rs_score = ativo_info.get("rs_score", "N/A")
 
         if not ticker or ticker == "#N/A" or ticker == "NONE": return None
+        if ticker in posicoes_ativas_dict: return None # Ignora se já estiver em carteira
         if ticker == "BRK-A": ticker = "BRK-B"
 
         time.sleep(random.uniform(0.8, 1.8))
 
-        # Dados fundamentais e Máximo de 52 Semanas (Travão Técnico)
         max_52s = None
         alerta_earnings = "OK"
         try:
@@ -133,7 +203,6 @@ def analisar_momentum_burst(ativo_info, vol_alvo_diaria_usd):
         except:
             pass
 
-        # Obtenção de dados históricos
         df = pd.DataFrame()
         for _ in range(3):
             try:
@@ -150,7 +219,6 @@ def analisar_momentum_burst(ativo_info, vol_alvo_diaria_usd):
         preco = float(df['Close'].iloc[-1])
         if preco < 5.00: return None
 
-        # Indicadores técnicos
         df['EMA_20'] = df['Close'].ewm(span=20, adjust=False).mean()
         df['Vol_SMA_20'] = df['Volume'].rolling(window=20).mean()
         df.ta.atr(length=14, append=True)
@@ -165,15 +233,11 @@ def analisar_momentum_burst(ativo_info, vol_alvo_diaria_usd):
         atr = float(ultimo[col_atr])
         ema20 = float(ultimo['EMA_20'])
 
-        # Cálculo do RVOL (Relative Volume)
         rvol = vol_atual / vol_sma20 if vol_sma20 > 0 else 0.0
-
-        # Máxima dos últimos 5 dias (excluindo a barra atual)
         max_5d = float(df['High'].iloc[-6:-1].max())
         minimo_hoje = float(ultimo['Low'])
         maximo_hoje = float(ultimo['High'])
 
-        # Condições de Entrada (Burst de Momento e Volume)
         cond_rvol = rvol >= 2.0
         cond_rompimento = maximo_hoje >= max_5d
         cond_tendencia = preco > ema20
@@ -185,21 +249,15 @@ def analisar_momentum_burst(ativo_info, vol_alvo_diaria_usd):
             stop_loss = round(min(minimo_hoje * 0.99, entrada_gatilho - (atr * 1.5)), 2)
             
             risco = entrada_gatilho - stop_loss
-            alvo_tp = round(entrada_gatilho + (risco * 2.0), 2) # Rácio 2.0R para rotação rápida
+            alvo_tp = round(entrada_gatilho + (risco * 2.0), 2)
 
-            # Travão de Teto Técnico (Máximo 52 semanas)
             if max_52s and max_52s > 0 and alvo_tp > max_52s:
                 alvo_tp = round(max_52s, 2)
 
-            # 🛡️ Validação de segurança: garantir estritamente que o Take Profit fica acima do gatilho
             if alvo_tp <= entrada_gatilho:
                 alvo_tp = round(entrada_gatilho + (risco * 1.5), 2)
 
-            if risco > 0:
-                qtd_calc = round(vol_alvo_diaria_usd / risco, 2)
-            else:
-                return None
-
+            qtd_calc = round(vol_diaria_usd / risco, 2) if risco > 0 else 0.0
             val_calc = entrada_gatilho * qtd_calc
             valor_investir = f"~{val_calc:.2f} USD"
 
@@ -216,10 +274,7 @@ def analisar_momentum_burst(ativo_info, vol_alvo_diaria_usd):
                 f"Data: {datetime.now(ZoneInfo('Europe/Lisbon')).strftime('%d/%m/%Y %H:%M:%S')}"
             )
 
-            return {
-                "ticker": ticker,
-                "comboio_str": linha_comboio
-            }
+            return {"ticker": ticker, "comboio_str": linha_comboio}
 
         return None
     except Exception as e:
@@ -227,46 +282,33 @@ def analisar_momentum_burst(ativo_info, vol_alvo_diaria_usd):
         return None
 
 # ===================================================================
-# 4. EXECUÇÃO PRINCIPAL
+# 6. EXECUÇÃO PRINCIPAL E RELATÓRIO
 # ===================================================================
 def executar_motor():
-    ativos, configs = buscar_watchlist()
-    if not ativos: sys.exit(0)
-        
-    try:
-        capital = float(configs.get("CAPITAL_TOTAL_CONTA", 10400.00))
-        vol_anual = float(configs.get("ALVO_VOLATILIDADE_ANUAL", 0.05))
-    except (ValueError, TypeError):
-        capital, vol_anual = 10400.00, 0.05
-
-    vol_diaria_usd = (capital * vol_anual) / 16.0
-    print(f"[CONFIG] Orçamento Diário de Volatilidade: ${vol_diaria_usd:.2f}\n")
+    if not ativos_sheets: sys.exit(0)
 
     ativos_acionados = []
-    for ativo_info in ativos:
+    for ativo_info in ativos_sheets:
         ticker = ativo_info.get("ticker")
         if not ticker or ticker == "#N/A": continue
         
-        res = analisar_momentum_burst(ativo_info, vol_diaria_usd)
+        res = analisar_momentum_burst(ativo_info)
         if res: ativos_acionados.append(res)
 
     prompt_ia = """MODO ESTRATÉGICO: MOTOR 18 - MOMENTUM BURST & VOLUME SURGE
-O teu mandato é auditar oportunidades de curto prazo (Hit and Run) focadas em explosões institucionais de volume.
-
-ESTRUTURA OBRIGATÓRIA:
-⚡ [TICKER] - [Nome da Empresa] ([Setor])
-- 🚀 DIAGNÓSTICO DE MOMENTO: Explosão de volume detetada (RVOL elevado) com quebra de máximos de curto prazo.
-- ⚙️ TÁTICA DE EXECUÇÃO: Colocar ordem Buy Stop no Gatilho de [Entrada].
-- 🛡️ RISCO E ALVO: Stop em [Stop] | Alvo: [TP] | Qtd: [X] | Alocação: [Valor] USD.
-- 🔄 PASSAGEM DE TESTEMUNHO: Adiciona: "⚠️ ATENÇÃO: Operação puramente HIT AND RUN. Assim que executada, regista o estado no Sheets como 'ATIVA_M18'. Logo que atinja o Alvo (TP), fecha a posição integralmente para libertar capital."
-"""
+O teu mandato é auditar oportunidades de curto prazo (Hit and Run) focadas em explosões institucionais de volume."""
 
     bloco = f"⚡ RELATÓRIO MOTOR 18 - MOMENTUM BURST 🚀\n\n{prompt_ia}\n\n--------------------------------------------------\n"
 
+    if bloco_posicoes_ativas:
+        bloco += "GESTÃO DE POSIÇÕES ATIVAS (ATIVA_M18):\n\n"
+        bloco += bloco_posicoes_ativas
+        bloco += "--------------------------------------------------\n\n"
+
     if not ativos_acionados:
-        bloco += "[SEM SINAIS MOMENTUM BURST] - Nenhum ativo apresenta explosão de volume e momento hoje.\n"
+        bloco += "[SEM NOVOS SINAIS] - Nenhum novo ativo apresenta explosão de volume e momento hoje.\n"
     else:
-        bloco += "ALVOS DE MOMENTUM BURST:\n\n"
+        bloco += "NOVOS ALVOS DE MOMENTUM BURST:\n\n"
         for item in ativos_acionados:
             bloco += item["comboio_str"] + "\n"
 
@@ -275,12 +317,18 @@ ESTRUTURA OBRIGATÓRIA:
 
     enviar_email(bloco)
 
-    # Notificação simples no Telegram (respeitando o Sheets)
-    telegram_ativado = str(configs.get("TELEGRAM_NOTIFICATIONS", "true")).strip().lower() in ["true", "1", "sim", "yes"]
+    telegram_ativado = str(configs_dict.get("TELEGRAM_NOTIFICATIONS", "true")).strip().lower() in ["true", "1", "sim", "yes"]
     if telegram_ativado:
-        print("A enviar notificação curta de conclusão do Motor 18 para o Telegram...")
-        mensagem_curta = "⚡ *MOTOR 18 (MOMENTUM BURST)*\n\n✅ Execução concluída com sucesso. Verifica o e-mail para consultar os sinais detetados."
-        enviar_alerta(mensagem_curta)
+        print("A enviar notificação para o Telegram...")
+        telegram_token = os.environ.get('TELEGRAM_BOT_TOKEN_GERAL')
+        telegram_chat = os.environ.get('TELEGRAM_CHAT_ID')
+        if telegram_token and telegram_chat:
+            url_tg = f"https://api.telegram.org/bot{telegram_token}/sendMessage"
+            payload_tg = {
+                "chat_id": telegram_chat,
+                "text": "⚡ *MOTOR 18 (MOMENTUM BURST)*\n\n✅ Relatório e auditoria de posições enviados com sucesso para o e-mail!"
+            }
+            requests.post(url_tg, json=payload_tg, timeout=10)
 
 if __name__ == "__main__":
     executar_motor()
