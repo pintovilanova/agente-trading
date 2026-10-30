@@ -30,6 +30,7 @@ print("A iniciar Motor 15 - Portfolio Rebalancing & Profit Harvest...")
 # 1. OBTER POSIÇÕES ATIVAS DO GOOGLE SHEETS
 # ===================================================================
 configs_dict = {}
+posicoes_ativas = {}
 try:
     resposta = requests.get(WEBHOOK_URL, timeout=15)
     if resposta.status_code != 200:
@@ -55,12 +56,14 @@ if not posicoes_ativas:
 # ===================================================================
 relatorio_harvest = []
 alertas_colheita = []
+total_posicoes_auditadas = 0
 
 for ticker, pos in posicoes_ativas.items():
     status = pos.get('status', '')
     if status not in ['ATIVA', 'ATIVA_FAST']:
         continue
         
+    total_posicoes_auditadas += 1
     try:
         preco_entrada = float(str(pos.get('precoEntrada', 0)).replace(',', '.'))
         stop_inicial = float(str(pos.get('stopInicial', pos.get('stopAtual', 0))).replace(',', '.'))
@@ -161,5 +164,10 @@ debug_telegram_ativado = str(configs_dict.get("TELEGRAM_NOTIFICATIONS_DEBUG", "f
 if debug_telegram_ativado:
     print("A enviar notificação de Debug para o Telegram via função modular...")
     status_msg = f"✂️ {len(alertas_colheita)} Oportunidades de Colheita (>= 2R)" if alertas_colheita else "✅ Nenhuma Posição em 2R para Colheita"
-    mensagem_debug = f"15 ✂️ *MOTOR 15 (PROFIT HARVEST)*\n\n🔍 [DEBUG] Execução concluída.\nEstado: {status_msg}\nAuditoria de rebalanceamento finalizada."
+    mensagem_debug = (
+        f"15 ✂️ *MOTOR 15 (PROFIT HARVEST)*\n\n"
+        f"🔍 [DEBUG] Execução concluída com sucesso.\n"
+        f"📊 Posições auditadas: *{total_posicoes_auditadas}* | Acionadas (>= 2R): *{len(alertas_colheita)}*\n"
+        f"Auditoria de rebalanceamento finalizada."
+    )
     enviar_alerta(mensagem_debug)
