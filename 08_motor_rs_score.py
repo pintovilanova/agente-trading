@@ -15,6 +15,9 @@ from email.mime.multipart import MIMEMultipart
 import warnings
 warnings.filterwarnings("ignore")
 
+# Importação da função modular de notificação do Telegram
+from F01_notificador_telegram import enviar_alerta
+
 # ===================================================================
 # 0. TRAVA DE FIM DE SEMANA
 # ===================================================================
@@ -44,18 +47,23 @@ SETORES_ETFS = {
 # ===================================================================
 # 2. FUNÇÕES DE REDE E COMUNICAÇÃO
 # ===================================================================
-def buscar_watchlist():
-    print("A carregar a Watchlist do Google Sheets...")
-    if not WEBHOOK_URL: return []
+def buscar_dados_completos():
+    print("A carregar a Watchlist e Configurações do Google Sheets...")
+    if not WEBHOOK_URL: return [], {}
     try:
         resp = requests.get(WEBHOOK_URL, timeout=15)
         if resp.status_code == 200:
             dados = resp.json()
-            return dados.get("ativos", []) if isinstance(dados, dict) else dados
-        return []
+            if isinstance(dados, dict):
+                ativos = dados.get("ativos", [])
+                configs = dados.get("configs", {})
+                return ativos, configs
+            elif isinstance(dados, list):
+                return dados, {}
+        return [], {}
     except Exception as e:
         print(f"[ERRO] Sheets: {e}")
-        return []
+        return [], {}
 
 def atualizar_rs_no_sheets(lista_scores):
     print("\nA enviar atualização de RS Scores para o Google Sheets (Coluna O)...")
@@ -99,7 +107,6 @@ def enviar_email_bruto(conteudo):
 def calcular_performance_historica(ticker):
     ticker = str(ticker).strip().upper()
     
-    # CORREÇÃO: Conversão de BRK-A para BRK-B
     if ticker == "BRK-A":
         ticker = "BRK-B"
 
@@ -147,8 +154,8 @@ def executar_radar():
             
     lista_setores = sorted(lista_setores, key=lambda k: k['alpha'], reverse=True)
 
-    print("A analisar Watchlist Pessoal...")
-    ativos = buscar_watchlist()
+    print("A analisar Watchlist Pessoal e Configurações...")
+    ativos, configs = buscar_dados_completos()
     lista_watchlist = []
     for ativo in ativos:
         ticker = ativo.get("ticker")
@@ -166,7 +173,6 @@ def executar_radar():
         lista_watchlist = df_wl.to_dict('records')
         lista_watchlist = sorted(lista_watchlist, key=lambda k: k['RS_Score'], reverse=True)
         
-        # Preparar dados simplificados para gravar no Google Sheets
         for w in lista_watchlist:
             dados_para_sheets.append({"ticker": w['ticker'], "rs_score": int(w['RS_Score'])})
 
@@ -195,7 +201,7 @@ def executar_radar():
 
     bloco_texto_ia += "\n--------------------------------------------------\n"
     bloco_texto_ia += "[WATCHLIST - TOP 10 RS SCORES (Ativos já gravados no Sheets)]\n"
-    for w in lista_watchlist[:10]: # Envia só o Top 10 para o email não ficar gigante
+    for w in lista_watchlist[:10]:
         rs = int(w['RS_Score'])
         bloco_texto_ia += f"Ticker: {w['ticker']} | RS Score: {rs} | Alpha vs SPY: {w['alpha']:.2f}%\n"
 
@@ -203,6 +209,16 @@ def executar_radar():
         f.write(bloco_texto_ia)
 
     enviar_email_bruto(bloco_texto_ia)
+
+    # ===================================================================
+    # 5. NOTIFICAÇÃO TELEGRAM DEBUG (CONTROLADA PELA FLAG DE CONFIGS)
+    # ===================================================================
+    debug_telegram_ativado = str(configs.get("TELEGRAM_NOTIFICATIONS_DEBUG", "false")).strip().lower() in ["true", "1", "sim", "yes"]
+
+    if debug_telegram_ativado:
+        print("A enviar notificação de Debug para o Telegram via função modular...")
+        mensagem_debug = "🧭 *MOTOR RS SCORE & ROTAÇÃO SETORIAL*\n\n🔍 [DEBUG] Execução concluída com sucesso. RS Scores calculados, atualizados no Google Sheets e relatório enviado por e-mail."
+        enviar_alerta(mensagem_debug)
 
 if __name__ == "__main__":
     executar_radar()
