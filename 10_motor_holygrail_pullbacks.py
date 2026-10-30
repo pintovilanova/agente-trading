@@ -6,7 +6,8 @@
 # Procura ativos com Força Relativa de Elite (RS >= 80) e forte tendência direcional
 # (ADX > 25), que estão a sofrer um pullback natural de curto prazo, tocando na 
 # Média Móvel Exponencial (EMA) de 20 ou 21 dias, com forte contração de volume,
-# auditando em simultâneo as posições ativas em carteira (ATIVA_M10 / ATIVA_SWING).
+# auditando em simultâneo as posições ativas em carteira (ATIVA_M10 / ATIVA_SWING)
+# com base na lógica dinâmica de EMA20 e ATR.
 # ===================================================================================
 
 import pandas as pd
@@ -128,19 +129,30 @@ vol_diaria_usd = (capital * vol_anual) / 16.0
 print(f"[CONFIG] Orçamento Diário de Volatilidade: ${vol_diaria_usd:.2f}\n")
 
 # ===================================================================
-# 4. AUDITAR POSIÇÕES EM CARTEIRA (ESTADO: ATIVA_M10 / ATIVA_SWING)
+# 4. AUDITAR POSIÇÕES EM CARTEIRA (LÓGICA DINÂMICA DE EMA20 E ATR)
 # ===================================================================
 bloco_posicoes_ativas = ""
 for ticker, info in posicoes_ativas_dict.items():
     status = str(info.get("status", "")).strip().upper()
     if status in ["ATIVA_M10", "ATIVA_SWING"]:
         try:
-            df_pos = yf.download(ticker, period="1mo", interval="1d", progress=False)
+            df_pos = yf.download(ticker, period="2mo", interval="1d", progress=False)
             if not df_pos.empty:
                 if isinstance(df_pos.columns, pd.MultiIndex):
                     df_pos.columns = df_pos.columns.droplevel(1)
                 
-                stop = limpar_float(info.get("stopAtual")) or limpar_float(info.get("stopLoss")) or 0.0
+                df_pos['EMA_20'] = df_pos['Close'].ewm(span=20, adjust=False).mean()
+                df_pos['EMA_50'] = df_pos['Close'].ewm(span=50, adjust=False).mean()
+                df_pos.ta.atr(length=14, append=True)
+                
+                col_atr = [c for c in df_pos.columns if str(c).startswith('ATRr_') or str(c).startswith('ATR_')][0]
+                
+                ultimo_pos = df_pos.iloc[-1]
+                ema20_atual = round(float(ultimo_pos['EMA_20']), 2)
+                ema50_atual = round(float(ultimo_pos['EMA_50']), 2)
+                atr_atual = round(float(ultimo_pos[col_atr]), 2)
+                
+                stop_atual = limpar_float(info.get("stopAtual")) or limpar_float(info.get("stopLoss")) or 0.0
                 alvo_tp = limpar_float(info.get("alvoTp")) or limpar_float(info.get("takeProfit")) or 0.0
                 
                 try:
@@ -159,16 +171,23 @@ for ticker, info in posicoes_ativas_dict.items():
                 qtd = info.get("quantidade", "N/A")
                 maxima_efetiva = max(maxima_hoje, preco_atual)
                 
+                # Trailing stop dinâmico baseado na estratégia Holy Grail (ex: EMA20 - ATR ou suporte de tendência)
+                trailing_sugerido = round(ema20_atual - atr_atual, 2)
+                
                 if alvo_tp > 0 and maxima_efetiva >= alvo_tp:
                     acao = f"🎯 ALVO ALCANÇADO (TP em ${alvo_tp})! Recomendado FECHAR POSIÇÃO com Lucro (WIN)."
-                elif stop > 0 and minima_hoje <= stop:
-                    acao = f"🚨 STOP LOSS ATINGIDO (${stop})! Recomendado LIQUIDAR POSIÇÃO (LOSS)."
+                elif stop_atual > 0 and minima_hoje <= stop_atual:
+                    acao = f"🚨 STOP LOSS ATINGIDO (${stop_atual})! Recomendado LIQUIDAR POSIÇÃO (LOSS)."
+                elif preco_atual < ema50_atual:
+                    acao = f"⚠️ ALERTA TÉCNICO: Preço (${preco_atual}) abaixo da EMA50 (${ema50_atual}). Deterioração da tendência, considerar fechar."
+                elif trailing_sugerido > stop_atual:
+                    acao = f"📈 GESTÃO DINÂMICA: Subir Stop Loss para o novo Trailing baseado na EMA20 (${trailing_sugerido})."
                 else:
-                    acao = f"⏳ MANTER POSIÇÃO (Holy Grail). Alvo TP: ${alvo_tp} | Stop: ${stop}."
+                    acao = f"⏳ MANTER POSIÇÃO (Holy Grail). Preço acima da EMA20 (${ema20_atual}) | Stop Atual: ${stop_atual}."
                 
                 bloco_posicoes_ativas += (
                     f"📌 [POSIÇÃO ATIVA - {status}] {ticker} | Qtd: {qtd} | Entrada: ${entrada} | "
-                    f"Preço Atual: ${preco_atual} | Alvo: ${alvo_tp} | Stop: ${stop} | "
+                    f"Preço Atual: ${preco_atual} | EMA20: ${ema20_atual} | Trailing Sugerido: ${trailing_sugerido} | "
                     f"AÇÃO: {acao}\n"
                 )
         except Exception as e:
@@ -374,7 +393,7 @@ O teu mandato é auditar ações de força relativa ELITE (RS >= 80) que sofrera
             url_tg = f"https://api.telegram.org/bot{telegram_token}/sendMessage"
             payload_tg = {
                 "chat_id": telegram_chat,
-                "text": "🏆 *MOTOR 10 (HOLY GRAIL)*\n\n✅ Relatório e auditoria de posições enviados com sucesso para o e-mail!"
+                "text": "🏆 *MOTOR 10 (HOLY GRAIL)*\n\n✅ Relatório e auditoria de posições baseados em EMA20/ATR enviados com sucesso para o e-mail!"
             }
             requests.post(url_tg, json=payload_tg, timeout=10)
 
