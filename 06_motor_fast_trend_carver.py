@@ -17,6 +17,9 @@ from email.mime.multipart import MIMEMultipart
 import warnings
 warnings.filterwarnings("ignore")
 
+# Importação da função modular de notificação do Telegram
+from F01_notificador_telegram import enviar_alerta
+
 # ===================================================================
 # 0. TRAVA DE FIM DE SEMANA
 # ===================================================================
@@ -146,7 +149,6 @@ def verificar_regime_macro():
         ultimo_preco = float(spy.iloc[-1]['Close'])
         ema50 = float(spy.iloc[-1]['EMA_50'])
         
-        # OTIMIZAÇÃO: Exigência de Forecast elevada para 12.0 (Favorável) e 14.0 (Defensivo)
         if ultimo_preco >= ema50:
             print(f"[MACRO] S&P 500 acima da EMA50 (${ultimo_preco:.2f} >= ${ema50:.2f}). Regime: FAVORÁVEL (Lote Completo, Forecast Min: 12.0).")
             return {"status": "FAVORÁVEL", "fator_lote": 1.0, "min_forecast": 12.0}
@@ -169,7 +171,6 @@ def calcular_indicadores_tecnicos(ticker):
         if isinstance(df.columns, pd.MultiIndex):
             df.columns = df.columns.droplevel(1)
 
-        # BLINDAGEM CONTRA BARRAS INCOMPLETAS E NaNs
         df = df.dropna(subset=['Close', 'High', 'Low', 'Volume'])
         if df.empty or len(df) < 50:
             return None
@@ -212,12 +213,10 @@ def analisar_tendencia_carver(ativo_info, vol_alvo_diaria_usd, info_macro):
     if not ticker or ticker == "#N/A" or ticker == "NONE":
         return None
 
-    # CORREÇÃO 1: Conversão automática de BRK-A para BRK-B (Evita fracionamento zero em $800k)
     if ticker == "BRK-A":
         print("[AJUSTE] Ticker BRK-A convertido automaticamente para BRK-B.")
         ticker = "BRK-B"
 
-    # CORREÇÃO 2: Fallback automático de setor via yfinance se vier Desconhecido
     if setor in ["Desconhecido", "N/A", "", "NONE"]:
         try:
             ticker_obj = yf.Ticker(ticker)
@@ -227,7 +226,6 @@ def analisar_tendencia_carver(ativo_info, vol_alvo_diaria_usd, info_macro):
         except Exception:
             pass
 
-    # FILTRO DE FORÇA RELATIVA INSTITUCIONAL (RS SCORE >= 50)
     val_rs_num = limpar_float(rs_score)
     if val_rs_num is not None and val_rs_num < MIN_RS_SCORE:
         print(f"[VETO RS SCORE] {ticker} ignorado. RS Score fraco ({val_rs_num} < {MIN_RS_SCORE} - Laggard).")
@@ -243,7 +241,6 @@ def analisar_tendencia_carver(ativo_info, vol_alvo_diaria_usd, info_macro):
     diferenca_bruta = ema8 - ema32
     forecast_carver = (diferenca_bruta / atr36) * 5.0
     
-    # Exigência dinâmica de Forecast conforme o Regime Macro
     min_forecast = info_macro.get("min_forecast", 12.0)
     if forecast_carver < min_forecast:
         return None
@@ -253,20 +250,16 @@ def analisar_tendencia_carver(ativo_info, vol_alvo_diaria_usd, info_macro):
     entrada = round(preco, 2)
     stop_loss = round(entrada - (atr36 * 1.5), 2)
     
-    # TRAVA ANTI-GAP DOWN (Veto se o preço já abriu abaixo do Stop)
     if entrada <= stop_loss:
         print(f"[VETO GAP DOWN] {ticker} ignorado. Preço (${entrada:.2f}) <= Stop Loss (${stop_loss:.2f}).")
         return None
 
-    # EXPANSÃO DO PAYOFF (Rácio 3.0x de Risco para Elevar Ganho Médio)
     alvo_tp = round(entrada + ((entrada - stop_loss) * 3.0), 2)
     
-    # Aplicação do Fator de Lote Macro (100% ou 50%)
     fator_lote = info_macro.get("fator_lote", 1.0)
     qtd_bruta = ((vol_alvo_diaria_usd / atr36) * multiplicador) * fator_lote
     qtd_acoes = round(qtd_bruta, 2)
 
-    # CORREÇÃO 3: Filtro de quantidade calculada nula (Qtd <= 0)
     if qtd_acoes <= 0:
         print(f"[FILTRADO] {ticker} rejeitado por quantidade calculada nula ({qtd_acoes}).")
         return None
@@ -317,12 +310,10 @@ def monitorizar_posicao_ativa(ticker, nome_empresa, status_atual, dados_posicao)
     
     preco, ema8, ema32, atr36 = ind['preco'], ind['ema8'], ind['ema32'], ind['atr36']
     
-    # PROTEÇÃO CONTRA NaNs
     if pd.isna(preco) or pd.isna(ema8) or pd.isna(ema32) or pd.isna(atr36):
         print(f"[AVISO] Valores inválidos/NaN detetados para {ticker}. Monitorização ignorada hoje.")
         return None
 
-    # CORREÇÃO 4: Verificação de Calendário de Earnings para Posições Ativas
     alerta_earnings = "OK"
     try:
         ticker_obj = yf.Ticker(ticker)
@@ -346,7 +337,6 @@ def monitorizar_posicao_ativa(ticker, nome_empresa, status_atual, dados_posicao)
     quantidade = dados_posicao.get("quantidade", "N/A")
     stop_atual_registado = dados_posicao.get("stopAtual", None)
     
-    # REGRA DE OURO BLINDADA: O stop nunca desce, só sobe ou mantém-se
     stop_final = trailing_stop_calculado
     instrucao_risco = f"Atualizar stop para {trailing_stop_calculado}"
     
@@ -396,13 +386,11 @@ def executar_motor():
     print(f"[CONFIG] Alvo Volatilidade Anual: {alvo_volatilidade_anual*100:.1f}%")
     print(f"[CONFIG] Orçamento Diário de Volatilidade: ${volatilidade_alvo_diaria_usd:.2f}\n")
     
-    # 0. Avalia Regime Macro
     info_macro = verificar_regime_macro()
         
     candidatos_novos = []
     posicoes_em_gestao = []
 
-    # 1. Analisa novos sinais (ignora qualquer ativo que já esteja no dicionário de posições ativas)
     for ativo_info in ativos:
         ticker = ativo_info.get("ticker")
         if not ticker or ticker == "#N/A": continue
@@ -414,10 +402,8 @@ def executar_motor():
         if res:
             candidatos_novos.append(res)
 
-    # Ordena os candidatos do maior para o menor Forecast
     candidatos_novos = sorted(candidatos_novos, key=lambda k: k['forecast'], reverse=True)
 
-    # 2. APLICAÇÃO DA TRAVA DE CORRELAÇÃO SETORIAL (Máximo 2 por setor)
     ativos_acionados = []
     contagem_setores = {}
 
@@ -431,7 +417,6 @@ def executar_motor():
         else:
             print(f"[CORRELAÇÃO BLOQUEADA] Ativo {item['ticker']} ignorado. Limite de {MAX_NOVOS_SINAIS_POR_SETOR} novos sinais para o setor '{setor}' atingido.")
 
-    # 3. Processa posições ativas APENAS se o estado for ATIVA_FAST
     for ticker, dados_pos in posicoes_ativas_dict.items():
         status_atual = str(dados_pos.get("status", "")).strip().upper()
         
@@ -475,6 +460,16 @@ def executar_motor():
         f.write(bloco_texto_ia)
 
     enviar_email_bruto(bloco_texto_ia)
+
+    # ===================================================================
+    # 6. NOTIFICAÇÃO TELEGRAM DEBUG (CONTROLADA PELA FLAG DE CONFIGS)
+    # ===================================================================
+    debug_telegram_ativado = str(configs.get("TELEGRAM_NOTIFICATIONS_DEBUG", "false")).strip().lower() in ["true", "1", "sim", "yes"]
+
+    if debug_telegram_ativado:
+        print("A enviar notificação de Debug para o Telegram via função modular...")
+        mensagem_debug = "🏄‍♂️ *MOTOR FAST TREND (CARVER)*\n\n🔍 [DEBUG] Execução concluída com sucesso. Relatório Carver gerado e enviado por e-mail."
+        enviar_alerta(mensagem_debug)
 
 if __name__ == "__main__":
     executar_motor()
