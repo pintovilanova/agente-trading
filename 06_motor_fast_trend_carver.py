@@ -390,6 +390,7 @@ def executar_motor():
         
     candidatos_novos = []
     posicoes_em_gestao = []
+    total_analisados = 0
 
     for ativo_info in ativos:
         ticker = ativo_info.get("ticker")
@@ -398,6 +399,7 @@ def executar_motor():
         if ticker in posicoes_ativas_dict:
             continue
 
+        total_analisados += 1
         res = analisar_tendencia_carver(ativo_info, volatilidade_alvo_diaria_usd, info_macro)
         if res:
             candidatos_novos.append(res)
@@ -468,7 +470,13 @@ def executar_motor():
 
     if debug_telegram_ativado:
         print("A enviar notificação de Debug para o Telegram via função modular...")
-        mensagem_debug = "06 🏄‍♂️ *MOTOR FAST TREND (CARVER)*\n\n🔍 [DEBUG] Execução concluída com sucesso. Relatório Carver gerado e enviado por e-mail."
+        total_acionados = len(ativos_acionados)
+        mensagem_debug = (
+            f"06 🏄‍♂️ *MOTOR FAST TREND (CARVER)*\n\n"
+            f"🔍 [DEBUG] Execução concluída com sucesso.\n"
+            f"📊 Ativos analisados: *{total_analisados}* | Acionados: *{total_acionados}*\n"
+            f"✉️ Relatório Carver gerado e enviado por e-mail."
+        )
         enviar_alerta(mensagem_debug)
 
 if __name__ == "__main__":
