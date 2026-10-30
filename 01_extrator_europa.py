@@ -577,5 +577,12 @@ debug_telegram_ativado = str(configs.get("TELEGRAM_NOTIFICATIONS_DEBUG", "false"
 
 if debug_telegram_ativado:
     print("A enviar notificação de Debug para o Telegram via função modular...")
-    mensagem_debug = f"01 🇪🇺 *MOTOR BREAKOUTS (EUROPA)*\n\n🔍 [DEBUG] Execução concluída.\nAtivos acionados: {len(ativos_acionados)}\nRelatório de breakout europeu gerado e enviado por e-mail."
+    total_analisados = len(dados_temporarios)
+    total_acionados = len(ativos_acionados)
+    mensagem_debug = (
+        f"01 🇪🇺 *MOTOR BREAKOUTS (EUROPA)*\n\n"
+        f"🔍 [DEBUG] Execução concluída com sucesso.\n"
+        f"📊 Ativos analisados: *{total_analisados}* | Acionados: *{total_acionados}*\n"
+        f"✉️ Relatório de breakout europeu gerado e enviado por e-mail."
+    )
     enviar_alerta(mensagem_debug)
