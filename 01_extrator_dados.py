@@ -18,6 +18,9 @@ from email.mime.multipart import MIMEMultipart
 import warnings
 warnings.filterwarnings("ignore")
 
+# Importação da função modular de notificação do Telegram
+from F01_notificador_telegram import enviar_alerta
+
 # ===================================================================
 # 0.1 TRAVA DE FIM DE SEMANA (Não corre ao Sábado e Domingo)
 # ===================================================================
@@ -34,6 +37,8 @@ hoje_e_sexta = "SIM" if dia_da_semana == 4 else "NÃO"
 WEBHOOK_URL = os.environ.get('WEBHOOK_URL')
 EMAIL_USER = os.environ.get("EMAIL_USER")
 EMAIL_PASS = os.environ.get("EMAIL_PASS")
+TELEGRAM_BOT_TOKEN_GERAL = os.environ.get('TELEGRAM_BOT_TOKEN_GERAL')
+TELEGRAM_CHAT_ID = os.environ.get('TELEGRAM_CHAT_ID')
 
 SMTP_SERVER = "smtp.gmail.com"
 SMTP_PORT = 587
@@ -170,7 +175,7 @@ VOLATILIDADE_ALVO_DIARIA_USD = (CAPITAL_TOTAL_CONTA * ALVO_VOLATILIDADE_ANUAL) /
 
 # REGRAS OTIMIZADAS
 multiplicador_trailing_ts = 1.5
-racio_tp_base = 3.0  # OTIMIZAÇÃO: Elevado para 3.0R (Expansão do Payoff para Expectativa Positiva)
+racio_tp_base = 3.0 
 
 dados_temporarios = []
 
@@ -186,7 +191,6 @@ for ativo_info in ativos_data:
     if not ticker or ticker == "#N/A" or ticker == "NONE":
         continue
 
-    # CORREÇÃO 1: Conversão automática de BRK-A para BRK-B (Evita fração zero em ações de $800k)
     if ticker == "BRK-A":
         print("[AJUSTE] Ticker BRK-A convertido automaticamente para BRK-B.")
         ticker = "BRK-B"
@@ -200,7 +204,6 @@ for ativo_info in ativos_data:
         if isinstance(df.columns, pd.MultiIndex):
             df.columns = df.columns.droplevel(1)
 
-        # BLINDAGEM CONTRA BARRAS INCOMPLETAS DE HOJE (NaNs)
         df = df.dropna(subset=['Close', 'High', 'Low', 'Volume'])
         if df.empty or len(df) < 50:
             continue
@@ -209,7 +212,6 @@ for ativo_info in ativos_data:
         try:
             ticker_obj = yf.Ticker(ticker)
             
-            # CORREÇÃO 2: Fallback automático de setor via yfinance se vier Desconhecido
             if setor in ["Desconhecido", "N/A", "", "NONE"]:
                 setor_yf = ticker_obj.info.get('sector')
                 if setor_yf:
@@ -309,9 +311,6 @@ for ativo_info in ativos_data:
         else:
             recomendacao = "Observar"
 
-        # ===================================================================
-        # FILTRO DE SEGURANÇA: PREÇO FUGIDO (GAP > 1% DA ENTRADA)
-        # ===================================================================
         if recomendacao != "Observar" and isinstance(preco_entrada, (int, float)):
             variacao_pct_entrada = ((preco - preco_entrada) / preco_entrada) * 100
             if variacao_pct_entrada > 1.0:
@@ -336,7 +335,6 @@ for ativo_info in ativos_data:
                 preco_tp = round(tp_calc, 2)
                 qtd_calc = round(vol_alocada / atr, 2) if atr > 0 else 0
                 
-                # CORREÇÃO 3: Veto a quantidades calculadas nulas (Qtd == 0)
                 if qtd_calc <= 0:
                     recomendacao = "Observar"
                     qtd_acoes = "N/A"
@@ -348,7 +346,6 @@ for ativo_info in ativos_data:
 
         data_atual = datetime.now(ZoneInfo("Europe/Lisbon")).strftime('%d/%m/%Y %H:%M:%S')
 
-        # GESTÃO DE POSIÇÃO ATIVA COM FILTRAGEM DE ATIVA_FAST E ATIVA_SWING
         if ticker in posicoes_ativas:
             pos_info = posicoes_ativas[ticker]
             status_pos = str(pos_info.get('status', 'ATIVA')).strip().upper()
@@ -368,7 +365,6 @@ for ativo_info in ativos_data:
             except:
                 return "N/A"
 
-        # Análise contextual do RS Score (Apenas informativo)
         val_rs_num = limpar_float(rs_score)
         if val_rs_num is not None:
             if val_rs_num >= 80:
@@ -544,7 +540,7 @@ Regras Operacionais Estritas de Triagem, Carteira e Ataque:
    - **ATENÇÃO AOS EARNINGS:** Se uma posição ativa apresentar 'EARNINGS = PERIGO', emite um alerta prioritário de liquidação preventiva antes da apresentação dos resultados.
    - Usa obrigatoriamente este template exato:
 
-   🎯 [TICKER] - [Nome da Empresa] ([Setor]) [Adicionar tag (SUPLENTE) se aplicável]
+    🎯 [TICKER] - [Nome da Empresa] ([Setor]) [Adicionar tag (SUPLENTE) se aplicável]
    - 🚩 BANDEIRAS: (Avisos ou "Limpo")
    - 📊 CONTEXTO INSTITUCIONAL: RS Score e respetivo estado de Força Relativa.
    - ⚠️ ESTADO NA CARTEIRA: [POSIÇÃO ATIVA... ou Nenhuma posição aberta]
@@ -571,3 +567,24 @@ with open("comboio_temp.txt", "w", encoding="utf-8") as f:
     f.write(bloco_texto_ia)
     
 enviar_email_para_agente_ia(bloco_texto_ia, assunto="🦅 tradingRelatorioIA US 🗽")
+
+# ===================================================================
+# 7. NOTIFICAÇÃO TELEGRAM DEBUG (CONTROLADA PELA FLAG DE CONFIGS)
+# ===================================================================
+debug_telegram_ativado = str(configs_data.get("TELEGRAM_NOTIFICATIONS_DEBUG", "false")).strip().lower() in ["true", "1", "sim", "yes"]
+
+if debug_telegram_ativado and TELEGRAM_BOT_TOKEN_GERAL and TELEGRAM_CHAT_ID:
+    try:
+        print("A enviar notificação de Debug para o Telegram...")
+        url_tg = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN_GERAL}/sendMessage"
+        payload_tg = {
+            "chat_id": TELEGRAM_CHAT_ID,
+            "text": "🦅 *MOTOR DE BREAKOUTS (EUA)*\n\n🔍 [DEBUG] Execução concluída. Relatório gerado e enviado por e-mail com sucesso."
+        }
+        resp_tg = requests.post(url_tg, json=payload_tg, timeout=10)
+        if resp_tg.status_code == 200:
+            print("[SUCESSO] Notificação de Debug enviada via Telegram!")
+        else:
+            print(f"[AVISO] Falha ao enviar Telegram Debug: {resp_tg.text}")
+    except Exception as e:
+        print(f"[ERRO] Erro de rede ao enviar Telegram Debug: {e}")
