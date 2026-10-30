@@ -1,6 +1,6 @@
-# ===================================================================
+# ===================================================================================
 # SISTEMA DE TRADING INSTITUCIONAL - MOTOR DE BREAKOUTS (EUROPA)
-# ===================================================================
+# ===================================================================================
 from datetime import datetime
 from zoneinfo import ZoneInfo
 import yfinance as yf
@@ -17,6 +17,9 @@ from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 import warnings
 warnings.filterwarnings("ignore")
+
+# Importação da função modular de notificação do Telegram
+from F01_notificador_telegram import enviar_alerta
 
 # ===================================================================
 # 0.1 TRAVA DE FIM DE SEMANA (Não corre ao Sábado e Domingo)
@@ -90,6 +93,9 @@ def enviar_email_para_agente_ia(relatorio_texto, assunto="🇪🇺🎯 tradingRe
 # 2. BUSCAR A WATCHLIST, POSIÇÕES ATIVAS E CONFIGS (Google Sheets via Webhook)
 # ===================================================================
 print(f"A carregar a Watchlist, Posições Ativas e Configurações da Europa a partir do Google Sheets (Aba: {NOME_ABA_EUROPA})...")
+ativos_data = []
+posicoes_ativas = {}
+configs = {}
 try:
     url_get = f"{WEBHOOK_URL}?aba={NOME_ABA_EUROPA}"
     resposta_webhook = requests.get(url_get, timeout=15)
@@ -536,14 +542,14 @@ Regras Operacionais Estritas de Triagem, Carteira e Ataque:
    - **ATENÇÃO AOS EARNINGS:** Se uma posição ativa apresentar 'EARNINGS = PERIGO', emite um alerta prioritário de liquidação preventiva antes da apresentação dos resultados.
    - Usa obrigatoriamente este template exato:
 
-   🇪🇺🎯 [TICKER] - [Nome da Empresa] ([Setor]) [Adicionar tag (SUPLENTE) se aplicável]
-   - 🚩 BANDEIRAS: (Avisos ou "Limpo")
-   - 📊 CONTEXTO INSTITUCIONAL: RS Score e respetivo estado de Força Relativa.
-   - ⚠️ ESTADO NA CARTEIRA: [POSIÇÃO ATIVA... ou Nenhuma posição aberta]
-   - ⚙️ EXECUÇÃO / DEFESA: (Regra dos Gaps e Gestão de Stop)
-   - 🛡️ TAMANHO DA POSIÇÃO: Lê o campo 'Lote' da linha de referência e transcreve (Ex: 'Lote Reduzido a 50%' ou 'Lote Completo').
-   - 🔢 DADOS EXATOS: Entrada: X | Stop: X | TP: X | BE: X | Trailing: X | Qtd: X | Valor a Investir: [Lê o campo 'ValorInvestir' da referência e transcreve diretamente]. NÃO FAÇAS CÁLCULOS.
-   - 📋 REFERÊNCIA: (Cola a linha original do comboio aqui)
+    🇪🇺🎯 [TICKER] - [Nome da Empresa] ([Setor]) [Adicionar tag (SUPLENTE) se aplicável]
+    - 🚩 BANDEIRAS: (Avisos ou "Limpo")
+    - 📊 CONTEXTO INSTITUCIONAL: RS Score e respetivo estado de Força Relativa.
+    - ⚠️ ESTADO NA CARTEIRA: [POSIÇÃO ATIVA... ou Nenhuma posição aberta]
+    - ⚙️ EXECUÇÃO / DEFESA: (Regra dos Gaps e Gestão de Stop)
+    - 🛡️ TAMANHO DA POSIÇÃO: Lê o campo 'Lote' da linha de referência e transcreve (Ex: 'Lote Reduzido a 50%' ou 'Lote Completo').
+    - 🔢 DADOS EXATOS: Entrada: X | Stop: X | TP: X | BE: X | Trailing: X | Qtd: X | Valor a Investir: [Lê o campo 'ValorInvestir' da referência e transcreve diretamente]. NÃO FAÇAS CÁLCULOS.
+    - 📋 REFERÊNCIA: (Cola a linha original do comboio aqui)
 
 7. SAÚDE DO MERCADO E MANDATO FINAL: 
    Termina com a frase obrigatória a negrito:
@@ -563,3 +569,13 @@ with open("comboio_europa.txt", "w", encoding="utf-8") as f:
     f.write(bloco_texto_ia)
     
 enviar_email_para_agente_ia(bloco_texto_ia, assunto="🇪🇺🎯 tradingRelatorioIA Europa 🛡️")
+
+# ===================================================================
+# 7. NOTIFICAÇÃO TELEGRAM DEBUG (CONTROLADA PELA FLAG DE CONFIGS)
+# ===================================================================
+debug_telegram_ativado = str(configs.get("TELEGRAM_NOTIFICATIONS_DEBUG", "false")).strip().lower() in ["true", "1", "sim", "yes"]
+
+if debug_telegram_ativado:
+    print("A enviar notificação de Debug para o Telegram via função modular...")
+    mensagem_debug = f"🇪🇺 *MOTOR BREAKOUTS (EUROPA)*\n\n🔍 [DEBUG] Execução concluída.\nAtivos acionados: {len(ativos_acionados)}\nRelatório de breakout europeu gerado e enviado por e-mail."
+    enviar_alerta(mensagem_debug)
