@@ -93,6 +93,8 @@ def enviar_email_para_agente_ia(relatorio_texto, assunto="🦅 tradingRelatorioI
 # ===================================================================
 print("A carregar a Watchlist, Posições Ativas e Configurações a partir do Google Sheets...")
 configs_data = {}
+ativos_data = []
+posicoes_ativas = {}
 try:
     resposta_webhook = requests.get(WEBHOOK_URL, timeout=15)
     if resposta_webhook.status_code == 200:
@@ -573,5 +575,12 @@ debug_telegram_ativado = str(configs_data.get("TELEGRAM_NOTIFICATIONS_DEBUG", "f
 
 if debug_telegram_ativado:
     print("A enviar notificação de Debug para o Telegram via função modular...")
-    mensagem_debug = "01 🦅 *MOTOR DE BREAKOUTS (EUA)*\n\n🔍 [DEBUG] Execução concluída com sucesso. Relatório gerado e enviado por e-mail."
+    total_analisados = len(dados_temporarios)
+    total_acionados = len(ativos_acionados)
+    mensagem_debug = (
+        f"01 🦅 *MOTOR DE BREAKOUTS (EUA)*\n\n"
+        f"🔍 [DEBUG] Execução concluída com sucesso.\n"
+        f"📊 Ativos analisados: *{total_analisados}* | Acionados: *{total_acionados}*\n"
+        f"✉️ Relatório gerado e enviado por e-mail."
+    )
     enviar_alerta(mensagem_debug)
