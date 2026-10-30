@@ -288,10 +288,13 @@ def executar_motor():
     if not ativos_sheets: sys.exit(0)
 
     ativos_acionados = []
+    total_analisados = 0
+    
     for ativo_info in ativos_sheets:
         ticker = ativo_info.get("ticker")
         if not ticker or ticker == "#N/A": continue
         
+        total_analisados += 1
         res = analisar_momentum_burst(ativo_info)
         if res: ativos_acionados.append(res)
 
@@ -317,18 +320,21 @@ O teu mandato é auditar oportunidades de curto prazo (Hit and Run) focadas em e
 
     enviar_email(bloco)
 
-    telegram_ativado = str(configs_dict.get("TELEGRAM_NOTIFICATIONS", "true")).strip().lower() in ["true", "1", "sim", "yes"]
-    if telegram_ativado:
-        print("A enviar notificação para o Telegram...")
-        telegram_token = os.environ.get('TELEGRAM_BOT_TOKEN_GERAL')
-        telegram_chat = os.environ.get('TELEGRAM_CHAT_ID')
-        if telegram_token and telegram_chat:
-            url_tg = f"https://api.telegram.org/bot{telegram_token}/sendMessage"
-            payload_tg = {
-                "chat_id": telegram_chat,
-                "text": "⚡ *MOTOR 18 (MOMENTUM BURST)*\n\n✅ Relatório e auditoria de posições enviados com sucesso para o e-mail!"
-            }
-            requests.post(url_tg, json=payload_tg, timeout=10)
+    # ===================================================================
+    # 7. NOTIFICAÇÃO TELEGRAM DEBUG (CONTROLADA PELA FLAG DE CONFIGS)
+    # ===================================================================
+    debug_telegram_ativado = str(configs_dict.get("TELEGRAM_NOTIFICATIONS_DEBUG", "false")).strip().lower() in ["true", "1", "sim", "yes"]
+
+    if debug_telegram_ativado:
+        print("A enviar notificação de Debug para o Telegram via função modular...")
+        total_acionados = len(ativos_acionados)
+        mensagem_debug = (
+            f"18 ⚡ *MOTOR 18 (MOMENTUM BURST)*\n\n"
+            f"🔍 [DEBUG] Execução concluída com sucesso.\n"
+            f"📊 Ativos analisados: *{total_analisados}* | Acionados: *{total_acionados}*\n"
+            f"✉️ Relatório de momentum burst gerado e enviado por e-mail."
+        )
+        enviar_alerta(mensagem_debug)
 
 if __name__ == "__main__":
     executar_motor()
