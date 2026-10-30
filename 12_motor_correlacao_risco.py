@@ -157,5 +157,5 @@ except Exception:
 if debug_telegram_ativado:
     print("A enviar notificação de Debug para o Telegram via função modular...")
     status_msg = "⚠️ Conflitos Detetados!" if conflitos_detetados else "✅ Pipeline Limpa (Sem Conflitos)"
-    mensagem_debug = f"🛡️ *MOTOR 12 (ESCUDO DE CORRELAÇÃO)*\n\n🔍 [DEBUG] Execução concluída.\nEstado: {status_msg}\nRelatório de correlação gerado."
+    mensagem_debug = "12🛡️ *(ESCUDO DE CORRELAÇÃO)*\n\n🔍 [DEBUG] Execução concluída.\nEstado: {status_msg}\nRelatório de correlação gerado."
     enviar_alerta(mensagem_debug)
