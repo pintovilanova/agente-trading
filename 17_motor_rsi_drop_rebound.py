@@ -247,9 +247,8 @@ else:
     bloco_texto += "📌 GESTÃO DE POSIÇÕES ATIVAS: Nenhuma posição ativa detetada.\n--------------------------------------------------\n\n"
 
 if alertas_rebound:
-    bloco_texto += f"🎯 NOVOS SINAIS DE REVERSSÃO DETETADOS ({len(alertas_rebound)}):\n\n"
+    bloco_texto += f"🎯 NOVOS SINAIS DE REVERSÃO DETETADOS ({len(alertas_rebound)}):\n\n"
     for a in alertas_rebound:
-        # Tenta obter o setor e RS score do dicionário do Sheets correspondente
         info_ativo = next((item for item in ativos_sheets if str(item.get("ticker","")).strip().upper() == a['ticker']), {})
         nome_empresa = info_ativo.get("nome", "N/A")
         setor = info_ativo.get("setor", "Desconhecido")
@@ -259,13 +258,17 @@ if alertas_rebound:
             f"🔹 [{a['ticker']}] - {nome_empresa} ({setor})\n"
             f"   - 📊 Contexto Técnico: RSI(2) a {a['rsi2']:.2f} (Zona de sobrevenda extrema < 10)\n"
             f"   - ⚙️ Tática: Reversão de Curto Prazo (Hit & Run 48h-72h) com alvo na EMA5\n"
+            f"   - 📋 Tipo de Ordem: BUY LIMIT (ou Compra ao Preço de Entrada no ressalto)\n"
             f"   - 🔢 Dados Exatos: Entrada: ${a['preco_atual']} | Stop Loss: ${a['stop_loss']} | Alvo (EMA5): ${a['take_profit_ema5']}\n"
             f"   - 💰 Dimensionamento: Qtd: {a['qtd_acoes']} | Valor a Investir: ~${a['valor_investir']} USD\n"
-            f"   - 📋 RS Score Institucional: {rs_score}\n"
+            f"   - 📈 RS Score Institucional: {rs_score}\n"
             f"--------------------------------------------------\n"
         )
 else:
     bloco_texto += "✅ Nenhum novo sinal de rebound detetado nos parâmetros estritos hoje.\n"
+
+# Enviar o relatório por e-mail
+enviar_email(bloco_texto)
 
 # Enviar o relatório por e-mail
 enviar_email(bloco_texto)
