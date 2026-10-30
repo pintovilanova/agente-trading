@@ -28,6 +28,9 @@ WEBHOOK_URL = os.environ.get('WEBHOOK_URL')
 EMAIL_USER = os.environ.get('EMAIL_USER')
 EMAIL_PASS = os.environ.get('EMAIL_PASS')
 
+SMTP_SERVER = "smtp.gmail.com"
+SMTP_PORT = 587
+
 def limpar_float(val):
     """Converte com segurança valores numéricos para float."""
     if val is None: return None
@@ -59,7 +62,7 @@ def buscar_dados_completos():
 
             if isinstance(dados, dict):
                 ativos = dados.get("ativos", [])
-                posicoes = dados.get("posicoesAtivas", {})
+                posicoes = dados.get("posicoesAtivas", {}) or dados.get("posicoes", {})
                 configs = dados.get("configs", {})
                 return ativos, posicoes, configs
             elif isinstance(dados, list):
@@ -70,6 +73,29 @@ def buscar_dados_completos():
     except Exception as e:
         print(f"[ERRO CRÍTICO] Falha ao ligar ao Google Sheets: {e}")
         return [], {}, {}
+
+def enviar_email(conteudo):
+    print("\nA enviar relatório do Motor 17 por e-mail...")
+    if not EMAIL_USER or not EMAIL_PASS:
+        print("[AVISO] EMAIL_USER ou EMAIL_PASS não definidos. Email não enviado.")
+        return False
+    try:
+        msg = MIMEMultipart()
+        msg['From'] = EMAIL_USER
+        msg['To'] = EMAIL_USER
+        msg['Subject'] = f"⚡ tradingRelatorioIA US - MOTOR 17 (2-DAY RSI) ({datetime.now(ZoneInfo('Europe/Lisbon')).strftime('%d/%m/%Y')})"
+        msg.attach(MIMEText(conteudo, 'plain', 'utf-8'))
+        
+        server = smtplib.SMTP(SMTP_SERVER, SMTP_PORT, timeout=15)
+        server.starttls()
+        server.login(EMAIL_USER, EMAIL_PASS)
+        server.sendmail(EMAIL_USER, EMAIL_USER, msg.as_string())
+        server.quit()
+        print("[SUCESSO] Email enviado com sucesso!")
+        return True
+    except Exception as e:
+        print(f"[ERRO] Falha ao enviar email: {e}")
+        return False
 
 # ===================================================================
 # 3. EXECUÇÃO DA CARGA DE DADOS E PARAMETRIZAÇÃO DE RISCO
@@ -105,10 +131,15 @@ tickers_watchlist = list(dict.fromkeys(tickers_watchlist))
 # 4. AUDITAR POSIÇÕES EM CARTEIRA
 # ===================================================================
 bloco_posicoes_ativas = ""
-for ticker, info in posicoes_ativas_dict.items():
+for chave_pos, info in posicoes_ativas_dict.items():
+    if not isinstance(info, dict):
+        continue
     status = str(info.get("status", "")).strip().upper()
-    if status in ["ATIVA_SWING", "ATIVA_M17"]:
+    if "ATIVA" in status or status in ["ATIVA_SWING", "ATIVA_M17"]:
         try:
+            # Mapeamento robusto de tickers (ex: C3.ai -> AI)
+            ticker = "AI" if chave_pos.lower() in ["c3.ai", "c3"] else chave_pos.strip().upper()
+            
             df_pos = yf.download(ticker, period="1mo", interval="1d", progress=False)
             if not df_pos.empty:
                 if isinstance(df_pos.columns, pd.MultiIndex):
@@ -116,7 +147,7 @@ for ticker, info in posicoes_ativas_dict.items():
                 
                 df_pos.ta.ema(length=5, append=True)
                 ema5_atual = round(float(df_pos['EMA_5'].iloc[-1]), 2)
-                stop = limpar_float(info.get("stopAtual")) or 0.0
+                stop = limpar_float(info.get("stopAtual")) or limpar_float(info.get("stopLoss")) or 0.0
                 
                 try:
                     df_intra = yf.download(ticker, period="2d", interval="1m", prepost=True, progress=False)
@@ -141,9 +172,9 @@ for ticker, info in posicoes_ativas_dict.items():
                 else:
                     acao = f"⏳ MANTER POSIÇÃO. Alvo EMA5: ${ema5_atual} | Stop: ${stop}."
                 
-                bloco_posicoes_ativas += f"📌 [{status}] {ticker} | Qtd: {qtd} | Entrada: ${entrada} | Atual: ${preco_atual} | {acao}\n"
+                bloco_posicoes_ativas += f"📌 [{status}] {ticker} ({chave_pos}) | Qtd: {qtd} | Entrada: ${entrada} | Atual: ${preco_atual} | {acao}\n"
         except Exception as e:
-            print(f"[ERRO] Falha ao auditar posição ativa {ticker}: {e}")
+            print(f"[ERRO] Falha ao auditar posição ativa {chave_pos}: {e}")
 
 # ===================================================================
 # 5. RASTREAR NOVOS SINAIS DE ENTRADA
@@ -203,13 +234,15 @@ for ticker in tickers_watchlist:
         print(f"[ERRO] Falha ao analisar {ticker}: {e}")
 
 # ===================================================================
-# 6. RELATÓRIO E TELEGRAM
+# 6. RELATÓRIO E ENVIO POR E-MAIL
 # ===================================================================
 data_hoje = datetime.now(ZoneInfo("Europe/Lisbon")).strftime("%d/%m/%Y %H:%M")
 bloco_texto = f"⚡ MOTOR 17: 2-DAY RSI DROP & REBOUND ({data_hoje})\n\n"
 
 if bloco_posicoes_ativas:
     bloco_texto += f"POSIÇÕES ATIVAS:\n{bloco_posicoes_ativas}\n"
+else:
+    bloco_texto += "POSIÇÕES ATIVAS: Nenhuma posição ativa detetada.\n\n"
 
 if alertas_rebound:
     bloco_texto += "NOVOS SINAIS DETETADOS:\n"
@@ -217,6 +250,9 @@ if alertas_rebound:
         bloco_texto += f"🎯 {a['ticker']} | RSI: {a['rsi2']} | Entrada: ${a['preco_atual']} | Stop: ${a['stop_loss']} | Alvo: ${a['take_profit_ema5']}\n"
 else:
     bloco_texto += "✅ Nenhum novo sinal hoje.\n"
+
+# Enviar o relatório por e-mail
+enviar_email(bloco_texto)
 
 # ===================================================================
 # 7. NOTIFICAÇÃO TELEGRAM DEBUG (CONTROLADA PELA FLAG DE CONFIGS)
