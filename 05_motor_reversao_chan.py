@@ -314,11 +314,13 @@ def executar_motor():
     print(f"[CONFIG] Orçamento Diário de Volatilidade: ${volatilidade_alvo_diaria_usd:.2f}\n")
 
     ativos_acionados = []
+    total_analisados = 0
     
     for ativo_info in ativos:
         ticker = ativo_info.get("ticker")
         if not ticker or ticker == "#N/A": continue
         
+        total_analisados += 1
         res = analisar_connors_chan(ativo_info, volatilidade_alvo_diaria_usd)
         
         if res:
@@ -331,12 +333,12 @@ O teu mandato é auditar os sinais estatísticos gerados pelo motor Python e for
 
 🚨 REGRAS DE OURO (ANTI-ALUCINAÇÃO DE DADOS) 🚨
 1. ZERO CRIATIVIDADE: É ESTRITAMENTE PROIBIDO inventar notícias, motivos de queda, lucros, previsões ou datas que não estejam na linha do comboio.
-2. FONTE ÚNICA: Retira os dados EXCLUSIVAMENTE da linha do comboio fornecida.
+ 2. FONTE ÚNICA: Retira os dados EXCLUSIVAMENTE da linha do comboio fornecida.
 3. NARRATIVA NEUTRA: Se não tiveres detalhes sobre o motivo da queda, escreve apenas 'Anomalia estatística baseada em exaustão técnica extrema'.
 
 Regras de Triagem e Execução:
 1. VALIDAÇÃO DE EXAUSTÃO: Confirma que o RSI(2) está abaixo de 10 e que o preço rompeu a Banda de Bollinger inferior.
-2. CONTEXTO INSTITUCIONAL (RS SCORE): Avalia o RS Score reportado. Se o ativo tiver RS Score de Elite (>= 80), o ressalto beneficia de suporte forte; se for laggard (< 50), exige cautela ou veto.
+ 2. CONTEXTO INSTITUCIONAL (RS SCORE): Avalia o RS Score reportado. Se o ativo tiver RS Score de Elite (>= 80), o ressalto beneficia de suporte forte; se for laggard (< 50), exige cautela ou veto.
 3. VETO FUNDAMENTAL: Emite veto obrigatório caso exista um rácio de risco negativo ou se o ativo apresentar EARNINGS = PERIGO.
 4. TÁTICA DE SAÍDA: O alvo de Take-Profit é cravado na Banda Central de Bollinger (SMA20).
 5. TÁTICA DE ENTRADA: Execução com alocação rígida baseada em volatilidade (Carver).
@@ -371,7 +373,13 @@ Estrutura Visual Obrigatória:
 
     if debug_telegram_ativado:
         print("A enviar notificação de Debug para o Telegram via função modular...")
-        mensagem_debug = "05 🧲 *MOTOR CONNORS-CHAN (REVERSÃO)*\n\n🔍 [DEBUG] Execução concluída com sucesso. Relatório Connors-Chan gerado e enviado por e-mail."
+        total_acionados = len(ativos_acionados)
+        mensagem_debug = (
+            f"05 🧲 *MOTOR CONNORS-CHAN (REVERSÃO)*\n\n"
+            f"🔍 [DEBUG] Execução concluída com sucesso.\n"
+            f"📊 Ativos analisados: *{total_analisados}* | Acionados: *{total_acionados}*\n"
+            f"✉️ Relatório Connors-Chan gerado e enviado por e-mail."
+        )
         enviar_alerta(mensagem_debug)
 
 if __name__ == "__main__":
