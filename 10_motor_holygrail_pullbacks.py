@@ -5,7 +5,8 @@
 # Implementa a estratégia "Holy Grail" (popularizada por Linda Raschke/David Ryan).
 # Procura ativos com Força Relativa de Elite (RS >= 80) e forte tendência direcional
 # (ADX > 25), que estão a sofrer um pullback natural de curto prazo, tocando na 
-# Média Móvel Exponencial (EMA) de 20 ou 21 dias, com forte contração de volume.
+# Média Móvel Exponencial (EMA) de 20 ou 21 dias, com forte contração de volume,
+# auditando em simultâneo as posições ativas em carteira (ATIVA_M10 / ATIVA_SWING).
 # ===================================================================================
 
 import pandas as pd
@@ -25,6 +26,9 @@ from email.mime.multipart import MIMEMultipart
 import warnings
 warnings.filterwarnings("ignore")
 import random
+
+# Importação da função modular de notificação do Telegram
+from F01_notificador_telegram import enviar_alerta
 
 # ===================================================================
 # 0. TRAVA DE FIM DE SEMANA
@@ -57,27 +61,35 @@ def limpar_float(val):
         return None
 
 # ===================================================================
-# 2. FUNÇÕES DE REDE
+# 2. FUNÇÕES DE REDE (LEITURA COMPLETA DO SHEETS)
 # ===================================================================
-def buscar_watchlist():
-    print("A carregar a Watchlist do Google Sheets...")
+def buscar_dados_completos():
+    print("A carregar Watchlist, Posições Ativas e Configs a partir do Google Sheets...")
     if not WEBHOOK_URL: 
         print("[ERRO] WEBHOOK_URL não configurado.")
-        return [], {}
+        return [], {}, {}
     try:
         url_alvo = WEBHOOK_URL if "?" in WEBHOOK_URL else f"{WEBHOOK_URL}?aba=Analise Compra"
         resp = requests.get(url_alvo, timeout=15)
         
         if resp.status_code == 200:
-            dados = resp.json()
+            try:
+                dados = resp.json()
+            except json.JSONDecodeError:
+                print(f"[ERRO] O Webhook não retornou um JSON válido.")
+                return [], {}, {}
+
             if isinstance(dados, dict):
-                return dados.get("ativos", []), dados.get("configs", {})
+                ativos = dados.get("ativos", [])
+                posicoes = dados.get("posicoesAtivas", {})
+                configs = dados.get("configs", {})
+                return ativos, posicoes, configs
             elif isinstance(dados, list):
-                return dados, {}
-        return [], {}
+                return dados, {}, {}
+        return [], {}, {}
     except Exception as e:
         print(f"[ERRO CRÍTICO] Sheets: {e}")
-        return [], {}
+        return [], {}, {}
 
 def enviar_email(conteudo):
     print("\nA enviar email do Holy Grail Pullbacks para o Agente IA...")
@@ -102,7 +114,68 @@ def enviar_email(conteudo):
             if tentativa < 2: time.sleep(5)
 
 # ===================================================================
-# 3. MOTOR MATEMÁTICO: HOLY GRAIL (PULLBACK À EMA20) COM TETO TÉCNICO
+# 3. CARGA DE DADOS E PARAMETRIZAÇÃO
+# ===================================================================
+ativos_sheets, posicoes_ativas_dict, configs_dict = buscar_dados_completos()
+
+try:
+    capital = float(configs_dict.get("CAPITAL_TOTAL_CONTA", 10400.00))
+    vol_anual = float(configs_dict.get("ALVO_VOLATILIDADE_ANUAL", 0.05))
+except (ValueError, TypeError):
+    capital, vol_anual = 10400.00, 0.05
+
+vol_diaria_usd = (capital * vol_anual) / 16.0
+print(f"[CONFIG] Orçamento Diário de Volatilidade: ${vol_diaria_usd:.2f}\n")
+
+# ===================================================================
+# 4. AUDITAR POSIÇÕES EM CARTEIRA (ESTADO: ATIVA_M10 / ATIVA_SWING)
+# ===================================================================
+bloco_posicoes_ativas = ""
+for ticker, info in posicoes_ativas_dict.items():
+    status = str(info.get("status", "")).strip().upper()
+    if status in ["ATIVA_M10", "ATIVA_SWING"]:
+        try:
+            df_pos = yf.download(ticker, period="1mo", interval="1d", progress=False)
+            if not df_pos.empty:
+                if isinstance(df_pos.columns, pd.MultiIndex):
+                    df_pos.columns = df_pos.columns.droplevel(1)
+                
+                stop = limpar_float(info.get("stopAtual")) or limpar_float(info.get("stopLoss")) or 0.0
+                alvo_tp = limpar_float(info.get("alvoTp")) or limpar_float(info.get("takeProfit")) or 0.0
+                
+                try:
+                    df_intra = yf.download(ticker, period="2d", interval="1m", prepost=True, progress=False)
+                    if isinstance(df_intra.columns, pd.MultiIndex):
+                        df_intra.columns = df_intra.columns.droplevel(1)
+                    preco_atual = round(float(df_intra['Close'].iloc[-1]), 2)
+                    maxima_hoje = round(float(df_intra['High'].max()), 2)
+                    minima_hoje = round(float(df_intra['Low'].min()), 2)
+                except Exception:
+                    preco_atual = round(float(df_pos['Close'].iloc[-1]), 2)
+                    maxima_hoje = round(float(df_pos['High'].iloc[-1]), 2)
+                    minima_hoje = round(float(df_pos['Low'].iloc[-1]), 2)
+                
+                entrada = limpar_float(info.get("precoEntrada")) or preco_atual
+                qtd = info.get("quantidade", "N/A")
+                maxima_efetiva = max(maxima_hoje, preco_atual)
+                
+                if alvo_tp > 0 and maxima_efetiva >= alvo_tp:
+                    acao = f"🎯 ALVO ALCANÇADO (TP em ${alvo_tp})! Recomendado FECHAR POSIÇÃO com Lucro (WIN)."
+                elif stop > 0 and minima_hoje <= stop:
+                    acao = f"🚨 STOP LOSS ATINGIDO (${stop})! Recomendado LIQUIDAR POSIÇÃO (LOSS)."
+                else:
+                    acao = f"⏳ MANTER POSIÇÃO (Holy Grail). Alvo TP: ${alvo_tp} | Stop: ${stop}."
+                
+                bloco_posicoes_ativas += (
+                    f"📌 [POSIÇÃO ATIVA - {status}] {ticker} | Qtd: {qtd} | Entrada: ${entrada} | "
+                    f"Preço Atual: ${preco_atual} | Alvo: ${alvo_tp} | Stop: ${stop} | "
+                    f"AÇÃO: {acao}\n"
+                )
+        except Exception as e:
+            print(f"[ERRO] Falha ao auditar posição ativa {ticker}: {e}")
+
+# ===================================================================
+# 5. MOTOR MATEMÁTICO: HOLY GRAIL (PULLBACK À EMA20) COM TETO TÉCNICO
 # ===================================================================
 def analisar_holy_grail(ativo_info, vol_alvo_diaria_usd):
     try:
@@ -112,6 +185,7 @@ def analisar_holy_grail(ativo_info, vol_alvo_diaria_usd):
         rs_score = ativo_info.get("rs_score", "N/A")
 
         if not ticker or ticker == "#N/A" or ticker == "NONE": return None
+        if ticker in posicoes_ativas_dict: return None # Ignora se já estiver em carteira
         if ticker == "BRK-A": ticker = "BRK-B"
 
         # 1. FILTRO DE FORÇA RELATIVA EXTREMA (RS >= 80)
@@ -119,10 +193,9 @@ def analisar_holy_grail(ativo_info, vol_alvo_diaria_usd):
         if val_rs_num is None or val_rs_num < MIN_RS_SCORE_HOLY_GRAIL:
             return None
 
-        # Pausa aleatória curta para evitar bloqueios do Yahoo Finance
         time.sleep(random.uniform(0.8, 1.8))
 
-        # 2. CALENDÁRIO DE EARNINGS E DADOS FUNDAMENTAIS (Obtenção do Máximo 52 Semanas)
+        # 2. CALENDÁRIO DE EARNINGS E DADOS FUNDAMENTAIS
         alerta_earnings = "OK"
         max_52s = None
         try:
@@ -144,7 +217,7 @@ def analisar_holy_grail(ativo_info, vol_alvo_diaria_usd):
         except:
             pass
 
-        # 3. DADOS FINANCEIROS COM TRATAMENTO DE RETENTATIVA
+        # 3. DADOS FINANCEIROS
         df = pd.DataFrame()
         for tentativa_yf in range(3):
             try:
@@ -209,18 +282,14 @@ def analisar_holy_grail(ativo_info, vol_alvo_diaria_usd):
             entrada_gatilho = round(max(maximo_hoje, maximo_ontem) * 1.002, 2)
             stop_loss = round(min(minimo_hoje * 0.99, ema20 - atr), 2)
             
-            # Cálculo base de risco e rácio RR de 2.5x
             risco = entrada_gatilho - stop_loss
             alvo_tp = round(entrada_gatilho + (risco * 2.5), 2) 
 
             # 🛡️ TRAVÃO TÉCNICO DE REALIDADE: Respeitar o Máximo de 52 Semanas
             if max_52s and max_52s > 0:
-                # Se o alvo projetado ultrapassar o teto de 52 semanas, limitamos ao valor máximo histórico 
-                # para garantir que o Take Profit faz sentido técnico e estrutural.
                 if alvo_tp > max_52s:
                     alvo_tp = round(max_52s, 2)
                     
-            # Garantir que o alvo fica sempre acima da entrada caso o teto ficasse comprimido
             if alvo_tp <= entrada_gatilho:
                 alvo_tp = round(entrada_gatilho + (risco * 1.5), 2)
             
@@ -260,24 +329,13 @@ def analisar_holy_grail(ativo_info, vol_alvo_diaria_usd):
         return None
 
 # ===================================================================
-# 4. EXECUÇÃO PRINCIPAL
+# 6. EXECUÇÃO PRINCIPAL E RELATÓRIO
 # ===================================================================
 def executar_motor():
-    ativos, configs = buscar_watchlist()
-    if not ativos: sys.exit(0)
-        
-    try:
-        capital = float(configs.get("CAPITAL_TOTAL_CONTA", 10400.00))
-        vol_anual = float(configs.get("ALVO_VOLATILIDADE_ANUAL", 0.05))
-    except (ValueError, TypeError):
-        capital, vol_anual = 10400.00, 0.05
-
-    vol_diaria_usd = (capital * vol_anual) / 16.0
-
-    print(f"[CONFIG] Orçamento Diário de Volatilidade: ${vol_diaria_usd:.2f}\n")
+    if not ativos_sheets: sys.exit(0)
 
     ativos_acionados = []
-    for ativo_info in ativos:
+    for ativo_info in ativos_sheets:
         ticker = ativo_info.get("ticker")
         if not ticker or ticker == "#N/A": continue
         
@@ -285,24 +343,15 @@ def executar_motor():
         if res: ativos_acionados.append(res)
 
     prompt_ia = """MODO ESTRATÉGICO: PULLBACKS DE LIDERANÇA (HOLY GRAIL - LINDA RASCHKE)
-O teu mandato é auditar ações de força relativa ELITE (RS >= 80) que sofreram um recuo (pullback) de curto prazo à Média Móvel Exponencial (EMA) de 20 períodos, apresentando seca de volume e tendência principal robusta (ADX forte).
-
-REGRAS ESTRITAS:
-1. O ativo não deve ser comprado a mercado. A entrada é SEMPRE validada via "Buy Stop" acima da máxima do pullback, garantindo que o fluxo comprador retomou o controlo.
-2. Veto Fundamental: Se detetares "Earnings: PERIGO", desclassifica o sinal imediatamente.
-3. Risco Assimétrico: Destaca a precisão deste trade. Ao comprar na EMA 20, o stop fica curto, permitindo alto retorno, limitado estruturalmente ao teto de 52 semanas.
-
-ESTRUTURA OBRIGATÓRIA:
-🏆 [TICKER] - [Nome da Empresa] ([Setor])
-- 📉 DIAGNÓSTICO DO PULLBACK: Teste à EMA 20 concluído com seca de volume. (ADX a [Valor] confirma força da tendência maior).
-- 📊 CONTEXTO INSTITUCIONAL: RS Score de Elite (Vento a Favor).
-- ⚙️ TÁTICA DE EXECUÇÃO: Colocar ordem pendente Buy Stop no Gatilho de [Entrada]. 
-- 🛡️ RISCO E ALVO: Stop cravado em [Stop] (Abaixo da média/mínimo) | Alvo: [TP] (Limitado ao teto técnico/máximo de 52 semanas) | Qtd: [X] | Alocação: [Valor] USD.
-- 🔄 PASSAGEM DE TESTEMUNHO: Adiciona: "⚠️ ATENÇÃO: Assim que executada, altera o estado no Sheets para 'ATIVA_SWING' (ou 'ATIVA_M10'). Gerir posição com Trailing Stop ou fechar no alvo estático."
-"""
+O teu mandato é auditar ações de força relativa ELITE (RS >= 80) que sofreram um recuo (pullback) de curto prazo à Média Móvel Exponencial (EMA) de 20 períodos, apresentando seca de volume e tendência principal robusta (ADX forte)."""
     
     bloco = f"📊 RELATÓRIO PULLBACKS DE LIDERANÇA (HOLY GRAIL) 🏆\n\n{prompt_ia}\n\n--------------------------------------------------\n"
     
+    if bloco_posicoes_ativas:
+        bloco += "GESTÃO DE POSIÇÕES ATIVAS (ATIVA_M10 / ATIVA_SWING):\n\n"
+        bloco += bloco_posicoes_ativas
+        bloco += "--------------------------------------------------\n\n"
+
     if not ativos_acionados:
         bloco += "[SEM SINAIS PULLBACK] - Nenhum ativo de Elite encontra-se num ponto ótimo de retração à EMA20 hoje.\n"
     else:
@@ -313,7 +362,21 @@ ESTRUTURA OBRIGATÓRIA:
     with open("comboio_holygrail_temp.txt", "w", encoding="utf-8") as f:
         f.write(bloco)
         
-    enviar_email(bloco) # Correção: A tua função chama-se 'enviar_email' e não 'envia_email'
+    enviar_email(bloco)
+
+    # Notificação unificada curta para o Telegram
+    telegram_ativado = str(configs_dict.get("TELEGRAM_NOTIFICATIONS", "true")).strip().lower() in ["true", "1", "sim", "yes"]
+    if telegram_ativado:
+        print("A enviar notificação para o Telegram...")
+        telegram_token = os.environ.get('TELEGRAM_BOT_TOKEN_GERAL')
+        telegram_chat = os.environ.get('TELEGRAM_CHAT_ID')
+        if telegram_token and telegram_chat:
+            url_tg = f"https://api.telegram.org/bot{telegram_token}/sendMessage"
+            payload_tg = {
+                "chat_id": telegram_chat,
+                "text": "🏆 *MOTOR 10 (HOLY GRAIL)*\n\n✅ Relatório e auditoria de posições enviados com sucesso para o e-mail!"
+            }
+            requests.post(url_tg, json=payload_tg, timeout=10)
 
 if __name__ == "__main__":
     executar_motor()
