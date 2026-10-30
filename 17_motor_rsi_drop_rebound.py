@@ -128,14 +128,16 @@ else:
 tickers_watchlist = list(dict.fromkeys(tickers_watchlist))
 
 # ===================================================================
-# 4. AUDITAR POSIÇÕES EM CARTEIRA
+# 4. AUDITAR POSIÇÕES EM CARTEIRA (APENAS ESTADOS DO MOTOR 17)
 # ===================================================================
 bloco_posicoes_ativas = ""
 for chave_pos, info in posicoes_ativas_dict.items():
     if not isinstance(info, dict):
         continue
     status = str(info.get("status", "")).strip().upper()
-    if "ATIVA" in status or status in ["ATIVA_SWING", "ATIVA_M17"]:
+    
+    # Restrição estricta: Apenas audita posições pertencentes ao Motor 17 / Swing
+    if status in ["ATIVA_SWING", "ATIVA_M17"]:
         try:
             # Mapeamento robusto de tickers (ex: C3.ai -> AI)
             ticker = "AI" if chave_pos.lower() in ["c3.ai", "c3"] else chave_pos.strip().upper()
