@@ -372,7 +372,7 @@ O teu mandato é auditar ações de força relativa ELITE (RS >= 80) que sofrera
 
     if debug_telegram_ativado:
         print("A enviar notificação de Debug para o Telegram via função modular...")
-        mensagem_debug = "🏆 *MOTOR HOLY GRAIL (PULLBACKS)*\n\n🔍 [DEBUG] Execução concluída com sucesso. Relatório e auditoria enviados por e-mail."
+        mensagem_debug = "10 🏆 *MOTOR HOLY GRAIL (PULLBACKS)*\n\n🔍 [DEBUG] Execução concluída com sucesso. Relatório e auditoria enviados por e-mail."
         enviar_alerta(mensagem_debug)
 
 if __name__ == "__main__":
