@@ -13,6 +13,9 @@ import random
 import warnings
 warnings.filterwarnings("ignore")
 
+# Importação da função modular de notificação do Telegram
+from F01_notificador_telegram import enviar_alerta
+
 # ===================================================================
 # 1. CONFIGURAÇÃO E MAPA DE ETFS SETORIAIS
 # ===================================================================
@@ -151,6 +154,29 @@ try:
 
     # Enviar e-mail de notificação de rotação
     enviar_email(f"tradingRelatorioIA US - 🔄 ROTAÇÃO SETORIAL ({datetime.now(ZoneInfo('Europe/Lisbon')).strftime('%d/%m/%Y')})", conteudo_relatorio)
+
+    # ===================================================================
+    # 4. NOTIFICAÇÃO TELEGRAM DEBUG (CONTROLADA PELA FLAG DE CONFIGS)
+    # ===================================================================
+    # Tenta carregar configs adicionais se existirem ou define padrão seguro
+    debug_telegram_ativado = False
+    try:
+        # Se houver um endpoint configurado, podemos tentar obter as configs, caso contrário assume false ou lê de env
+        webhook_url = os.environ.get('WEBHOOK_URL')
+        if webhook_url:
+            resp_cfg = requests.get(webhook_url, timeout=5)
+            if resp_cfg.status_code == 200:
+                dados_cfg = resp_cfg.json()
+                if isinstance(dados_cfg, dict):
+                    configs_dict = dados_cfg.get("configs", {})
+                    debug_telegram_ativado = str(configs_dict.get("TELEGRAM_NOTIFICATIONS_DEBUG", "false")).strip().lower() in ["true", "1", "sim", "yes"]
+    except Exception:
+        pass
+
+    if debug_telegram_ativado:
+        print("A enviar notificação de Debug para o Telegram via função modular...")
+        mensagem_debug = "🏆 *MOTOR 11 (ROTAÇÃO SETORIAL)*\n\n🔍 [DEBUG] Execução concluída com sucesso. Análise de fluxo de capital e rotação gerada e enviada por e-mail."
+        enviar_alerta(mensagem_debug)
 
 except Exception as e:
     print(f"[ERRO CRÍTICO] Falha no Motor de Rotação Setorial: {e}")
