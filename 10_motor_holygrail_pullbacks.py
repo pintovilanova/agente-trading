@@ -337,9 +337,11 @@ def executar_motor():
             return None
 
     ativos_acionados = []
+    total_analisados = 0
     for ativo_info in ativos_sheets:
         ticker = ativo_info.get("ticker")
         if not ticker or ticker == "#N/A": continue
+        total_analisados += 1
         res = analisar_holy_grail(ativo_info)
         if res: ativos_acionados.append(res)
 
@@ -372,7 +374,13 @@ O teu mandato é auditar ações de força relativa ELITE (RS >= 80) que sofrera
 
     if debug_telegram_ativado:
         print("A enviar notificação de Debug para o Telegram via função modular...")
-        mensagem_debug = f"10 🏆 *MOTOR HOLY GRAIL (PULLBACKS)*\n\n🔍 [DEBUG] Execução concluída com sucesso. Relatório e auditoria enviados por e-mail."
+        total_acionados = len(ativos_acionados)
+        mensagem_debug = (
+            f"10 🏆 *MOTOR HOLY GRAIL (PULLBACKS)*\n\n"
+            f"🔍 [DEBUG] Execução concluída com sucesso.\n"
+            f"📊 Ativos analisados: *{total_analisados}* | Acionados: *{total_acionados}*\n"
+            f"✉️ Relatório e auditoria enviados por e-mail."
+        )
         enviar_alerta(mensagem_debug)
 
 if __name__ == "__main__":
