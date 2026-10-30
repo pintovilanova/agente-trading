@@ -26,6 +26,9 @@ from email.mime.multipart import MIMEMultipart
 import warnings
 warnings.filterwarnings("ignore")
 
+# Importação da função modular de notificação do Telegram
+from F01_notificador_telegram import enviar_alerta
+
 # ===================================================================
 # 0. TRAVA DE FIM DE SEMANA
 # ===================================================================
@@ -132,12 +135,10 @@ def analisar_connors_chan(ativo_info, vol_alvo_diaria_usd):
         if not ticker or ticker == "#N/A" or ticker == "NONE":
             return None
 
-        # CORREÇÃO 1: Conversão automática de BRK-A para BRK-B
         if ticker == "BRK-A":
             print("[AJUSTE] Ticker BRK-A convertido automaticamente para BRK-B.")
             ticker = "BRK-B"
 
-        # CORREÇÃO 2: Filtro Anti-Laggard (RS Score >= 50)
         val_rs_num = limpar_float(rs_score)
         if val_rs_num is not None and val_rs_num < 50:
             print(f"[FILTRADO] {ticker} rejeitado por RS Score fraco ({val_rs_num} < 50 - Laggard).")
@@ -150,7 +151,6 @@ def analisar_connors_chan(ativo_info, vol_alvo_diaria_usd):
         if isinstance(df.columns, pd.MultiIndex):
             df.columns = df.columns.droplevel(1)
 
-        # BLINDAGEM CONTRA NaNs E HISTÓRICO CURTO
         df = df.dropna(subset=['Close', 'High', 'Low', 'Volume'])
         if len(df) < 25:
             return None
@@ -158,9 +158,6 @@ def analisar_connors_chan(ativo_info, vol_alvo_diaria_usd):
         ultimo_dia = df.iloc[-1]
         preco = ultimo_dia['Close']
 
-        # -------------------------------------------------------------
-        # FILTROS DE SEGURANÇA ESTRUTURAL E CALENDÁRIO
-        # -------------------------------------------------------------
         if pd.isna(preco) or preco < 3.00:
             print(f"[FILTRADO] {ticker} rejeitado por preço baixo (Preço: {preco}).")
             return None
@@ -169,7 +166,6 @@ def analisar_connors_chan(ativo_info, vol_alvo_diaria_usd):
         try:
             ticker_obj = yf.Ticker(ticker)
             
-            # CORREÇÃO 3: Fallback automático de setor via yfinance
             if setor in ["Desconhecido", "N/A", "", "NONE"]:
                 setor_yf = ticker_obj.info.get('sector')
                 if setor_yf:
@@ -193,12 +189,10 @@ def analisar_connors_chan(ativo_info, vol_alvo_diaria_usd):
             print(f"[FILTRADO] {ticker} rejeitado por pertencer ao setor REIT/Imobiliário.")
             return None
 
-        # Indicadores Técnicos (Pandas TA)
         df.ta.bbands(length=20, std=2.0, append=True)
         df.ta.rsi(length=2, append=True)            
-        df.ta.atr(length=14, append=True)           
+        df.ta.atr(length=14, append=True)            
 
-        # DETEÇÃO DINÂMICA DAS COLUNAS DOS INDICADORES
         col_bbl = [c for c in df.columns if str(c).startswith('BBL_')]
         col_bbm = [c for c in df.columns if str(c).startswith('BBM_')]
         col_rsi = [c for c in df.columns if str(c).startswith('RSI_2')]
@@ -231,9 +225,6 @@ def analisar_connors_chan(ativo_info, vol_alvo_diaria_usd):
         qtd_acoes = "N/A"
         valor_investir = "N/A"
         
-        # -------------------------------------------------------------
-        # A MATEMÁTICA DO GATILHO DE EXAUSTÃO CONNORS-CHAN
-        # -------------------------------------------------------------
         if pd.notna(bbl_inferior) and pd.notna(rsi_2) and (preco < bbl_inferior) and (rsi_2 < 10.0):
             estado = "EXAUSTÃO ESTATÍSTICA - Connors-Chan"
             entrada = round(preco, 2)
@@ -255,7 +246,6 @@ def analisar_connors_chan(ativo_info, vol_alvo_diaria_usd):
                 else:
                     qtd_calc = round(vol_alvo_diaria_usd / risco, 2) if risco > 0 else 0
 
-                # CORREÇÃO 4: Trava Anti-Quantidade Zero
                 if qtd_calc <= 0:
                     estado = "Rejeitado (Quantidade Nula)"
                     entrada = alvo_tp = stop_loss = "N/A"
@@ -373,6 +363,16 @@ Estrutura Visual Obrigatória:
         f.write(bloco_texto_ia)
         
     enviar_email(bloco_texto_ia)
+
+    # ===================================================================
+    # 5. NOTIFICAÇÃO TELEGRAM DEBUG (CONTROLADA PELA FLAG DE CONFIGS)
+    # ===================================================================
+    debug_telegram_ativado = str(configs.get("TELEGRAM_NOTIFICATIONS_DEBUG", "false")).strip().lower() in ["true", "1", "sim", "yes"]
+
+    if debug_telegram_ativado:
+        print("A enviar notificação de Debug para o Telegram via função modular...")
+        mensagem_debug = "🧲 *MOTOR CONNORS-CHAN (REVERSÃO)*\n\n🔍 [DEBUG] Execução concluída com sucesso. Relatório Connors-Chan gerado e enviado por e-mail."
+        enviar_alerta(mensagem_debug)
 
 if __name__ == "__main__":
     executar_motor()
