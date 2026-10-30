@@ -5,7 +5,7 @@
 # Este script opera como um "Caçador de Earnings Drift" (PEAD - Post-Earnings 
 # Announcement Drift) automatizado na nuvem via GitHub Actions. O seu 
 # objetivo é varrer a Watchlist em busca de empresas que tenham reportado 
-# resultados recentemente (últimos 5 dias), filtrandoquelas que apresentem 
+# resultados recentemente (últimos 5 dias), filtrando aquelas que apresentem 
 # uma explosão de preço e volume (salto inicial >= 2.0% e RVOL >= 2.0), 
 # calculando o dimensionamento de risco institucional (Método Carver) e 
 # enviando um relatório estruturado por email para triagem de uma IA.
@@ -28,6 +28,9 @@ from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 import warnings
 warnings.filterwarnings("ignore")
+
+# Importação da função modular de notificação do Telegram
+from F01_notificador_telegram import enviar_alerta
 
 # ===================================================================
 # 0. TRAVA DE FIM DE SEMANA
@@ -158,27 +161,22 @@ def analisar_earnings_drift(ativo_info, vol_alvo_diaria_usd):
     if not ticker or ticker == "#N/A" or ticker == "NONE":
         return None
 
-    # CORREÇÃO 1: Conversão de BRK-A para BRK-B
     if ticker == "BRK-A":
         print("[AJUSTE] Ticker BRK-A convertido automaticamente para BRK-B.")
         ticker = "BRK-B"
 
-    # CORREÇÃO 2: Filtro Anti-Laggard (RS Score >= 50)
     val_rs_num = limpar_float(rs_score)
     if val_rs_num is not None and val_rs_num < 50:
         print(f"[FILTRADO] {ticker} rejeitado por RS Score fraco ({val_rs_num} < 50 - Laggard).")
         return None
 
     try:
-        # Obter dados de histórico de forma segura contra 401/429
         df = get_yf_history_safe(ticker, period="6mo")
         if df.empty or len(df) < 25:
             return None
 
-        # Obter datas de earnings com proteção
         ticker_obj, earnings_df = obter_earnings_dates_safe(ticker)
 
-        # CORREÇÃO 3: Fallback automático de setor via yfinance
         if setor in ["Desconhecido", "N/A", "", "NONE"] and ticker_obj is not None:
             try:
                 setor_yf = ticker_obj.info.get('sector')
@@ -238,7 +236,6 @@ def analisar_earnings_drift(ativo_info, vol_alvo_diaria_usd):
             else:
                 qtd_calc = round(vol_alvo_diaria_usd / risco, 2) if risco > 0 else 0
                 
-            # CORREÇÃO 4: Trava Anti-Quantidade Zero
             if qtd_calc <= 0:
                 print(f"[FILTRADO] {ticker} rejeitado por quantidade calculada nula.")
                 return None
@@ -374,7 +371,7 @@ def executar_motor():
         "🎯 [TICKER] - [Nome da Empresa] ([Setor])\n"
         "- 🚀 CATALISADOR DE EARNINGS: Data do evento: [DataEarnings] | Salto inicial: [VarDia%]\n"
         "- 📊 CONTEXTO INSTITUCIONAL (RS SCORE): [Incluir o RS Score e o respetivo estado institucional reportado]\n"
-        "- GF PEGADA INSTITUCIONAL: RVOL detetado de [RVOL]\n"
+        "- 🩸 PEGADA INSTITUCIONAL: RVOL detetado de [RVOL]\n"
         "- ⚙️ TÁTICA: EARNINGS DRIFT. Surfar tendência com rácio 2:1.\n"
         "- 🔢 DADOS EXATOS: Entrada: X | Stop: X | TP: X | Qtd: X | Valor a Investir: X\n"
         "- 📋 REFERÊNCIA: [Copia e cola a Linha do Comboio exata fornecida abaixo]\n"
@@ -389,11 +386,20 @@ def executar_motor():
         for linha in comboio_ia:
             bloco_texto_ia += linha + "\n"
 
-    # Gravação local correta para o Orquestrador IA
     with open("comboio_earnings_temp.txt", "w", encoding="utf-8") as f:
         f.write(bloco_texto_ia)
 
     enviar_email(bloco_texto_ia)
+
+    # ===================================================================
+    # 5. NOTIFICAÇÃO TELEGRAM DEBUG (CONTROLADA PELA FLAG DE CONFIGS)
+    # ===================================================================
+    debug_telegram_ativado = str(configs.get("TELEGRAM_NOTIFICATIONS_DEBUG", "false")).strip().lower() in ["true", "1", "sim", "yes"]
+
+    if debug_telegram_ativado:
+        print("A enviar notificação de Debug para o Telegram via função modular...")
+        mensagem_debug = "📊 *MOTOR DE EARNINGS DRIFT (PEAD)*\n\n🔍 [DEBUG] Execução concluída com sucesso. Relatório de Earnings gerado e enviado por e-mail."
+        enviar_alerta(mensagem_debug)
 
 if __name__ == "__main__":
     executar_motor()
