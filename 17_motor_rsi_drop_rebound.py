@@ -232,22 +232,40 @@ for ticker in tickers_watchlist:
         print(f"[ERRO] Falha ao analisar {ticker}: {e}")
 
 # ===================================================================
-# 6. RELATÓRIO E ENVIO POR E-MAIL
+# 6. RELATÓRIO DETALHADO E ENVIO POR E-MAIL
 # ===================================================================
 data_hoje = datetime.now(ZoneInfo("Europe/Lisbon")).strftime("%d/%m/%Y %H:%M")
-bloco_texto = f"⚡ MOTOR 17: 2-DAY RSI DROP & REBOUND ({data_hoje})\n\n"
+
+bloco_texto = (
+    f"⚡ RELATÓRIO DETALHADO - MOTOR 17: 2-DAY RSI DROP & REBOUND ({data_hoje})\n"
+    f"==================================================================\n\n"
+)
 
 if bloco_posicoes_ativas:
-    bloco_texto += f"POSIÇÕES ATIVAS:\n{bloco_posicoes_ativas}\n"
+    bloco_texto += f"📌 GESTÃO DE POSIÇÕES ATIVAS:\n{bloco_posicoes_ativas}\n--------------------------------------------------\n\n"
 else:
-    bloco_texto += "POSIÇÕES ATIVAS: Nenhuma posição ativa detetada.\n\n"
+    bloco_texto += "📌 GESTÃO DE POSIÇÕES ATIVAS: Nenhuma posição ativa detetada.\n--------------------------------------------------\n\n"
 
 if alertas_rebound:
-    bloco_texto += "NOVOS SINAIS DETETADOS:\n"
+    bloco_texto += f"🎯 NOVOS SINAIS DE REVERSSÃO DETETADOS ({len(alertas_rebound)}):\n\n"
     for a in alertas_rebound:
-        bloco_texto += f"🎯 {a['ticker']} | RSI: {a['rsi2']} | Entrada: ${a['preco_atual']} | Stop: ${a['stop_loss']} | Alvo: ${a['take_profit_ema5']}\n"
+        # Tenta obter o setor e RS score do dicionário do Sheets correspondente
+        info_ativo = next((item for item in ativos_sheets if str(item.get("ticker","")).strip().upper() == a['ticker']), {})
+        nome_empresa = info_ativo.get("nome", "N/A")
+        setor = info_ativo.get("setor", "Desconhecido")
+        rs_score = info_ativo.get("rs_score", "N/A")
+        
+        bloco_texto += (
+            f"🔹 [{a['ticker']}] - {nome_empresa} ({setor})\n"
+            f"   - 📊 Contexto Técnico: RSI(2) a {a['rsi2']:.2f} (Zona de sobrevenda extrema < 10)\n"
+            f"   - ⚙️ Tática: Reversão de Curto Prazo (Hit & Run 48h-72h) com alvo na EMA5\n"
+            f"   - 🔢 Dados Exatos: Entrada: ${a['preco_atual']} | Stop Loss: ${a['stop_loss']} | Alvo (EMA5): ${a['take_profit_ema5']}\n"
+            f"   - 💰 Dimensionamento: Qtd: {a['qtd_acoes']} | Valor a Investir: ~${a['valor_investir']} USD\n"
+            f"   - 📋 RS Score Institucional: {rs_score}\n"
+            f"--------------------------------------------------\n"
+        )
 else:
-    bloco_texto += "✅ Nenhum novo sinal hoje.\n"
+    bloco_texto += "✅ Nenhum novo sinal de rebound detetado nos parâmetros estritos hoje.\n"
 
 # Enviar o relatório por e-mail
 enviar_email(bloco_texto)
