@@ -317,10 +317,12 @@ def executar_motor():
     print(f"[CONFIG] Orçamento Diário de Volatilidade: ${volatilidade_alvo_diaria_usd:.2f}\n")
 
     ativos_acionados = []
+    total_analisados = 0
     for ativo_info in ativos:
         ticker = ativo_info.get("ticker")
         if not ticker or ticker == "#N/A": continue
         
+        total_analisados += 1
         res = analisar_compressao_vcp(ativo_info, volatilidade_alvo_diaria_usd)
         if res:
             ativos_acionados.append(res)
@@ -365,7 +367,13 @@ ESTRUTURA OBRIGATÓRIA:
 
     if debug_telegram_ativado:
         print("A enviar notificação de Debug para o Telegram via função modular...")
-        mensagem_debug = "07 🎯 *MOTOR VCP BREAKOUT (SQUEEZE)*\n\n🔍 [DEBUG] Execução concluída com sucesso. Relatório VCP gerado e enviado por e-mail."
+        total_acionados = len(ativos_acionados)
+        mensagem_debug = (
+            f"07 🎯 *MOTOR VCP BREAKOUT (SQUEEZE)*\n\n"
+            f"🔍 [DEBUG] Execução concluída com sucesso.\n"
+            f"📊 Ativos analisados: *{total_analisados}* | Acionados: *{total_acionados}*\n"
+            f"✉️ Relatório VCP gerado e enviado por e-mail."
+        )
         enviar_alerta(mensagem_debug)
 
 if __name__ == "__main__":
