@@ -160,6 +160,6 @@ debug_telegram_ativado = str(configs_dict.get("TELEGRAM_NOTIFICATIONS_DEBUG", "f
 
 if debug_telegram_ativado:
     print("A enviar notificação de Debug para o Telegram via função modular...")
-    status_msg = f"✂️ {len(alertas_colheita)} Oportunidades de Colheita (>= 2R)" if alertas_colheita else "✅ Nenhuma Posição em 2R para Colheita"
+    status_msg = f"15 ✂️ {len(alertas_colheita)} Oportunidades de Colheita (>= 2R)" if alertas_colheita else "✅ Nenhuma Posição em 2R para Colheita"
     mensagem_debug = f"✂️ *MOTOR 15 (PROFIT HARVEST)*\n\n🔍 [DEBUG] Execução concluída.\nEstado: {status_msg}\nAuditoria de rebalanceamento finalizada."
     enviar_alerta(mensagem_debug)
