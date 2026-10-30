@@ -118,7 +118,6 @@ def enviar_email(conteudo):
 # 3. EXECUÇÃO PRINCIPAL
 # ===================================================================
 def executar_motor():
-    # CARGA DOS DADOS DO SHEETS DENTRO DA EXECUÇÃO
     ativos_sheets, posicoes_ativas_dict, configs_dict = buscar_dados_completos()
     if not ativos_sheets and not posicoes_ativas_dict:
         print("[AVISO] Nenhum dado retornado do Google Sheets.")
@@ -208,7 +207,7 @@ def executar_motor():
             rs_score = ativo_info.get("rs_score", "N/A")
 
             if not ticker or ticker == "#N/A" or ticker == "NONE": return None
-            if ticker in posicoes_ativas_dict: return None # Ignora se já estiver em carteira
+            if ticker in posicoes_ativas_dict: return None 
             if ticker == "BRK-A": ticker = "BRK-B"
 
             val_rs_num = limpar_float(rs_score)
@@ -366,18 +365,15 @@ O teu mandato é auditar ações de força relativa ELITE (RS >= 80) que sofrera
         
     enviar_email(bloco)
 
-    telegram_ativado = str(configs_dict.get("TELEGRAM_NOTIFICATIONS", "true")).strip().lower() in ["true", "1", "sim", "yes"]
-    if telegram_ativado:
-        print("A enviar notificação para o Telegram...")
-        telegram_token = os.environ.get('TELEGRAM_BOT_TOKEN_GERAL')
-        telegram_chat = os.environ.get('TELEGRAM_CHAT_ID')
-        if telegram_token and telegram_chat:
-            url_tg = f"https://api.telegram.org/bot{telegram_token}/sendMessage"
-            payload_tg = {
-                "chat_id": telegram_chat,
-                "text": "🏆 *MOTOR 10 (HOLY GRAIL)*\n\n✅ Relatório e auditoria de posições baseados em EMA20/ATR enviados com sucesso para o e-mail!"
-            }
-            requests.post(url_tg, json=payload_tg, timeout=10)
+    # ===================================================================
+    # 6. NOTIFICAÇÃO TELEGRAM DEBUG (CONTROLADA PELA FLAG DE CONFIGS)
+    # ===================================================================
+    debug_telegram_ativado = str(configs_dict.get("TELEGRAM_NOTIFICATIONS_DEBUG", "false")).strip().lower() in ["true", "1", "sim", "yes"]
+
+    if debug_telegram_ativado:
+        print("A enviar notificação de Debug para o Telegram via função modular...")
+        mensagem_debug = "🏆 *MOTOR HOLY GRAIL (PULLBACKS)*\n\n🔍 [DEBUG] Execução concluída com sucesso. Relatório e auditoria enviados por e-mail."
+        enviar_alerta(mensagem_debug)
 
 if __name__ == "__main__":
     executar_motor()
