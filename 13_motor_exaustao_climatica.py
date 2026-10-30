@@ -170,5 +170,5 @@ debug_telegram_ativado = str(configs_dict.get("TELEGRAM_NOTIFICATIONS_DEBUG", "f
 if debug_telegram_ativado:
     print("A enviar notificação de Debug para o Telegram via função modular...")
     status_msg = f"🚨 {len(alertas_exaustao)} Alertas de Exaustão Detetados!" if alertas_exaustao else "✅ Nenhuma Exaustão Parabólica"
-    mensagem_debug = f"🔥 *MOTOR 13 (EXAUSTÃO CLIMÁTICA)*\n\n🔍 [DEBUG] Execução concluída.\nEstado: {status_msg}\nMonitorização de posições ativas finalizada."
+    mensagem_debug = "13🔥 *(EXAUSTÃO CLIMÁTICA)*\n\n🔍 [DEBUG] Execução concluída.\nEstado: {status_msg}\nMonitorização de posições ativas finalizada."
     enviar_alerta(mensagem_debug)
