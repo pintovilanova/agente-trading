@@ -13,9 +13,13 @@ from zoneinfo import ZoneInfo
 import warnings
 warnings.filterwarnings("ignore")
 
+# Importação da função modular de notificação do Telegram
+from F01_notificador_telegram import enviar_alerta
+
 # ===================================================================
 # 1. CONFIGURAÇÕES
 # ===================================================================
+WEBHOOK_URL = os.environ.get('WEBHOOK_URL')
 EMAIL_USER = os.environ.get("EMAIL_USER")
 EMAIL_PASS = os.environ.get("EMAIL_PASS")
 SMTP_SERVER = "smtp.gmail.com"
@@ -48,7 +52,7 @@ def extrair_tickers_dos_comboios():
     
     for arq in arquivos:
         # Ignoramos a rotação setorial e a macro para focar apenas em sinais de compra
-        if "rotacao" in arq or "macro" in arq:
+        if "rotacao" in arq or "macro" in arq or "correlacao" in arq:
             continue
             
         try:
@@ -117,9 +121,9 @@ for i in range(len(matriz_corr.columns)):
         if correlacao >= LIMIAR_CORRELACAO:
             conflitos_detetados = True
             relatorio += f"⚠️ ALERTA DE CONFLITO: [{ticker_1}] e [{ticker_2}]\n"
-            relatorio += f"   • Correlação: {correlacao*100:.1f}% (Movimentam-se de forma quase idêntica)\n"
-            relatorio += f"   • Diagnóstico: Comprar ambas duplica o risco sistémico da tua carteira no mesmo movimento.\n"
-            relatorio += f"   • Ação Tática Exigida: Escolher apenas o ativo com maior RS Score institucional OU executar ambas mas reduzir o lote de ambas para 25% (em vez de 50%).\n\n"
+            relatorio += f"    • Correlação: {correlacao*100:.1f}% (Movimentam-se de forma quase idêntica)\n"
+            relatorio += f"    • Diagnóstico: Comprar ambas duplica o risco sistémico da tua carteira no mesmo movimento.\n"
+            relatorio += f"    • Ação Tática Exigida: Escolher apenas o ativo com maior RS Score institucional OU executar ambas mas reduzir o lote de ambas para 25% (em vez de 50%).\n\n"
 
 if not conflitos_detetados:
     relatorio += "✅ PIPELINE LIMPA: Os ativos sugeridos hoje para entrada têm baixa correlação entre si.\n"
@@ -134,3 +138,24 @@ with open("comboio_correlacao_temp.txt", "w", encoding="utf-8") as f:
 
 print(relatorio)
 print("\n[SUCESSO] Relatório de Correlação gerado.")
+
+# ===================================================================
+# 4. NOTIFICAÇÃO TELEGRAM DEBUG (CONTROLADA PELA FLAG DE CONFIGS)
+# ===================================================================
+debug_telegram_ativado = False
+try:
+    if WEBHOOK_URL:
+        resp_cfg = requests.get(WEBHOOK_URL, timeout=5)
+        if resp_cfg.status_code == 200:
+            dados_cfg = resp_cfg.json()
+            if isinstance(dados_cfg, dict):
+                configs_dict = dados_cfg.get("configs", {})
+                debug_telegram_ativado = str(configs_dict.get("TELEGRAM_NOTIFICATIONS_DEBUG", "false")).strip().lower() in ["true", "1", "sim", "yes"]
+except Exception:
+    pass
+
+if debug_telegram_ativado:
+    print("A enviar notificação de Debug para o Telegram via função modular...")
+    status_msg = "⚠️ Conflitos Detetados!" if conflitos_detetados else "✅ Pipeline Limpa (Sem Conflitos)"
+    mensagem_debug = f"🛡️ *MOTOR 12 (ESCUDO DE CORRELAÇÃO)*\n\n🔍 [DEBUG] Execução concluída.\nEstado: {status_msg}\nRelatório de correlação gerado."
+    enviar_alerta(mensagem_debug)
