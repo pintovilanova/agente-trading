@@ -16,6 +16,9 @@ from email.mime.multipart import MIMEMultipart
 import warnings
 warnings.filterwarnings("ignore")
 
+# Importação da função modular de notificação do Telegram
+from F01_notificador_telegram import enviar_alerta
+
 # ===================================================================
 # 0. TRAVA DE FIM DE SEMANA
 # ===================================================================
@@ -143,18 +146,15 @@ def analisar_compressao_vcp(ativo_info, vol_alvo_diaria_usd):
         if not ticker or ticker == "#N/A" or ticker == "NONE":
             return None
 
-        # CORREÇÃO 1: Conversão automática de BRK-A para BRK-B
         if ticker == "BRK-A":
             print("[AJUSTE] Ticker BRK-A convertido automaticamente para BRK-B.")
             ticker = "BRK-B"
 
-        # CORREÇÃO 2: Filtro Anti-Laggard (RS Score >= 50)
         val_rs_num = limpar_float(rs_score)
         if val_rs_num is not None and val_rs_num < MIN_RS_SCORE:
             print(f"[VETO RS SCORE] {ticker} ignorado. RS Score fraco ({val_rs_num} < {MIN_RS_SCORE} - Laggard).")
             return None
 
-        # CORREÇÃO 3: Fallback automático de setor e verificação de Earnings via yfinance
         alerta_earnings = "OK"
         try:
             ticker_obj = yf.Ticker(ticker)
@@ -184,35 +184,29 @@ def analisar_compressao_vcp(ativo_info, vol_alvo_diaria_usd):
         if isinstance(df.columns, pd.MultiIndex):
             df.columns = df.columns.droplevel(1)
 
-        # BLINDAGEM CONTRA NaNs E BARRAS INCOMPLETAS:
         df = df.dropna(subset=['Close', 'High', 'Low', 'Volume'])
         if len(df) < 120:
             return None
 
         preco = float(df.iloc[-1]['Close'])
         
-        # Filtros Anti-Lixo
         if pd.isna(preco) or preco < 5.00:
             return None
         if setor and any(termo in str(setor).lower() for termo in ["real estate", "reit"]):
             return None
 
-        # Médias de Tendência
         df['SMA_50'] = df['Close'].rolling(window=50).mean()
         df['SMA_200'] = df['Close'].rolling(window=200).mean()
         
-        # Bollinger Bands & Band Width (BBW)
         df['SMA_20'] = df['Close'].rolling(window=20).mean()
         df['STD_20'] = df['Close'].rolling(window=20).std()
         df['BB_Upper'] = df['SMA_20'] + (df['STD_20'] * 2)
         df['BB_Lower'] = df['SMA_20'] - (df['STD_20'] * 2)
         df['BBW'] = ((df['BB_Upper'] - df['BB_Lower']) / df['SMA_20']) * 100
         
-        # Volume Seco
         df['Vol_SMA_50'] = df['Volume'].rolling(window=50).mean()
         vol_medio_3d = df['Volume'].iloc[-3:].mean()
         
-        # ATR para Dimensionamento
         high = df['High']
         low = df['Low']
         close = df['Close']
@@ -233,11 +227,9 @@ def analisar_compressao_vcp(ativo_info, vol_alvo_diaria_usd):
         vol_sma50 = float(ultimo['Vol_SMA_50'])
         atr = float(ultimo['ATR_14'])
         
-        # Caixote de 5 dias
         max_5d = float(df['High'].iloc[-5:].max())
         min_5d = float(df['Low'].iloc[-5:].min())
 
-        # Condições do Gatilho VCP (Squeeze)
         tendencia_alta = (preco > sma50) and (sma50 > sma200)
         bbw_120d_min = float(df['BBW'].iloc[-120:].min()) if len(df) >= 120 else float(df['BBW'].min())
         squeeze_ativo = bbw_atual <= (bbw_120d_min * 1.5) and bbw_atual < 8.0
@@ -256,7 +248,6 @@ def analisar_compressao_vcp(ativo_info, vol_alvo_diaria_usd):
             else:
                 qtd_calc = round(vol_alvo_diaria_usd / risco, 2) if risco > 0 else 0
                 
-            # CORREÇÃO 4: Trava Anti-Quantidade Nula (Qtd <= 0)
             if qtd_calc <= 0:
                 print(f"[FILTRADO] {ticker} rejeitado por quantidade calculada nula ({qtd_calc}).")
                 return None
@@ -366,6 +357,16 @@ ESTRUTURA OBRIGATÓRIA:
         f.write(bloco_texto_ia)
         
     enviar_email(bloco_texto_ia)
+
+    # ===================================================================
+    # 5. NOTIFICAÇÃO TELEGRAM DEBUG (CONTROLADA PELA FLAG DE CONFIGS)
+    # ===================================================================
+    debug_telegram_ativado = str(configs.get("TELEGRAM_NOTIFICATIONS_DEBUG", "false")).strip().lower() in ["true", "1", "sim", "yes"]
+
+    if debug_telegram_ativado:
+        print("A enviar notificação de Debug para o Telegram via função modular...")
+        mensagem_debug = "🎯 *MOTOR VCP BREAKOUT (SQUEEZE)*\n\n🔍 [DEBUG] Execução concluída com sucesso. Relatório VCP gerado e enviado por e-mail."
+        enviar_alerta(mensagem_debug)
 
 if __name__ == "__main__":
     executar_motor()
