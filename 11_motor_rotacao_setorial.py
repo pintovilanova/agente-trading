@@ -175,7 +175,7 @@ try:
 
     if debug_telegram_ativado:
         print("A enviar notificação de Debug para o Telegram via função modular...")
-        mensagem_debug = "11🏆 *(ROTAÇÃO SETORIAL)*\n\n🔍 [DEBUG] Execução concluída com sucesso. Análise de fluxo de capital e rotação gerada e enviada por e-mail."
+        mensagem_debug = f"11🏆 *(ROTAÇÃO SETORIAL)*\n\n🔍 [DEBUG] Execução concluída com sucesso. Análise de fluxo de capital e rotação gerada e enviada por e-mail."
         enviar_alerta(mensagem_debug)
 
 except Exception as e:
