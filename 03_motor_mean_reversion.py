@@ -316,11 +316,13 @@ def executar_motor():
     print(f"[CONFIG] Orçamento Diário de Volatilidade: ${volatilidade_alvo_diaria_usd:.2f}\n")
 
     ativos_acionados = []
+    total_analisados = 0
     
     for ativo_info in ativos:
         ticker = ativo_info.get("ticker")
         if not ticker or ticker == "#N/A": continue
         
+        total_analisados += 1
         res = analisar_reversao_media(ativo_info, volatilidade_alvo_diaria_usd)
         
         res_dict = res if isinstance(res, dict) else None
@@ -373,7 +375,13 @@ def executar_motor():
 
     if debug_telegram_ativado:
         print("A enviar notificação de Debug para o Telegram via função modular...")
-        mensagem_debug = "03 🚨 *MOTOR DE REVERSÃO À MÉDIA (PÂNICO)*\n\n🔍 [DEBUG] Execução concluída com sucesso. Relatório de pânico gerado e enviado por e-mail."
+        total_acionados = len(ativos_acionados)
+        mensagem_debug = (
+            f"03 🚨 *MOTOR DE REVERSÃO À MÉDIA (PÂNICO)*\n\n"
+            f"🔍 [DEBUG] Execução concluída com sucesso.\n"
+            f"📊 Ativos analisados: *{total_analisados}* | Acionados: *{total_acionados}*\n"
+            f"✉️ Relatório de pânico gerado e enviado por e-mail."
+        )
         enviar_alerta(mensagem_debug)
 
 if __name__ == "__main__":
