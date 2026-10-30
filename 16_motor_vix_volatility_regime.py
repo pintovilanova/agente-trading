@@ -3,6 +3,7 @@
 # ===================================================================
 import os
 import sys
+import requests
 import yfinance as yf
 import pandas as pd
 from datetime import datetime
@@ -10,7 +11,26 @@ from zoneinfo import ZoneInfo
 import warnings
 warnings.filterwarnings("ignore")
 
+# Importação da função modular de notificação do Telegram
+from F01_notificador_telegram import enviar_alerta
+
+# ===================================================================
+# 0. CONFIGURAÇÕES E CREDENCIAIS
+# ===================================================================
+WEBHOOK_URL = os.environ.get('WEBHOOK_URL')
+
 print("A iniciar Motor 16 - Volatility Regime & VIX Dynamic Targeting...")
+
+configs_dict = {}
+if WEBHOOK_URL:
+    try:
+        resp = requests.get(WEBHOOK_URL, timeout=15)
+        if resp.status_code == 200:
+            json_data = resp.json()
+            if isinstance(json_data, dict):
+                configs_dict = json_data.get("configs", {})
+    except Exception as e:
+        print(f"[AVISO] Não foi possível ler as configurações do Sheets: {e}")
 
 try:
     # Obter histórico do VIX (^VIX) via yfinance
@@ -81,3 +101,13 @@ with open("comboio_vix_temp.txt", "w", encoding="utf-8") as f:
     f.write(bloco_texto)
 
 print(f"[SUCESSO] Motor 16 executado com sucesso. Regime: {regime_nome} (VIX: {vix_atual:.2f})")
+
+# ===================================================================
+# NOTIFICAÇÃO TELEGRAM DEBUG (CONTROLADA PELA FLAG DE CONFIGS)
+# ===================================================================
+debug_telegram_ativado = str(configs_dict.get("TELEGRAM_NOTIFICATIONS_DEBUG", "false")).strip().lower() in ["true", "1", "sim", "yes"]
+
+if debug_telegram_ativado:
+    print("A enviar notificação de Debug para o Telegram via função modular...")
+    mensagem_debug = f"📈 *MOTOR 16 (REGIME VIX)*\n\n🔍 [DEBUG] Execução concluída.\nVIX: {vix_atual:.2f} | Regime: {regime_nome}\nRelatório de volatilidade gerado."
+    enviar_alerta(mensagem_debug)
