@@ -25,6 +25,9 @@ from email.mime.multipart import MIMEMultipart
 import warnings
 warnings.filterwarnings("ignore")
 
+# Importação da função modular de notificação do Telegram
+from F01_notificador_telegram import enviar_alerta
+
 # ===================================================================
 # 0. TRAVA DE FIM DE SEMANA
 # ===================================================================
@@ -129,12 +132,10 @@ def analisar_reversao_media(ativo_info, vol_alvo_diaria_usd):
     if not ticker or ticker == "#N/A" or ticker == "NONE":
         return None
 
-    # CORREÇÃO 1: Conversão automática de BRK-A para BRK-B
     if ticker == "BRK-A":
         print("[AJUSTE] Ticker BRK-A convertido automaticamente para BRK-B.")
         ticker = "BRK-B"
 
-    # CORREÇÃO 2: Filtro Anti-Laggard (Exige RS Score >= 50)
     val_rs_num = limpar_float(rs_score)
     if val_rs_num is not None and val_rs_num < 50:
         print(f"[FILTRADO] {ticker} rejeitado por RS Score fraco ({val_rs_num} < 50 - Laggard).")
@@ -148,7 +149,6 @@ def analisar_reversao_media(ativo_info, vol_alvo_diaria_usd):
         if isinstance(df.columns, pd.MultiIndex):
             df.columns = df.columns.droplevel(1)
 
-        # BLINDAGEM CONTRA NaNs E BARRAS INCOMPLETAS
         df = df.dropna(subset=['Close', 'High', 'Low', 'Volume'])
         if len(df) < 25:
             return None
@@ -156,7 +156,6 @@ def analisar_reversao_media(ativo_info, vol_alvo_diaria_usd):
         ultimo_dia = df.iloc[-1]
         preco = ultimo_dia['Close']
 
-        # Filtros de Segurança Estrutural
         if pd.isna(preco) or preco < 3.00:
             print(f"[FILTRADO] {ticker} rejeitado por preço baixo (Preço: {preco}).")
             return None
@@ -165,7 +164,6 @@ def analisar_reversao_media(ativo_info, vol_alvo_diaria_usd):
         try:
             ticker_obj = yf.Ticker(ticker)
             
-            # CORREÇÃO 3: Fallback automático de setor via yfinance
             if setor in ["Desconhecido", "N/A", "", "NONE"]:
                 setor_yf = ticker_obj.info.get('sector')
                 if setor_yf:
@@ -189,20 +187,16 @@ def analisar_reversao_media(ativo_info, vol_alvo_diaria_usd):
             print(f"[FILTRADO] {ticker} rejeitado por pertencer ao setor REIT/Imobiliário.")
             return None
 
-        # Indicadores Base
         df['SMA_20'] = df['Close'].rolling(window=20).mean()
         
-        # RSI 14 Rápido
         delta = df['Close'].diff()
         gain = (delta.where(delta > 0, 0)).rolling(window=14).mean()
         loss = (-delta.where(delta < 0, 0)).rolling(window=14).mean()
         rs = gain / loss
         df['RSI_14'] = 100 - (100 / (1 + rs))
         
-        # EMA 9
         df['EMA_9'] = df['Close'].ewm(span=9, adjust=False).mean()
         
-        # RVOL e ATR
         df['SMA_20_Vol'] = df['Volume'].rolling(window=20).mean()
         df['RVOL'] = df['Volume'] / df['SMA_20_Vol']
         df.ta.atr(length=14, append=True)
@@ -221,7 +215,6 @@ def analisar_reversao_media(ativo_info, vol_alvo_diaria_usd):
         
         dist_mm20 = ((preco - sma20) / sma20) * 100 if pd.notna(sma20) and sma20 > 0 else 0.0
         
-        # Deteção de Absorção
         abertura = ultimo_dia.get('Open', preco)
         minimo = ultimo_dia.get('Low', preco)
         
@@ -236,7 +229,6 @@ def analisar_reversao_media(ativo_info, vol_alvo_diaria_usd):
         qtd_acoes = "N/A"
         valor_investir = "N/A"
         
-        # CRITÉRIO ESTRITO DE PÂNICO
         if pd.notna(dist_mm20) and dist_mm20 <= -8.0 and pd.notna(rsi) and rsi < 30 and (rvol >= 1.5 or absorcao):
             estado = "PÂNICO EXTREMO - Oportunidade de Reversão"
             entrada = round(preco, 2)
@@ -255,7 +247,6 @@ def analisar_reversao_media(ativo_info, vol_alvo_diaria_usd):
                 else:
                     qtd_calc = round(vol_alvo_diaria_usd / risco, 2) if risco > 0 else 0
 
-                # CORREÇÃO 4: Trava Anti-Quantidade Zero
                 if qtd_calc <= 0:
                     estado = "Rejeitado (Quantidade Nula)"
                     entrada = alvo_tp = stop_loss = "N/A"
@@ -374,6 +365,16 @@ def executar_motor():
         f.write(bloco_texto_ia)
         
     enviar_email(bloco_texto_ia)
+
+    # ===================================================================
+    # 5. NOTIFICAÇÃO TELEGRAM DEBUG (CONTROLADA PELA FLAG DE CONFIGS)
+    # ===================================================================
+    debug_telegram_ativado = str(configs.get("TELEGRAM_NOTIFICATIONS_DEBUG", "false")).strip().lower() in ["true", "1", "sim", "yes"]
+
+    if debug_telegram_ativado:
+        print("A enviar notificação de Debug para o Telegram via função modular...")
+        mensagem_debug = "🚨 *MOTOR DE REVERSÃO À MÉDIA (PÂNICO)*\n\n🔍 [DEBUG] Execução concluída com sucesso. Relatório de pânico gerado e enviado por e-mail."
+        enviar_alerta(mensagem_debug)
 
 if __name__ == "__main__":
     executar_motor()
