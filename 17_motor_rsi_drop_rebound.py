@@ -82,7 +82,6 @@ VALOR_RISCO_USD = capital_total * pct_risco
 
 print(f"[CONFIG] Capital Total: ${capital_total:,.2f} | Risco/Trade: {pct_risco*100:.1f}% (${VALOR_RISCO_USD:,.2f} USD)")
 
-# Tickers conhecidos por estarem deslistados ou causarem falhas no Yahoo Finance
 TICKERS_EXCLUIDOS = {"NVVE"}
 
 tickers_watchlist = []
@@ -93,27 +92,20 @@ for item in ativos_sheets:
             ticker_limpo = str(t).strip().upper()
             if ticker_limpo not in TICKERS_EXCLUIDOS:
                 tickers_watchlist.append(ticker_limpo)
-            else:
-                print(f"[AVISO] Ticker ignorado por estar na lista de exclusão: {ticker_limpo}")
 
 if not tickers_watchlist:
-    print("[INFO] Watchlist vazia no Sheets. A carregar lista de fallback de alta liquidez.")
-    tickers_watchlist = [
-        "NVDA", "AAPL", "MSFT", "AMZN", "GOOGL", "META", "TSLA", "AMD", 
-        "NFLX", "AVGO", "COST", "PEP", "QCOM", "TXN", "AMAT", "CRM"
-    ]
+    tickers_watchlist = ["NVDA", "AAPL", "MSFT", "AMZN", "GOOGL", "META", "TSLA", "AMD"]
 else:
     print(f"[SUCESSO] {len(tickers_watchlist)} ativos carregados da Watchlist do Sheets.")
 
 tickers_watchlist = list(dict.fromkeys(tickers_watchlist))
 
 # ===================================================================
-# 4. AUDITAR POSIÇÕES EM CARTEIRA (STATUS: ATIVA_M17 / ATIVA_SWING)
+# 4. AUDITAR POSIÇÕES EM CARTEIRA
 # ===================================================================
 bloco_posicoes_ativas = ""
 for ticker, info in posicoes_ativas_dict.items():
     status = str(info.get("status", "")).strip().upper()
-    # Adicionado ATIVA_M17 e mantido ATIVA_SWING por retrocompatibilidade
     if status in ["ATIVA_SWING", "ATIVA_M17"]:
         try:
             df_pos = yf.download(ticker, period="1mo", interval="1d", progress=False)
@@ -121,11 +113,6 @@ for ticker, info in posicoes_ativas_dict.items():
                 if isinstance(df_pos.columns, pd.MultiIndex):
                     df_pos.columns = df_pos.columns.droplevel(1)
                 
-                if len(df_pos) > 1:
-                    ult = df_pos.iloc[-1]
-                    if ult['Open'] == ult['High'] == ult['Low'] == ult['Close']:
-                        df_pos = df_pos.iloc[:-1]
-
                 df_pos.ta.ema(length=5, append=True)
                 ema5_atual = round(float(df_pos['EMA_5'].iloc[-1]), 2)
                 stop = limpar_float(info.get("stopAtual")) or 0.0
@@ -134,13 +121,9 @@ for ticker, info in posicoes_ativas_dict.items():
                     df_intra = yf.download(ticker, period="2d", interval="1m", prepost=True, progress=False)
                     if isinstance(df_intra.columns, pd.MultiIndex):
                         df_intra.columns = df_intra.columns.droplevel(1)
-                    
                     preco_atual = round(float(df_intra['Close'].iloc[-1]), 2)
-                    ultimo_dia_str = df_intra.index[-1].strftime('%Y-%m-%d')
-                    df_hoje = df_intra[df_intra.index.strftime('%Y-%m-%d') == ultimo_dia_str]
-                    
-                    maxima_hoje = round(float(df_hoje['High'].max()), 2)
-                    minima_hoje = round(float(df_hoje['Low'].min()), 2)
+                    maxima_hoje = round(float(df_intra['High'].max()), 2)
+                    minima_hoje = round(float(df_intra['Low'].min()), 2)
                 except Exception:
                     preco_atual = round(float(df_pos['Close'].iloc[-1]), 2)
                     maxima_hoje = round(float(df_pos['High'].iloc[-1]), 2)
@@ -148,46 +131,31 @@ for ticker, info in posicoes_ativas_dict.items():
                 
                 entrada = limpar_float(info.get("precoEntrada")) or preco_atual
                 qtd = info.get("quantidade", "N/A")
-                
                 maxima_efetiva = max(maxima_hoje, preco_atual)
                 
                 if maxima_efetiva >= ema5_atual:
-                    acao = f"🎯 ALVO ALCANÇADO (EMA5 em ${ema5_atual})! Recomendado FECHAR POSIÇÃO com Lucro (WIN)."
+                    acao = f"🎯 ALVO ALCANÇADO (EMA5 em ${ema5_atual})! FECHAR POSIÇÃO."
                 elif minima_hoje <= stop and stop > 0:
-                    acao = f"🚨 STOP LOSS ATINGIDO (${stop})! Recomendado LIQUIDAR POSIÇÃO (LOSS)."
+                    acao = f"🚨 STOP LOSS ATINGIDO (${stop})! LIQUIDAR POSIÇÃO."
                 else:
-                    acao = f"⏳ MANTER POSIÇÃO. A acompanhar ressalto rumo à EMA5 (${ema5_atual}). Stop fixo em ${stop}."
+                    acao = f"⏳ MANTER POSIÇÃO. Alvo EMA5: ${ema5_atual} | Stop: ${stop}."
                 
-                bloco_posicoes_ativas += (
-                    f"📌 [POSIÇÃO ATIVA - {status}] {ticker} | Qtd: {qtd} | Entrada: ${entrada} | "
-                    f"Preço Atual: ${preco_atual} | Alvo EMA5: ${ema5_atual} | Stop Fixo: ${stop} | "
-                    f"AÇÃO: {acao}\n"
-                )
+                bloco_posicoes_ativas += f"📌 [{status}] {ticker} | Qtd: {qtd} | Entrada: ${entrada} | Atual: ${preco_atual} | {acao}\n"
         except Exception as e:
             print(f"[ERRO] Falha ao auditar posição ativa {ticker}: {e}")
 
 # ===================================================================
-# 5. RASTREAR NOVOS SINAIS DE ENTRADA (WATCHLIST DINÂMICA)
+# 5. RASTREAR NOVOS SINAIS DE ENTRADA
 # ===================================================================
 alertas_rebound = []
-
 for ticker in tickers_watchlist:
     if ticker in posicoes_ativas_dict:
         continue
-
     try:
         df = yf.download(ticker, period="3mo", interval="1d", progress=False)
-        if df.empty or len(df) < 30:
-            continue
-            
-        if isinstance(df.columns, pd.MultiIndex):
-            df.columns = df.columns.droplevel(1)
+        if df.empty or len(df) < 30: continue
+        if isinstance(df.columns, pd.MultiIndex): df.columns = df.columns.droplevel(1)
 
-        if len(df) > 1:
-            ult = df.iloc[-1]
-            if ult['Open'] == ult['High'] == ult['Low'] == ult['Close']:
-                df = df.iloc[:-1]
-            
         df.ta.sma(length=50, append=True)
         df.ta.ema(length=5, append=True)
         df.ta.rsi(length=2, append=True)
@@ -197,8 +165,7 @@ for ticker in tickers_watchlist:
         
         try:
             df_intra = yf.download(ticker, period="1d", interval="1m", progress=False)
-            if isinstance(df_intra.columns, pd.MultiIndex):
-                df_intra.columns = df_intra.columns.droplevel(1)
+            if isinstance(df_intra.columns, pd.MultiIndex): df_intra.columns = df_intra.columns.droplevel(1)
             preco_atual = float(df_intra['Close'].iloc[-1])
         except Exception:
             preco_atual = float(ultimo_dia['Close'])
@@ -206,7 +173,6 @@ for ticker in tickers_watchlist:
         sma50 = float(df['SMA_50'].iloc[-1])
         ema5 = float(df['EMA_5'].iloc[-1])
         rsi2 = float(df['RSI_2'].iloc[-1])
-        
         fecho_ontem = float(dia_anterior['Close'])
         fecho_anteontem = float(df['Close'].iloc[-3])
         
@@ -216,14 +182,9 @@ for ticker in tickers_watchlist:
             preco_entrada = round(preco_atual, 2)
             preco_stop = round(float(ultimo_dia['Low']) * 0.99, 2)
             preco_tp = round(ema5, 2)
-            
             risco_por_acao = preco_entrada - preco_stop
-            if risco_por_acao > 0:
-                qtd_acoes = round(VALOR_RISCO_USD / risco_por_acao, 2)
-                valor_a_investir = round(qtd_acoes * preco_entrada, 2)
-            else:
-                qtd_acoes = 0
-                valor_a_investir = 0
+            qtd_acoes = round(VALOR_RISCO_USD / risco_por_acao, 2) if risco_por_acao > 0 else 0
+            valor_investir = round(qtd_acoes * preco_entrada, 2)
             
             alertas_rebound.append({
                 "ticker": ticker,
@@ -231,82 +192,40 @@ for ticker in tickers_watchlist:
                 "rsi2": round(rsi2, 2),
                 "stop_loss": preco_stop,
                 "take_profit_ema5": preco_tp,
-                "ordem_tipo": "BUY MARKET (no fecho) / BUY LIMIT",
                 "qtd_acoes": qtd_acoes,
-                "valor_investir": valor_a_investir,
-                "status_sheets": "ATIVA_M17"
+                "valor_investir": valor_investir
             })
-            
     except Exception as e:
-        print(f"[ERRO] Falha ao analisar {ticker} no Motor 17: {e}")
+        print(f"[ERRO] Falha ao analisar {ticker}: {e}")
 
 # ===================================================================
-# 6. RELATÓRIO, FICHEIRO TEMPORÁRIO E TELEGRAM
+# 6. RELATÓRIO E TELEGRAM
 # ===================================================================
 data_hoje = datetime.now(ZoneInfo("Europe/Lisbon")).strftime("%d/%m/%Y %H:%M")
-
 bloco_texto = f"⚡ MOTOR 17: 2-DAY RSI DROP & REBOUND ({data_hoje})\n\n"
 
 if bloco_posicoes_ativas:
-    bloco_texto += "--------------------------------------------------\n"
-    bloco_texto += "GESTÃO DE POSIÇÕES ATIVAS (MOTOR 17 - SWING REBOUND):\n\n"
-    bloco_texto += bloco_posicoes_ativas
-    bloco_texto += "--------------------------------------------------\n\n"
+    bloco_texto += f"POSIÇÕES ATIVAS:\n{bloco_posicoes_ativas}\n"
 
 if alertas_rebound:
-    bloco_texto += "NOVOS SINAIS DE ENTRADA DETETADOS:\n\n"
+    bloco_texto += "NOVOS SINAIS DETETADOS:\n"
     for a in alertas_rebound:
-        bloco_texto += (
-            f"🎯 TICKER: {a['ticker']} | RSI(2): {a['rsi2']} (Extremo Oversold em Tendência de Alta)\n"
-            f"   - Estratégia / Tag Sheets: {a['status_sheets']}\n"
-            f"   - Ordem Recomendada: {a['ordem_tipo']}\n"
-            f"   - Preço de Entrada: ${a['preco_atual']}\n"
-            f"   - Stop Loss (Abaixo da Mínima): ${a['stop_loss']}\n"
-            f"   - Take Profit Alvo (EMA5): ${a['take_profit_ema5']}\n"
-            f"   - Qtd. Recomendada: {a['qtd_acoes']} Ações\n"
-            f"   - Valor Estimado do Lote: ~${a['valor_investir']} USD\n"
-            f"   - Horizonte Tático: 48h a 72h\n"
-            f"   - 🔄 PASSAGEM DE TESTEMUNHO: ⚠️ ATENÇÃO: Operação HIT AND RUN. Assim que executada, regista o estado no Sheets como 'ATIVA_M17'. Logo que a EMA5 for tocada, fecha a posição integralmente.\n"
-            f"--------------------------------------------------\n"
-        )
+        bloco_texto += f"🎯 {a['ticker']} | RSI: {a['rsi2']} | Entrada: ${a['preco_atual']} | Stop: ${a['stop_loss']} | Alvo: ${a['take_profit_ema5']}\n"
 else:
-    bloco_texto += "✅ Nenhum novo sinal de entrada hoje. (Modo Silêncio ativo para novas ordens).\n"
+    bloco_texto += "✅ Nenhum novo sinal hoje.\n"
 
-# Grava o ficheiro temporário para o Orquestrador
-with open("comboio_rsi_rebound_temp.txt", "w", encoding="utf-8") as f:
-    f.write(bloco_texto)
-
-print(f"[SUCESSO] Ficheiro temporário gerado.")
-
-# 📧 Envio de E-mail Direto (Ativo)
-if EMAIL_USER and EMAIL_PASS:
-    try:
-        print("A enviar e-mail direto do Motor 17...")
-        msg = MIMEMultipart()
-        msg['From'] = EMAIL_USER
-        msg['To'] = EMAIL_USER
-        msg['Subject'] = f"⚡ Relatório Direto - Motor 17 (RSI Drop & Rebound) [{data_hoje}]"
-        msg.attach(MIMEText(bloco_texto, 'plain', 'utf-8'))
-        
-        with smtplib.SMTP_SSL('smtp.gmail.com', 465) as server:
-            server.login(EMAIL_USER, EMAIL_PASS)
-            server.sendmail(EMAIL_USER, EMAIL_USER, msg.as_string())
-        print("[SUCESSO] E-mail direto enviado com sucesso!")
-    except Exception as e:
-        print(f"[AVISO] Falha ao enviar e-mail direto: {e}")
-
-# 📱 Envio de Notificação Telegram (Controlado pelo Sheets)
+# Envio Telegram Direto para o Chat Pessoal/Geral configurado
 telegram_ativado = str(configs_dict.get("TELEGRAM_NOTIFICATIONS", "true")).strip().lower() in ["true", "1", "sim", "yes"]
 
 if not telegram_ativado:
-    print("[INFO] Notificações de Telegram desativadas no Google Sheets (TELEGRAM_NOTIFICATIONS = false).")
+    print("[INFO] Notificações de Telegram desativadas no Sheets.")
 elif TELEGRAM_BOT_TOKEN_GERAL and TELEGRAM_CHAT_ID:
     try:
-        print("A enviar notificação para o Telegram...")
+        print("A enviar notificação para o Telegram (Chat Geral/Pessoal)...")
         url_tg = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN_GERAL}/sendMessage"
         payload_tg = {
             "chat_id": TELEGRAM_CHAT_ID,
-            "text": f"🎯 *MOTOR 17 (2-DAY RSI DROP & REBOUND)*\n\n✅ Execução concluída com sucesso. Verifica o e-mail para consultar os sinais detetados."
+            "text": f"🎯 *MOTOR 17 (2-DAY RSI DROP & REBOUND)*\n\n{bloco_texto}"
         }
         resp_tg = requests.post(url_tg, json=payload_tg, timeout=10)
         if resp_tg.status_code == 200:
@@ -316,6 +235,6 @@ elif TELEGRAM_BOT_TOKEN_GERAL and TELEGRAM_CHAT_ID:
     except Exception as e:
         print(f"[ERRO] Erro de rede ao enviar Telegram: {e}")
 else:
-    print("[AVISO] Credenciais de Telegram não configuradas. Notificação ignorada.")
+    print("[AVISO] Credenciais de Telegram não configuradas.")
 
 print(f"[SUCESSO] Ciclo completo do Motor 17 concluído.")
