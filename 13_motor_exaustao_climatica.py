@@ -12,6 +12,9 @@ from zoneinfo import ZoneInfo
 import warnings
 warnings.filterwarnings("ignore")
 
+# Importação da função modular de notificação do Telegram
+from F01_notificador_telegram import enviar_alerta
+
 # ===================================================================
 # 1. CONFIGURAÇÕES E PARÂMETROS CLIMÁTICOS
 # ===================================================================
@@ -36,18 +39,19 @@ def get_yf_history_safe(ticker, period="3mo"):
     return pd.DataFrame()
 
 # ===================================================================
-# 2. CARREGAMENTO DE POSIÇÕES ATIVAS (SHEETS VIA WEBHOOK)
+# 2. CARREGAMENTO DE POSIÇÕES ATIVAS E CONFIGS (SHEETS VIA WEBHOOK)
 # ===================================================================
 print("A iniciar Motor de Exaustão Climática nas posições ativas...")
 
 ativos_ativos = []
+configs_dict = {}
 if WEBHOOK_URL:
     try:
         resp = requests.get(WEBHOOK_URL, timeout=15)
         if resp.status_code == 200:
             json_data = resp.json()
             if isinstance(json_data, dict):
-                # O Webhook fornece as posições ativas na chave exata "posicoesAtivas"
+                configs_dict = json_data.get("configs", {})
                 posicoes_dict = json_data.get("posicoesAtivas", {})
                 print(f"[DEBUG] Chaves em posicoesAtivas: {list(posicoes_dict.keys())}")
                 
@@ -128,11 +132,11 @@ if alertas_exaustao:
     
     for alerta in alertas_exaustao:
         relatorio += f"🔥 {alerta['ticker']}:\n"
-        relatorio += f"   - Estado: PREÇO ESTICADO EXTREMO\n"
-        relatorio += f"   - Tensão Estrutural: {alerta['dist_ema9']:.1f}% acima da EMA 9\n"
-        relatorio += f"   - Exaustão Vendedora (RVOL): {alerta['rvol']:.2f}x o volume normal\n"
-        relatorio += f"   - RSI (14): {alerta['rsi']:.1f}\n"
-        relatorio += f"   - ⚡ AÇÃO EXIGIDA: Fechar 50% ou 100% da posição de {alerta['qtd']} ações IMEDIATAMENTE A MERCADO.\n\n"
+        relatorio += f"    - Estado: PREÇO ESTICADO EXTREMO\n"
+        relatorio += f"    - Tensão Estrutural: {alerta['dist_ema9']:.1f}% acima da EMA 9\n"
+        relatorio += f"    - Exaustão Vendedora (RVOL): {alerta['rvol']:.2f}x o volume normal\n"
+        relatorio += f"    - RSI (14): {alerta['rsi']:.1f}\n"
+        relatorio += f"    - ⚡ AÇÃO EXIGIDA: Fechar 50% ou 100% da posição de {alerta['qtd']} ações IMEDIATAMENTE A MERCADO.\n\n"
         
     print("\n[ALERTA] Anomalia detetada! A preparar envio de email de emergência...")
     
@@ -157,3 +161,14 @@ if alertas_exaustao:
             print(f"[ERRO] Falha ao enviar email de emergência: {e}")
 else:
     print("\n✅ Nenhuma anomalia parabólica detetada. As posições ativas estão saudáveis. Silêncio mantido.")
+
+# ===================================================================
+# 5. NOTIFICAÇÃO TELEGRAM DEBUG (CONTROLADA PELA FLAG DE CONFIGS)
+# ===================================================================
+debug_telegram_ativado = str(configs_dict.get("TELEGRAM_NOTIFICATIONS_DEBUG", "false")).strip().lower() in ["true", "1", "sim", "yes"]
+
+if debug_telegram_ativado:
+    print("A enviar notificação de Debug para o Telegram via função modular...")
+    status_msg = f"🚨 {len(alertas_exaustao)} Alertas de Exaustão Detetados!" if alertas_exaustao else "✅ Nenhuma Exaustão Parabólica"
+    mensagem_debug = f"🔥 *MOTOR 13 (EXAUSTÃO CLIMÁTICA)*\n\n🔍 [DEBUG] Execução concluída.\nEstado: {status_msg}\nMonitorização de posições ativas finalizada."
+    enviar_alerta(mensagem_debug)
