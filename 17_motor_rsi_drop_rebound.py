@@ -267,10 +267,7 @@ if alertas_rebound:
 else:
     bloco_texto += "✅ Nenhum novo sinal de rebound detetado nos parâmetros estritos hoje.\n"
 
-# Enviar o relatório por e-mail
-enviar_email(bloco_texto)
-
-# Enviar o relatório por e-mail
+# Enviar o relatório por e-mail (Apenas uma chamada)
 enviar_email(bloco_texto)
 
 # ===================================================================
