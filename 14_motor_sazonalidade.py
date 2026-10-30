@@ -12,6 +12,9 @@ from zoneinfo import ZoneInfo
 import warnings
 warnings.filterwarnings("ignore")
 
+# Importação da função modular de notificação do Telegram
+from F01_notificador_telegram import enviar_alerta
+
 # ===================================================================
 # 1. CONFIGURAÇÕES E PARÂMETROS
 # ===================================================================
@@ -31,11 +34,12 @@ def get_yf_history_safe(ticker, period="1y"):
     return pd.DataFrame()
 
 # ===================================================================
-# 2. CARREGAMENTO DA WATCHLIST (SHEETS)
+# 2. CARREGAMENTO DA WATCHLIST E CONFIGS (SHEETS)
 # ===================================================================
 print("A iniciar Motor de Sazonalidade Institucional...")
 
 ativos = []
+configs_dict = {}
 if WEBHOOK_URL:
     try:
         url_alvo = WEBHOOK_URL if "?" in WEBHOOK_URL else f"{WEBHOOK_URL}?aba=Analise Compra"
@@ -44,6 +48,7 @@ if WEBHOOK_URL:
             json_data = resp.json()
             if isinstance(json_data, dict):
                 ativos = json_data.get("ativos", [])
+                configs_dict = json_data.get("configs", {})
             elif isinstance(json_data, list):
                 ativos = json_data
     except Exception as e:
@@ -61,11 +66,7 @@ dia_semana = hoje_lisboa.weekday() # 0 = Segunda, 1 = Terça, ..., 4 = Sexta
 dia_mes = hoje_lisboa.day
 
 # Definição do Contexto Temporal Atual
-# Ciclo Mensal: Turn-of-the-month (últimos 3 dias ou primeiros 4 dias do mês)
-# Nota: Para simplificar de forma robusta, assumimos mês de ~30 dias (dias 1-4 e dias 28-31)
 eh_turn_of_month = (dia_mes <= 4) or (dia_mes >= 28)
-
-# Ciclo Semanal: Terças e quartas-feiras têm historicamente maior viés de continuidade de tendência
 eh_meio_semana = dia_semana in [1, 2] # Terça ou Quarta
 
 print(f"[CONTEXTO] Data: {hoje_lisboa.strftime('%d/%m/%Y')} | Turn-of-the-Month: {eh_turn_of_month} | Meio de Semana (Ter/Qua): {eh_meio_semana}")
@@ -84,20 +85,16 @@ for ativo_info in ativos:
     df = get_yf_history_safe(ticker, period="1y")
     if df.empty: continue
     
-    # Adicionar colunas de calendário ao histórico para calcular win-rate estatístico
     df['DayOfWeek'] = df.index.dayofweek
     df['DayOfMonth'] = df.index.day
     df['Return'] = df['Close'].pct_change()
     
-    # Estatística do Ativo nas Terças/Quartas vs Outros Dias
     retorno_meio_semana = df[df['DayOfWeek'].isin([1, 2])]['Return'].mean() * 100
     
-    # Pontuação Sazonal (Base de 0 a 100)
     score_sazonal = 50.0
     if eh_turn_of_month: score_sazonal += 25.0
     if eh_meio_semana and retorno_meio_semana > 0: score_sazonal += 25.0
     
-    # Apenas aprovamos se a pontuação sazonal for forte (> 60)
     if score_sazonal >= 75.0:
         sinais_sazonalidade.append({
             "ticker": ticker,
@@ -120,8 +117,8 @@ if sinais_sazonalidade:
     relatorio_sazonal += "🌟 ATIVOS COM ALINHAMENTO SAZONAL FAVORÁVEL:\n\n"
     for item in sinais_sazonalidade:
         relatorio_sazonal += f"🔹 {item['ticker']} ({item['nome']}) | Setor: {item['setor']}\n"
-        relatorio_sazonal += f"   - Score Sazonal: {item['score_sazonal']}/100\n"
-        relatorio_sazonal += f"   - Viés Histórico Meio de Semana: {item['retorno_historico_meio_semana']:.3f}%\n\n"
+        relatorio_sazonal += f"    - Score Sazonal: {item['score_sazonal']}/100\n"
+        relatorio_sazonal += f"    - Viés Histórico Meio de Semana: {item['retorno_historico_meio_semana']:.3f}%\n\n"
 else:
     relatorio_sazonal += "⚖️ Nenhuma janela sazonal de alta convicção detetada na Watchlist para o dia de hoje.\n"
 
@@ -129,3 +126,14 @@ with open("comboio_sazonalidade_temp.txt", "w", encoding="utf-8") as f:
     f.write(relatorio_sazonal)
 
 print("[SUCESSO] Auditoria de Sazonalidade concluída e ficheiro temporário gerado.")
+
+# ===================================================================
+# 5. NOTIFICAÇÃO TELEGRAM DEBUG (CONTROLADA PELA FLAG DE CONFIGS)
+# ===================================================================
+debug_telegram_ativado = str(configs_dict.get("TELEGRAM_NOTIFICATIONS_DEBUG", "false")).strip().lower() in ["true", "1", "sim", "yes"]
+
+if debug_telegram_ativado:
+    print("A enviar notificação de Debug para o Telegram via função modular...")
+    status_msg = f"🌟 {len(sinais_sazonalidade)} Ativos com Sazonalidade Favorável" if sinais_sazonalidade else "⚖️ Sem Janelas Sazonais Ativas"
+    mensagem_debug = f"📅 *MOTOR 14 (SAZONALIDADE INSTITUCIONAL)*\n\n🔍 [DEBUG] Execução concluída.\nEstado: {status_msg}\nRelatório temporal gerado."
+    enviar_alerta(mensagem_debug)
