@@ -16,6 +16,9 @@ from zoneinfo import ZoneInfo
 import warnings
 warnings.filterwarnings("ignore")
 
+# Importação da função modular de notificação do Telegram
+from F01_notificador_telegram import enviar_alerta
+
 print("A iniciar Motor 17 - 2-Day RSI Drop & Rebound (Hit & Run 48h-72h)...")
 
 # ===================================================================
@@ -24,8 +27,6 @@ print("A iniciar Motor 17 - 2-Day RSI Drop & Rebound (Hit & Run 48h-72h)...")
 WEBHOOK_URL = os.environ.get('WEBHOOK_URL')
 EMAIL_USER = os.environ.get('EMAIL_USER')
 EMAIL_PASS = os.environ.get('EMAIL_PASS')
-TELEGRAM_BOT_TOKEN_GERAL = os.environ.get('TELEGRAM_BOT_TOKEN_GERAL')
-TELEGRAM_CHAT_ID = os.environ.get('TELEGRAM_CHAT_ID')
 
 def limpar_float(val):
     """Converte com segurança valores numéricos para float."""
@@ -148,10 +149,13 @@ for ticker, info in posicoes_ativas_dict.items():
 # 5. RASTREAR NOVOS SINAIS DE ENTRADA
 # ===================================================================
 alertas_rebound = []
+total_analisados = 0
+
 for ticker in tickers_watchlist:
     if ticker in posicoes_ativas_dict:
         continue
     try:
+        total_analisados += 1
         df = yf.download(ticker, period="3mo", interval="1d", progress=False)
         if df.empty or len(df) < 30: continue
         if isinstance(df.columns, pd.MultiIndex): df.columns = df.columns.droplevel(1)
@@ -214,27 +218,20 @@ if alertas_rebound:
 else:
     bloco_texto += "✅ Nenhum novo sinal hoje.\n"
 
-# 📱 Envio de Notificação Telegram (Apenas aviso de envio para o e-mail)
-telegram_ativado = str(configs_dict.get("TELEGRAM_NOTIFICATIONS", "true")).strip().lower() in ["true", "1", "sim", "yes"]
+# ===================================================================
+# 7. NOTIFICAÇÃO TELEGRAM DEBUG (CONTROLADA PELA FLAG DE CONFIGS)
+# ===================================================================
+debug_telegram_ativado = str(configs_dict.get("TELEGRAM_NOTIFICATIONS_DEBUG", "false")).strip().lower() in ["true", "1", "sim", "yes"]
 
-if not telegram_ativado:
-    print("[INFO] Notificações de Telegram desativadas no Sheets.")
-elif TELEGRAM_BOT_TOKEN_GERAL and TELEGRAM_CHAT_ID:
-    try:
-        print("A enviar notificação curta para o Telegram...")
-        url_tg = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN_GERAL}/sendMessage"
-        payload_tg = {
-            "chat_id": TELEGRAM_CHAT_ID,
-            "text": f"🎯 *MOTOR 17 (2-DAY RSI DROP & REBOUND)*\n\n✅ Relatório enviado com sucesso para o e-mail!"
-        }
-        resp_tg = requests.post(url_tg, json=payload_tg, timeout=10)
-        if resp_tg.status_code == 200:
-            print("[SUCESSO] Alerta enviado via Telegram com sucesso!")
-        else:
-            print(f"[AVISO] Falha ao enviar Telegram: {resp_tg.text}")
-    except Exception as e:
-        print(f"[ERRO] Erro de rede ao enviar Telegram: {e}")
-else:
-    print("[AVISO] Credenciais de Telegram não configuradas.")
+if debug_telegram_ativado:
+    print("A enviar notificação de Debug para o Telegram via função modular...")
+    total_acionados = len(alertas_rebound)
+    mensagem_debug = (
+        f"17 ⚡ *MOTOR 17 (2-DAY RSI DROP & REBOUND)*\n\n"
+        f"🔍 [DEBUG] Execução concluída com sucesso.\n"
+        f"📊 Ativos analisados: *{total_analisados}* | Acionados: *{total_acionados}*\n"
+        f"✉️ Relatório de reversão de curto prazo gerado e enviado por e-mail."
+    )
+    enviar_alerta(mensagem_debug)
 
 print(f"[SUCESSO] Ciclo completo do Motor 17 concluído.")
