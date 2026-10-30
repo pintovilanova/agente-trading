@@ -573,5 +573,5 @@ debug_telegram_ativado = str(configs_data.get("TELEGRAM_NOTIFICATIONS_DEBUG", "f
 
 if debug_telegram_ativado:
     print("A enviar notificação de Debug para o Telegram via função modular...")
-    mensagem_debug = "🦅 *MOTOR DE BREAKOUTS (EUA)*\n\n🔍 [DEBUG] Execução concluída com sucesso. Relatório gerado e enviado por e-mail."
+    mensagem_debug = "01 🦅 *MOTOR DE BREAKOUTS (EUA)*\n\n🔍 [DEBUG] Execução concluída com sucesso. Relatório gerado e enviado por e-mail."
     enviar_alerta(mensagem_debug)
