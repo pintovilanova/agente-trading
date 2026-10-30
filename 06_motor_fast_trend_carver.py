@@ -468,7 +468,7 @@ def executar_motor():
 
     if debug_telegram_ativado:
         print("A enviar notificação de Debug para o Telegram via função modular...")
-        mensagem_debug = "🏄‍♂️ *MOTOR FAST TREND (CARVER)*\n\n🔍 [DEBUG] Execução concluída com sucesso. Relatório Carver gerado e enviado por e-mail."
+        mensagem_debug = "06 🏄‍♂️ *MOTOR FAST TREND (CARVER)*\n\n🔍 [DEBUG] Execução concluída com sucesso. Relatório Carver gerado e enviado por e-mail."
         enviar_alerta(mensagem_debug)
 
 if __name__ == "__main__":
