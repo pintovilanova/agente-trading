@@ -217,7 +217,7 @@ def executar_radar():
 
     if debug_telegram_ativado:
         print("A enviar notificação de Debug para o Telegram via função modular...")
-        mensagem_debug = "🧭 *MOTOR RS SCORE & ROTAÇÃO SETORIAL*\n\n🔍 [DEBUG] Execução concluída com sucesso. RS Scores calculados, atualizados no Google Sheets e relatório enviado por e-mail."
+        mensagem_debug = "08 🧭 *MOTOR RS SCORE & ROTAÇÃO SETORIAL*\n\n🔍 [DEBUG] Execução concluída com sucesso. RS Scores calculados, atualizados no Google Sheets e relatório enviado por e-mail."
         enviar_alerta(mensagem_debug)
 
 if __name__ == "__main__":
