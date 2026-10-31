@@ -180,6 +180,16 @@ for chave_pos, info in posicoes_ativas_dict.items():
 # ===================================================================
 def analisar_squeeze(ativo_info):
     try:
+        # FILTRO DE FORÇA RELATIVA (RS SCORE MÍNIMO)
+        rs_score_raw = ativo_info.get("rs_score", 0)
+        try:
+            rs_score = float(str(rs_score_raw).replace(",", ".").strip())
+        except (ValueError, TypeError):
+            rs_score = 0.0
+
+        # Se o RS Score for inferior a 60, o ativo é descartado de imediato
+        if rs_score < 60.0:
+            return None
         ticker = str(ativo_info.get("ticker", "")).strip().upper()
         if not ticker or ticker == "#N/A" or ticker == "NONE": return None
         if ticker in posicoes_ativas_dict: return None
