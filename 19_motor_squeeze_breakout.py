@@ -232,8 +232,14 @@ def analisar_squeeze(ativo_info):
         # Condição de Squeeze Estrita: BB totalmente inseridas dentro dos KC
         squeeze_on = (bb_upper <= kc_upper) and (bb_lower >= kc_lower)
         
-        # Breakout válido (fecho rompe KC superior a partir de um momento de compressão)
+        # Breakout clássico (fecho rompe KC superior a partir de um momento de compressão)
         breakout_alta = (preco > kc_upper) and (float(df['Close'].iloc[-2]) <= float(df['KC_Upper'].iloc[-2]))
+
+        # FILTRO DE EXAUSTÃO: Se o preço esticou mais de 1 ATR acima do Keltner, o comboio já partiu. Descarta.
+        limite_exaustao = kc_upper + (atr * 1.0)
+        if breakout_alta and preco > limite_exaustao:
+            breakout_alta = False # Anula o sinal por estar demasiado esticado
+            squeeze_on = False
 
         if breakout_alta or squeeze_on:
             entrada_gatilho = round(maximo_hoje * 1.002, 2)
@@ -258,9 +264,6 @@ def analisar_squeeze(ativo_info):
                 "valor_investir": round(val_calc, 2),
                 "estado_squeeze": "A ATIVAR (Breakout Detetado)" if breakout_alta else "EM COMPRESSÃO EXTREMA"
             }
-        return None
-    except Exception as e:
-        print(f"[ERRO] Falha ao processar ativo {ativo_info.get('ticker')}: {e}")
         return None
 
 # ===================================================================
