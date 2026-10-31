@@ -337,8 +337,12 @@ def executar_motor():
     else:
         bloco_texto += "✅ Nenhum novo sinal de Squeeze / Breakout detetado hoje.\n"
 
-    # Apenas 1 chamada robusta
+    # Enviar o relatório por e-mail
     enviar_email(bloco_texto)
+
+    # 📌 GRAVAR FICHEIRO TEMPORÁRIO PARA O LOOP GERAL / AGENTE IA
+    with open("comboio_squeeze_temp.txt", "w", encoding="utf-8") as f:
+        f.write(bloco_texto)
 
     # ===================================================================
     # 7. NOTIFICAÇÃO TELEGRAM DEBUG
@@ -358,6 +362,3 @@ def executar_motor():
 
 if __name__ == "__main__":
     executar_motor()
-    # Guardar o bloco num ficheiro temporário para o loop geral / Agente IA
-    with open("comboio_squeeze_temp.txt", "w", encoding="utf-8") as f:
-        f.write(bloco)
