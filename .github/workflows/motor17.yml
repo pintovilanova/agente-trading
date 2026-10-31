@@ -27,8 +27,7 @@ jobs:
           pip install yfinance pandas requests
           pip install pandas-ta==0.4.71b0
           pip install google-generativeai google-genai
-    # ADICIONA ESTE BLOCO PARA O NOVO MOTOR 20
-      - name: Executar Motor 20 (Pullback EMA 20)
+      - name: 🧲 Executar Motor 20 (Pullback EMA 20)
         env:
           WEBHOOK_URL: ${{ secrets.WEBHOOK_URL }}
           EMAIL_USER: ${{ secrets.EMAIL_USER }}
