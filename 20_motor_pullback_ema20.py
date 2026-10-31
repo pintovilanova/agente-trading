@@ -1,9 +1,9 @@
 # ===================================================================================
-# SISTEMA DE TRADING INSTITUCIONAL - MOTOR 20: PULLBACK INSTITUCIONAL À EMA 20
+# SISTEMA DE TRADING INSTITUCIONAL - MOTOR 20: PULLBACK À EMA 20
 # ===================================================================================
 # Descrição Geral:
-# Identifica ativos em forte tendência de alta que fazem uma pausa (pullback) 
-# tocando na média móvel de 20 dias (EMA 20) e sendo rejeitados (fecho acima),
+# Identifica ativos com forte Força Relativa (RS Score > 60) e tendência de alta
+# (EMA 20 > SMA 50) que realizam um pullback cirúrgico de defesa junto à EMA 20,
 # auditando em simultâneo as posições ativas em carteira (estritamente ATIVA_M20).
 # ===================================================================================
 
@@ -166,7 +166,7 @@ for chave_pos, info in posicoes_ativas_dict.items():
                 elif stop > 0 and minima_hoje <= stop:
                     acao = f"🚨 STOP LOSS ATINGIDO (${stop})! Recomendado LIQUIDAR POSIÇÃO (LOSS)."
                 else:
-                    acao = f"⏳ MANTER POSIÇÃO (Pullback EMA20). Alvo TP: ${alvo_tp} | Stop: ${stop}."
+                    acao = f"⏳ MANTER POSIÇÃO (Pullback EMA 20). Alvo TP: ${alvo_tp} | Stop: ${stop}."
                 
                 bloco_posicoes_ativas += (
                     f"📌 [{status}] {ticker} ({chave_pos}) | Qtd: {qtd} | Entrada: ${entrada} | "
@@ -187,10 +187,9 @@ def analisar_pullback_ema20(ativo_info):
         except (ValueError, TypeError):
             rs_score = 0.0
 
-        # Se o RS Score for inferior a 60, o ativo é descartado de imediato
         if rs_score < 60.0:
             return None
-            
+
         ticker = str(ativo_info.get("ticker", "")).strip().upper()
         if not ticker or ticker == "#N/A" or ticker == "NONE": return None
         if ticker in posicoes_ativas_dict: return None
@@ -214,12 +213,12 @@ def analisar_pullback_ema20(ativo_info):
         preco = float(df['Close'].iloc[-1])
         if preco < 5.00: return None
 
-        # 1. Definição das Médias e ATR
+        # Indicadores de Tendência
         df['EMA_20'] = df['Close'].ewm(span=20, adjust=False).mean()
         df['SMA_50'] = df['Close'].rolling(window=50).mean()
-        df.ta.atr(length=20, mamode="rma", append=True)
-        col_atr = [c for c in df.columns if str(c).startswith('ATRr_') or str(c).startswith('ATR_')][0]
+        df.ta.atr(length=14, append=True)
 
+        col_atr = [c for c in df.columns if str(c).startswith('ATRr_') or str(c).startswith('ATR_')][0]
         df = df.dropna(subset=['EMA_20', 'SMA_50', col_atr])
         if df.empty: return None
 
@@ -227,16 +226,14 @@ def analisar_pullback_ema20(ativo_info):
         ema20 = float(ultimo['EMA_20'])
         sma50 = float(ultimo['SMA_50'])
         atr = float(ultimo[col_atr])
-        maximo_hoje = float(ultimo['High'])
+        
         minimo_hoje = float(ultimo['Low'])
         fecho_hoje = float(ultimo['Close'])
+        maximo_hoje = float(ultimo['High'])
 
-        # 2. Regime de Tendência de Alta
-        tendencia_alta = (ema20 > sma50) and (fecho_hoje > sma50)
-
-        # 3. O Toque do Pullback (Mínimo toca na EMA 20 c/ margem de 1%, mas o fecho é acima)
-        margem_toque = ema20 * 1.01 
-        toque_ema20 = (minimo_hoje <= margem_toque) and (fecho_hoje > ema20)
+        # Condições do Setup: Tendência de alta (EMA 20 > SMA 50) + Toque na EMA 20 + Fecho acima
+        tendencia_alta = ema20 > sma50
+        toque_ema20 = (minimo_hoje <= ema20) and (fecho_hoje >= ema20)
 
         if tendencia_alta and toque_ema20:
             entrada_gatilho = round(maximo_hoje * 1.002, 2)
@@ -259,13 +256,13 @@ def analisar_pullback_ema20(ativo_info):
                 "alvo_tp": alvo_tp,
                 "qtd_acoes": qtd_calc,
                 "valor_investir": round(val_calc, 2),
-                "estado_motor": "A ATIVAR (Pullback Detetado: Preço defendeu a EMA 20)"
+                "estado_pullback": "A ATIVAR (Pullback Detetado: Preço defendeu a EMA 20)"
             }
         return None
     except Exception as e:
         print(f"[ERRO] Falha ao processar ativo {ativo_info.get('ticker')}: {e}")
         return None
-    
+
 # ===================================================================
 # 6. EXECUÇÃO PRINCIPAL E RELATÓRIO DETALHADO
 # ===================================================================
@@ -291,9 +288,9 @@ def executar_motor():
     )
 
     if bloco_posicoes_ativas:
-        bloco_texto += f"📌 GESTÃO DE POSIÇÕES ATIVAS (M20):\n{bloco_posicoes_ativas}\n--------------------------------------------------\n\n"
+        bloco_texto += f"📌 GESTÃO DE POSIÇÕES ATIVAS:\n{bloco_posicoes_ativas}\n--------------------------------------------------\n\n"
     else:
-        bloco_texto += "📌 GESTÃO DE POSIÇÕES ATIVAS (M20): Nenhuma posição ativa detetada para este motor.\n--------------------------------------------------\n\n"
+        bloco_texto += "📌 GESTÃO DE POSIÇÕES ATIVAS: Nenhuma posição ativa detetada para este motor.\n--------------------------------------------------\n\n"
 
     if alertas_pullback:
         bloco_texto += f"🎯 NOVOS SINAIS DE PULLBACK À EMA 20 ({len(alertas_pullback)}):\n\n"
@@ -305,7 +302,7 @@ def executar_motor():
             
             bloco_texto += (
                 f"🔹 [{a['ticker']}] - {nome_empresa} ({setor})\n"
-                f"   - 📊 Contexto Técnico: {a['estado_motor']}\n"
+                f"   - 📊 Contexto Técnico: {a['estado_pullback']}\n"
                 f"   - ⚙️ Tática: Continuação de Tendência (Hit & Run 48h-72h)\n"
                 f"   - 📋 Tipo de Ordem: BUY STOP (Gatilho na quebra da máxima diária da vela de defesa)\n"
                 f"   - 🔢 Dados Exatos: Gatilho Compra: ${a['gatilho']} | Stop Loss: ${a['stop_loss']} | Alvo: ${a['alvo_tp']}\n"
@@ -314,9 +311,14 @@ def executar_motor():
                 f"--------------------------------------------------\n"
             )
     else:
-        bloco_texto += "✅ Nenhum novo sinal de Pullback (EMA 20) detetado hoje.\n"
+        bloco_texto += "✅ Nenhum novo sinal de Pullback à EMA 20 detetado hoje.\n"
 
+    # Enviar o relatório por e-mail
     enviar_email(bloco_texto)
+
+    # 📌 GRAVAR FICHEIRO TEMPORÁRIO PARA O LOOP GERAL / AGENTE IA
+    with open("comboio_pullback_temp.txt", "w", encoding="utf-8") as f:
+        f.write(bloco_texto)
 
     # ===================================================================
     # 7. NOTIFICAÇÃO TELEGRAM DEBUG
@@ -324,13 +326,13 @@ def executar_motor():
     debug_telegram_ativado = str(configs_dict.get("TELEGRAM_NOTIFICATIONS_DEBUG", "false")).strip().lower() in ["true", "1", "sim", "yes"]
 
     if debug_telegram_ativado:
-        print("A enviar notificação de Debug para o Telegram...")
+        print("A enviar notificação de Debug para o Telegram via função modular...")
         total_acionados = len(alertas_pullback)
         mensagem_debug = (
             f"20 ⚡ *MOTOR 20 (PULLBACK EMA 20)*\n\n"
             f"🔍 [DEBUG] Execução concluída com sucesso.\n"
             f"📊 Ativos analisados: *{total_analisados}* | Acionados: *{total_acionados}*\n"
-            f"✉️ Relatório de Pullback gerado e enviado por e-mail."
+            f"✉️ Relatório de pullback gerado e enviado por e-mail."
         )
         enviar_alerta(mensagem_debug)
 
