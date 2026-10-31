@@ -1,4 +1,4 @@
-name: 17 e 18⚡ Pipeline Tática - Hit and Run
+name: 17, 18 e 19⚡ Pipeline Tática - Hit and Run
 
 on:
   schedule:
@@ -8,7 +8,7 @@ on:
 
 jobs:
   run-rsi-rebound-engine:
-    name: ⚙️ Execução Pipeline Hit & Run (M17 + M18)
+    name: ⚙️ Execução Pipeline Hit & Run (M17 + M18 + M19)
     runs-on: ubuntu-latest
 
     steps:
@@ -46,6 +46,15 @@ jobs:
           TELEGRAM_BOT_TOKEN_GERAL: ${{ secrets.TELEGRAM_BOT_TOKEN_GERAL }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
         run: python 18_motor_momentum_burst.py
+
+      - name: 🗜️ 19 - Executar Motor Squeeze Breakout
+        env:
+          WEBHOOK_URL: ${{ secrets.WEBHOOK_URL }}
+          EMAIL_USER: ${{ secrets.EMAIL_USER }}
+          EMAIL_PASS: ${{ secrets.EMAIL_PASS }}
+          TELEGRAM_BOT_TOKEN_GERAL: ${{ secrets.TELEGRAM_BOT_TOKEN_GERAL }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+        run: python 19_motor_squeeze_breakout.py
 
       - name: 🤖 09 - Orquestrador IA (Síntese Final)
         env:
