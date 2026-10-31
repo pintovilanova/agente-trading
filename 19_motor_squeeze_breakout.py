@@ -221,6 +221,10 @@ def analisar_squeeze(ativo_info):
         df = df.dropna(subset=['BB_Upper', 'BB_Lower', 'KC_Upper', 'KC_Lower', col_atr])
         if df.empty: return None
 
+        # 3. Registo histórico de Squeeze (BB dentro dos KC) e Filtro de Squeeze Recente (últimos 5 dias)
+        df['Squeeze_On'] = (df['BB_Upper'] <= df['KC_Upper']) & (df['BB_Lower'] >= df['KC_Lower'])
+        df['Squeeze_Recente'] = df['Squeeze_On'].rolling(window=5).sum() > 0
+
         ultimo = df.iloc[-1]
         bb_upper = float(ultimo['BB_Upper'])
         bb_lower = float(ultimo['BB_Lower'])
@@ -229,11 +233,15 @@ def analisar_squeeze(ativo_info):
         atr = float(ultimo[col_atr])
         maximo_hoje = float(ultimo['High'])
 
-        # Condição de Squeeze Estrita: BB totalmente inseridas dentro dos KC
-        squeeze_on = (bb_upper <= kc_upper) and (bb_lower >= kc_lower)
+        # Condição de Squeeze Estrita (Estado atual)
+        squeeze_on = bool(ultimo['Squeeze_On'])
         
-        # Breakout clássico (fecho rompe KC superior a partir de um momento de compressão)
-        breakout_alta = (preco > kc_upper) and (float(df['Close'].iloc[-2]) <= float(df['KC_Upper'].iloc[-2]))
+        # Breakout válido: Só dispara se o preço romper o KC superior E tiver estado em Squeeze pelo menos 1 dia nos últimos 5 dias
+        breakout_alta = (
+            (preco > kc_upper) and 
+            (float(df['Close'].iloc[-2]) <= float(df['KC_Upper'].iloc[-2])) and 
+            bool(ultimo['Squeeze_Recente'])
+        )
 
         # FILTRO DE EXAUSTÃO: Se o preço esticou mais de 1 ATR acima do Keltner, o comboio já partiu. Descarta.
         limite_exaustao = kc_upper + (atr * 1.0)
