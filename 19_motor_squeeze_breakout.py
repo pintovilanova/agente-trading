@@ -176,7 +176,7 @@ for chave_pos, info in posicoes_ativas_dict.items():
             print(f"[ERRO] Falha ao auditar posição ativa {chave_pos}: {e}")
 
 # ===================================================================
-# 5. MOTOR MATEMÁTICO: VOLATILITY SQUEEZE (NOVOS SINAIS)
+# 5. MOTOR MATEMÁTICO: VOLATILITY SQUEEZE (TRADINGVIEW REPLICA)
 # ===================================================================
 def analisar_squeeze(ativo_info):
     try:
@@ -203,17 +203,20 @@ def analisar_squeeze(ativo_info):
         preco = float(df['Close'].iloc[-1])
         if preco < 5.00: return None
 
-        # Cálculo de Bollinger Bands (20, 2) e Keltner Channels (20, 1.5)
+        # 1. Bollinger Bands (SMA 20, Desvio Padrão 2.0)
         df['SMA_20'] = df['Close'].rolling(window=20).mean()
         df['STD_20'] = df['Close'].rolling(window=20).std()
         df['BB_Upper'] = df['SMA_20'] + (df['STD_20'] * 2.0)
         df['BB_Lower'] = df['SMA_20'] - (df['STD_20'] * 2.0)
 
-        df.ta.atr(length=20, append=True)
+        # 2. Keltner Channels (Fiel ao TradingView: EMA 20, ATR(20) com suavização RMA)
+        df['EMA_20'] = df['Close'].ewm(span=20, adjust=False).mean()
+        df.ta.atr(length=20, mamode="rma", append=True) # RMA = Rolling Moving Average de Wilder
+        
         col_atr = [c for c in df.columns if str(c).startswith('ATRr_') or str(c).startswith('ATR_')][0]
         
-        df['KC_Upper'] = df['SMA_20'] + (df[col_atr] * 1.5)
-        df['KC_Lower'] = df['SMA_20'] - (df[col_atr] * 1.5)
+        df['KC_Upper'] = df['EMA_20'] + (df[col_atr] * 1.5)
+        df['KC_Lower'] = df['EMA_20'] - (df[col_atr] * 1.5)
 
         df = df.dropna(subset=['BB_Upper', 'BB_Lower', 'KC_Upper', 'KC_Lower', col_atr])
         if df.empty: return None
@@ -226,18 +229,18 @@ def analisar_squeeze(ativo_info):
         atr = float(ultimo[col_atr])
         maximo_hoje = float(ultimo['High'])
 
-        # Condição de Squeeze: Bollinger Bands inseridas nos Canais de Keltner
+        # Condição de Squeeze Estrita: BB totalmente inseridas dentro dos KC
         squeeze_on = (bb_upper <= kc_upper) and (bb_lower >= kc_lower)
         
-        # Breakout válido (fecho acima do limite superior ou Squeeze extremo a acumular)
+        # Breakout válido (fecho rompe KC superior a partir de um momento de compressão)
         breakout_alta = (preco > kc_upper) and (float(df['Close'].iloc[-2]) <= float(df['KC_Upper'].iloc[-2]))
 
         if breakout_alta or squeeze_on:
-            entrada_gatilho = round(maximo_hoje * 1.002, 2) # Buy Stop acima da máxima
+            entrada_gatilho = round(maximo_hoje * 1.002, 2)
             stop_loss = round(entrada_gatilho - (atr * 1.5), 2)
             
             risco = entrada_gatilho - stop_loss
-            alvo_tp = round(entrada_gatilho + (risco * 2.0), 2) # Relação de risco/retorno 1:2
+            alvo_tp = round(entrada_gatilho + (risco * 2.0), 2)
 
             if alvo_tp <= entrada_gatilho:
                 alvo_tp = round(entrada_gatilho + (risco * 1.5), 2)
@@ -253,7 +256,7 @@ def analisar_squeeze(ativo_info):
                 "alvo_tp": alvo_tp,
                 "qtd_acoes": qtd_calc,
                 "valor_investir": round(val_calc, 2),
-                "estado_squeeze": "A ATIVAR" if breakout_alta else "EM COMPRESSÃO"
+                "estado_squeeze": "A ATIVAR (Breakout Detetado)" if breakout_alta else "EM COMPRESSÃO EXTREMA"
             }
         return None
     except Exception as e:
