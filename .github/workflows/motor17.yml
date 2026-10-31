@@ -1,21 +1,14 @@
-name: 17 - ⚡ Motor RSI Drop & Rebound (Swing)
+name: TESTE 19⚡ Pipeline Tática - Hit and Run
 
 on:
-  # 1. Permite testar e executar manualmente a qualquer momento
-  workflow_dispatch:
-  
-  # 2. Agendamento Automático (Golden Window - 20 minutos antes do fecho de Wall St)
   schedule:
-    # 🕒 HORÁRIO DE INVERNO: Corre às 20h40 (Novembro a Março)
-    - cron: '40 20 * * 1-5'
-    
-    # ☀️ NOTA PARA O VERÃO: 
-    # Quando a hora mudar no final de março, deves vir aqui alterar o cron para:
-    # - cron: '40 19 * * 1-5' (que será 19h40 UTC = 20h40 em Portugal)
+    # Executa de Segunda a Sexta às 21:15 (Hora de Lisboa / 21:15 UTC no Inverno)
+    - cron: '15 21 * * 1-5'
+  workflow_dispatch: # Permite execução manual no GitHub
 
 jobs:
   run-rsi-rebound-engine:
-    name: ⚙️ Execução Motor 17 Isolada
+    name: ⚙️ Execução Pipeline Hit & Run (M17 + M18 + M19)
     runs-on: ubuntu-latest
 
     steps:
@@ -33,12 +26,23 @@ jobs:
           python -m pip install --upgrade pip
           pip install yfinance pandas requests
           pip install pandas-ta==0.4.71b0
+          pip install google-generativeai google-genai
 
-      - name: ⚡ Executar Motor 17 (RSI Drop & Rebound)
+      - name: 🗜️ 19 - Executar Motor Squeeze Breakout
         env:
           WEBHOOK_URL: ${{ secrets.WEBHOOK_URL }}
           EMAIL_USER: ${{ secrets.EMAIL_USER }}
           EMAIL_PASS: ${{ secrets.EMAIL_PASS }}
-          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_BOT_TOKEN_GERAL: ${{ secrets.TELEGRAM_BOT_TOKEN_GERAL }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
-        run: python 17_motor_rsi_drop_rebound.py
+        run: python 19_motor_squeeze_breakout.py
+
+      - name: 🤖 09 - Orquestrador IA (Síntese Final)
+        env:
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          WEBHOOK_URL: ${{ secrets.WEBHOOK_URL }}
+          EMAIL_USER: ${{ secrets.EMAIL_USER }}
+          EMAIL_PASS: ${{ secrets.EMAIL_PASS }}
+          TELEGRAM_BOT_TOKEN_GERAL: ${{ secrets.TELEGRAM_BOT_TOKEN_GERAL }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+        run: python 09_agente_gemini_orquestrador.py
