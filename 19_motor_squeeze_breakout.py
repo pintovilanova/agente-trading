@@ -265,7 +265,22 @@ def analisar_squeeze(ativo_info):
                 "estado_squeeze": "A ATIVAR (Breakout Detetado)" if breakout_alta else "EM COMPRESSÃO EXTREMA"
             }
         return None
-
+        return {
+                "ticker": ticker,
+                "preco_atual": round(preco, 2),
+                "gatilho": entrada_gatilho,
+                "stop_loss": stop_loss,
+                "alvo_tp": alvo_tp,
+                "qtd_acoes": qtd_calc,
+                "valor_investir": round(val_calc, 2),
+                "estado_squeeze": "A ATIVAR (Breakout Detetado)" if breakout_alta else "EM COMPRESSÃO EXTREMA"
+            }
+        return None
+    
+    except Exception as e:
+        print(f"[ERRO] Falha ao processar ativo {ativo_info.get('ticker')}: {e}")
+        return None
+    
 # ===================================================================
 # 6. EXECUÇÃO PRINCIPAL E RELATÓRIO DETALHADO
 # ===================================================================
