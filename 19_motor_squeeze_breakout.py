@@ -358,3 +358,6 @@ def executar_motor():
 
 if __name__ == "__main__":
     executar_motor()
+    # Guardar o bloco num ficheiro temporário para o loop geral / Agente IA
+    with open("comboio_squeeze_temp.txt", "w", encoding="utf-8") as f:
+        f.write(bloco)
