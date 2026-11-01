@@ -162,7 +162,10 @@ ficheiros_alvo = [
     "comboio_harvest_temp.txt",     # Motor 15 (Profit Harvest & Rebalancing)
     "comboio_vix_temp.txt",         # Motor 16 (Volatility Regime & VIX)
     "comboio_rsi_rebound_temp.txt", # Motor 17 (2-Day RSI Drop & Rebound)
-    "comboio_momentumburst_temp.txt"# Motor 18 (Momentum Burst & Volume Surge)
+    "comboio_momentumburst_temp.txt", # Motor 18 (Momentum Burst & Volume Surge)
+    "comboio_squeeze_temp.txt",     # Motor 19 (Volatility Squeeze Breakout)
+    "comboio_pullback_temp.txt",    # Motor 20 (Pullback à EMA 20)
+    "comboio_confluencia_temp.txt"  # Motor 21 (Confluência Suprema)
 ]
 
 conteudo_bruto_total = ""
@@ -194,7 +197,7 @@ else:
                 conteudo_bruto_total += f"📁 FONTE: {ficheiro}\n"
                 conteudo_bruto_total += f"==================================\n"
                 
-                if dados and "Nenhum ativo" not in dados and "[SEM OPORTUNIDADES]" not in dados:
+                if dados and "Nenhum ativo" not in dados and "[SEM OPORTUNIDADES]" not in dados and "[MERCADO FRACO]" not in dados:
                     conteudo_bruto_total += f"{dados}\n"
                     print(f"[ENCONTRADO] Dados detetados no {ficheiro}.")
                 else:
@@ -215,6 +218,12 @@ else:
                 conteudo_bruto_total += "✅ Nenhum ativo em retração extrema de 2 dias com RSI(2) < 10 hoje. (Modo Silêncio ativo).\n"
             elif ficheiro == "comboio_momentumburst_temp.txt":
                 conteudo_bruto_total += "✅ Nenhum ativo apresenta explosão de volume e momento hoje. (Modo Silêncio ativo).\n"
+            elif ficheiro == "comboio_squeeze_temp.txt":
+                conteudo_bruto_total += "✅ Nenhum sinal de Squeeze / Breakout detetado hoje. (Modo Silêncio ativo).\n"
+            elif ficheiro == "comboio_pullback_temp.txt":
+                conteudo_bruto_total += "✅ Nenhum sinal de Pullback à EMA 20 detetado hoje. (Modo Silêncio ativo).\n"
+            elif ficheiro == "comboio_confluencia_temp.txt":
+                conteudo_bruto_total += "✅ Nenhum sinal Sniper de Confluência Suprema detetado hoje (ou bloqueio de mercado ativo). (Modo Silêncio ativo).\n"
             else:
                 conteudo_bruto_total += "[ERRO: FICHEIRO NÃO ENCONTRADO - MOTOR PODE TER FALHADO]\n"
 
@@ -234,31 +243,31 @@ if not veio_do_email:
 # ===================================================================
 prompt_orquestrador = f"""
 És o Analista Quantitativo Principal (Agente Orquestrador).
-Abaixo estão os relatórios em bruto e os dados gerados dinamicamente pelos Extratores de Mercado (US e Europa) e pelos vários Motores de Estratégia no fecho do mercado de hoje, incluindo o Motor 15 (Profit Harvest & Rebalancing), o Motor 16 (Regime de Volatilidade VIX), o Motor 17 (2-Day RSI Drop & Rebound) e o Motor 18 (Momentum Burst).
+Abaixo estão os relatórios em bruto e os dados gerados dinamicamente pelos Extratores de Mercado (US e Europa) e pelos vários Motores de Estratégia no fecho do mercado de hoje.
 
 A tua missão é ler integralmente este conteúdo, processar todos os ativos e compilar um ÚNICO relatório consolidado, limpo, detalhado e altamente profissional para o Gestor de Conta aprovar na corretora.
 
 🚨 REGRAS ESTRITAS DE ESTRUTURA E FECHO 🚨
 
 1. REGIME DE VOLATILIDADE VIX (MOTOR 16): Lê a diretriz do Motor 16 e indica explicitamente no topo do relatório o Regime do VIX. Aplica a percentagem de lote indicada pelo Motor 16 (100%, 75%, 50% ou 0%) ao calcular o tamanho e alocação de TODAS as novas sugestões de entrada.
-2. ZERO CRIATIVIDADE DE DADOS: Não inventes preços, tickers, stops ou tamanhos de posição. Utiliza unicamente e na íntegra os dados fornecidos.
-3. VETO DE SOBREPOSIÇÃO: Posições ativas na carteira (com 'PosicaoAtiva: SIM') NÃO PODEM ter novas ordens de compra sugeridas.
-4. ⚡ TÁTICA HIT AND RUN (MOTOR 18 - MOMENTUM BURST):
-   Se o ficheiro correspondente ao Motor 18 apresentar ativos com explosão de volume (RVOL elevado), cria uma secção dedicada.
-   Usa o formato:
-   - [TICKER]: Entrada a [X], Stop a [Y], Alvo [Z]. (Motivo: RVOL [W]x com quebra de máxima).
-   Se não houver sinais do Motor 18, refere brevemente a ausência de momento extremo.
-5. TABELA FINAL OBRIGATÓRIA (SÍNTESE DE ORDENS):
+2. PRIORIDADE ABSOLUTA - MOTOR 21 (CONFLUÊNCIA SUPREMA):
+   - Se o Motor 21 reportar "SINAIS DE ALTA PROBABILIDADE (SNIPER)", DEVES OBRIGATORIAMENTE criar um destaque gigante logo no topo (após o VIX) intitulado "🚨🚨 ALERTA SNIPER: CONFLUÊNCIA SUPREMA DETETADA 🚨🚨".
+   - O Motor 21 é o modelo quantitativo absoluto com Risco/Retorno 3:1. Dá-lhe a máxima importância.
+3. ZERO CRIATIVIDADE DE DADOS: Não inventes preços, tickers, stops ou tamanhos de posição. Utiliza unicamente e na íntegra os dados fornecidos.
+4. VETO DE SOBREPOSIÇÃO: Posições ativas na carteira (com 'PosicaoAtiva: SIM') NÃO PODEM ter novas ordens de compra sugeridas.
+5. SÍNTESE ESTRATÉGICA (MOTORES 18, 19 e 20):
+   - Se existirem sinais nestes motores de curto prazo (Momentum Burst, Squeeze Breakout, Pullback EMA 20), agrupa-os de forma lógica e organizada na secção central do relatório, indicando claramente a tática, Entrada, Stop Loss e Alvo TP de 2:1.
+6. TABELA FINAL OBRIGATÓRIA (SÍNTESE DE ORDENS):
    É ESTRITAMENTE OBRIGATÓRIO terminar o relatório com uma secção final intitulada "## 12. SÍNTESE DE ORDENS PARA APROVAÇÃO DO GESTOR DE CONTA" contendo uma tabela Markdown formatada exatamente com esta estrutura:
 
    | Ticker | Estratégia | Tipo de Ordem | Preço Entrada | Stop Loss | Take Profit | Qtd | Alocação Est. | Notas Táticas |
    | :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- |
 
    - Inclui TODAS as ordens de colheita parcial de lucro a 2R (Profit Harvest) geradas pelo Motor 15 no topo da tabela.
-   - Inclui TODAS as ações ativas em carteira que exijam fecho ou ajuste de stop.
+   - Inclui TODAS as ações ativas em carteira que exijam fecho ou ajuste de stop (Auditorias de posições ativas dos Motores).
    - Inclui TODAS as novas ordens aprovadas ajustadas pelo Lote Máximo do VIX (Motor 16).
-   - Inclui os sinais do Motor 17 (2-Day RSI Drop & Rebound) indicando o alvo rápido da EMA5.
-   - Inclui os sinais do Motor 18 (Momentum Burst) com indicação do respetivo alvo rápido.
+   - Inclui os sinais do Motor 17, 18, 19 e 20 com os respetivos alvos TP e dados de entrada exatos.
+   - Inclui os sinais do Motor 21 com nota explícita de "SNIPER 3:1" nas Notas Táticas.
    - Respeita rigorosamente a moeda de cada ativo (USD ou EUR).
 
 DADOS RECOLHIDOS HOJE NOS FICHEIROS:
