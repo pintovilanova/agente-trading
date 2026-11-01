@@ -56,7 +56,7 @@ jobs:
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
         run: python 19_motor_squeeze_breakout.py
         
-      - name: 🧲 Executar Motor 20 (Pullback EMA 20)
+      - name: 🧲 20 - (Pullback EMA 20)
         env:
           WEBHOOK_URL: ${{ secrets.WEBHOOK_URL }}
           EMAIL_USER: ${{ secrets.EMAIL_USER }}
@@ -64,7 +64,7 @@ jobs:
           TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_TOKEN }} 
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
         run: python 20_motor_pullback_ema20.py
-      - name: 🧲 Executar Motor 21 (Confluencia)
+      - name: 🧲 21 - (Confluencia)
         env:
           WEBHOOK_URL: ${{ secrets.WEBHOOK_URL }}
           EMAIL_USER: ${{ secrets.EMAIL_USER }}
