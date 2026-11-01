@@ -8,7 +8,7 @@ on:
 
 jobs:
   run-rsi-rebound-engine:
-    name: ⚙️ Execução Pipeline Hit & Run (M17 + M18 + M19)
+    name: ⚙️ Execução Pipeline Hit & Run (M17 + M18 + M19 + M20 + M21)
     runs-on: ubuntu-latest
 
     steps:
