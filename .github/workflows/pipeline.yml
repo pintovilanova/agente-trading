@@ -161,7 +161,7 @@ jobs:
         run: python 15_motor_profit_harvest.py
       - name: 🛡️ 16 - Executar Motor Volatility Regime & VIX
         run: python 16_motor_vix_volatility_regime.py
-      - name: ⚡17-  Executar Motor 2-Day RSI Drop & Rebound
+      - name: ⚡17 - Executar Motor 2-Day RSI Drop & Rebound
         env:
           WEBHOOK_URL: ${{ secrets.WEBHOOK_URL }}
           TELEGRAM_BOT_TOKEN_GERAL: ${{ secrets.TELEGRAM_BOT_TOKEN_GERAL }}
@@ -187,7 +187,7 @@ jobs:
           TELEGRAM_BOT_TOKEN_GERAL: ${{ secrets.TELEGRAM_BOT_TOKEN_GERAL }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
         run: python 19_motor_squeeze_breakout.py
-      - name: 🧲 20  (Pullback EMA 20)
+      - name: 🧲 20 - (Pullback EMA 20)
         env:
           WEBHOOK_URL: ${{ secrets.WEBHOOK_URL }}
           EMAIL_USER: ${{ secrets.EMAIL_USER }}
@@ -195,7 +195,7 @@ jobs:
           TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_TOKEN }} 
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
         run: python 20_motor_pullback_ema20.py
-      - name: 🧲 21 (Confluencia)
+      - name: 🧲 21 - (Confluencia)
         env:
           WEBHOOK_URL: ${{ secrets.WEBHOOK_URL }}
           EMAIL_USER: ${{ secrets.EMAIL_USER }}
