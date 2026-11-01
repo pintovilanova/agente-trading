@@ -27,6 +27,14 @@ jobs:
           pip install yfinance pandas requests
           pip install pandas-ta==0.4.71b0
           pip install google-generativeai google-genai
+      - name: 🧲 Executar Motor 21 (Confluencia)
+        env:
+          WEBHOOK_URL: ${{ secrets.WEBHOOK_URL }}
+          EMAIL_USER: ${{ secrets.EMAIL_USER }}
+          EMAIL_PASS: ${{ secrets.EMAIL_PASS }}
+          TELEGRAM_BOT_TOKEN_GERAL: ${{ secrets.TELEGRAM_BOT_TOKEN_GERAL }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+        run: python 21_motor_confluencia.py
       - name: 🧲 Executar Motor 20 (Pullback EMA 20)
         env:
           WEBHOOK_URL: ${{ secrets.WEBHOOK_URL }}
@@ -44,14 +52,7 @@ jobs:
           TELEGRAM_BOT_TOKEN_GERAL: ${{ secrets.TELEGRAM_BOT_TOKEN_GERAL }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
         run: python 19_motor_squeeze_breakout.py
-      - name: 🧲 Executar Motor 21 (Confluencia)
-        env:
-          WEBHOOK_URL: ${{ secrets.WEBHOOK_URL }}
-          EMAIL_USER: ${{ secrets.EMAIL_USER }}
-          EMAIL_PASS: ${{ secrets.EMAIL_PASS }}
-          TELEGRAM_BOT_TOKEN_GERAL: ${{ secrets.TELEGRAM_BOT_TOKEN_GERAL }}
-          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
-        run: python 21_motor_confluencia.py
+      
 
       - name: 🤖 09 - Orquestrador IA (Síntese Final)
         env:
