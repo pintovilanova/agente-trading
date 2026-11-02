@@ -1,10 +1,5 @@
 # ===================================================================================
-# SISTEMA DE TRADING INSTITUCIONAL - MOTOR 19: VOLATILITY SQUEEZE BREAKOUT
-# ===================================================================================
-# Descrição Geral:
-# Identifica ativos em consolidação apertada (Squeeze entre Bandas de Bollinger e 
-# Canais de Keltner) prontos para um rompimento explosivo de curto prazo (Hit and Run),
-# auditando em simultâneo as posições ativas em carteira (estritamente ATIVA_M19).
+# SISTEMA DE TRADING INSTITUCIONAL - MOTOR 17: 2-DAY RSI DROP & REBOUND (HIT & RUN)
 # ===================================================================================
 
 import pandas as pd
@@ -32,7 +27,7 @@ from F01_notificador_telegram import enviar_alerta
 # ===================================================================
 dia_da_semana = datetime.now(ZoneInfo("Europe/Lisbon")).weekday()
 if dia_da_semana >= 5:
-    print("[INFO] Fim de semana detetado. O Motor Squeeze Breakout vai descansar.")
+    print("[INFO] Fim de semana detetado. O Motor 17 vai descansar.")
     # sys.exit(0)
 
 # ===================================================================
@@ -85,40 +80,28 @@ def buscar_dados_completos():
         print(f"[ERRO CRÍTICO] Sheets: {e}")
         return [], {}, {}
 
-def enviar_email(conteudo):
-    print("\nA enviar relatório detalhado do Motor 19 por e-mail...")
+def enviar_email(assunto, conteudo):
+    print(f"\nA enviar e-mail ('{assunto}')...")
     if not EMAIL_USER or not EMAIL_PASS:
-        print("[AVISO] EMAIL_USER ou EMAIL_PASS não definidos.")
+        print("[AVISO] EMAIL_USER ou EMAIL_PASS não configurados. E-mail não enviado.")
         return False
-
-    msg = MIMEMultipart()
-    msg['From'] = EMAIL_USER
-    msg['To'] = EMAIL_USER
-    msg['Subject'] = f"⚡ tradingRelatorioIA US - MOTOR 19 SQUEEZE BREAKOUT ({datetime.now(ZoneInfo('Europe/Lisbon')).strftime('%d/%m/%Y')})"
-    msg.attach(MIMEText(conteudo, 'plain', 'utf-8'))
-    
-    for tentativa in range(3):
-        try:
-            server = smtplib.SMTP(SMTP_SERVER, SMTP_PORT, timeout=15)
-            server.starttls()
-            server.login(EMAIL_USER, EMAIL_PASS)
-            server.sendmail(EMAIL_USER, EMAIL_USER, msg.as_string())
-            server.quit()
-            print("[SUCESSO] Email enviado com sucesso!")
-            return True
-        except Exception as e:
-            print(f"[ERRO EMAIL] Falha na tentativa {tentativa + 1}: {e}")
-            if tentativa < 2: time.sleep(5)
-    return False
-
-def obter_setor_yf(ticker):
-    """Fallback para obter o setor diretamente do yfinance caso falhe no Sheets"""
     try:
-        t = yf.Ticker(ticker)
-        setor = t.info.get('sector')
-        return setor if setor else "Desconhecido"
-    except Exception:
-        return "Desconhecido"
+        msg = MIMEMultipart()
+        msg['From'] = EMAIL_USER
+        msg['To'] = EMAIL_USER
+        msg['Subject'] = assunto
+        msg.attach(MIMEText(conteudo, 'plain', 'utf-8'))
+        
+        server = smtplib.SMTP(SMTP_SERVER, SMTP_PORT, timeout=15)
+        server.starttls()
+        server.login(EMAIL_USER, EMAIL_PASS)
+        server.sendmail(EMAIL_USER, EMAIL_USER, msg.as_string())
+        server.quit()
+        print("[SUCESSO] Email enviado com sucesso!")
+        return True
+    except Exception as e:
+        print(f"[ERRO EMAIL] Falha ao enviar e-mail: {e}")
+        return False
 
 # ===================================================================
 # 3. CARGA DE DADOS E PARAMETRIZAÇÃO DE RISCO
@@ -135,14 +118,14 @@ vol_diaria_usd = capital * pct_risco
 print(f"[CONFIG] Capital Total: ${capital:,.2f} | Risco/Trade: {pct_risco*100:.1f}% (${vol_diaria_usd:,.2f} USD)\n")
 
 # ===================================================================
-# 4. AUDITAR POSIÇÕES EM CARTEIRA (ESTRITO: ATIVA_M19)
+# 4. AUDITAR POSIÇÕES EM CARTEIRA (ESTRITO: ATIVA_M17)
 # ===================================================================
 bloco_posicoes_ativas = ""
 for chave_pos, info in posicoes_ativas_dict.items():
     if not isinstance(info, dict): continue
     status = str(info.get("status", "")).strip().upper()
     
-    if status == "ATIVA_M19":
+    if status == "ATIVA_M17":
         try:
             ticker = "AI" if chave_pos.lower() in ["c3.ai", "c3"] else chave_pos.strip().upper()
             
@@ -168,14 +151,13 @@ for chave_pos, info in posicoes_ativas_dict.items():
                 
                 entrada = limpar_float(info.get("precoEntrada")) or preco_atual
                 qtd = info.get("quantidade", "N/A")
-                maxima_efetiva = max(maxima_hoje, preco_atual)
                 
                 if alvo_tp > 0 and preco_atual >= alvo_tp:
                     acao = f"🎯 ALVO ALCANÇADO (TP em ${alvo_tp})! Recomendado FECHAR POSIÇÃO com Lucro (WIN)."
                 elif stop > 0 and minima_hoje <= stop:
                     acao = f"🚨 STOP LOSS ATINGIDO (${stop})! Recomendado LIQUIDAR POSIÇÃO (LOSS)."
                 else:
-                    acao = f"⏳ MANTER POSIÇÃO (Squeeze Breakout). Alvo TP: ${alvo_tp} | Stop: ${stop}."
+                    acao = f"⏳ MANTER POSIÇÃO (RSI Rebound). Alvo TP: ${alvo_tp} | Stop: ${stop}."
                 
                 bloco_posicoes_ativas += (
                     f"📌 [{status}] {ticker} ({chave_pos}) | Qtd: {qtd} | Entrada: ${entrada} | "
@@ -185,98 +167,40 @@ for chave_pos, info in posicoes_ativas_dict.items():
             print(f"[ERRO] Falha ao auditar posição ativa {chave_pos}: {e}")
 
 # ===================================================================
-# 5. MOTOR MATEMÁTICO: VOLATILITY SQUEEZE (TRADINGVIEW REPLICA)
+# 5. MOTOR MATEMÁTICO: 2-DAY RSI DROP & REBOUND
 # ===================================================================
-def analisar_squeeze(ativo_info):
+def analisar_rsi_drop(ativo_info):
     try:
-        # FILTRO DE FORÇA RELATIVA (RS SCORE MÍNIMO)
-        rs_score_raw = ativo_info.get("rs_score", 0)
-        try:
-            rs_score = float(str(rs_score_raw).replace(",", ".").strip())
-        except (ValueError, TypeError):
-            rs_score = 0.0
-
-        # Se o RS Score for inferior a 60, o ativo é descartado de imediato
-        if rs_score < 60.0:
-            return None
         ticker = str(ativo_info.get("ticker", "")).strip().upper()
         if not ticker or ticker == "#N/A" or ticker == "NONE": return None
         if ticker in posicoes_ativas_dict: return None
         if ticker == "BRK-A": ticker = "BRK-B"
 
-        time.sleep(random.uniform(0.8, 1.8))
-
-        df = pd.DataFrame()
-        for _ in range(3):
-            try:
-                df = yf.download(ticker, period="6mo", interval="1d", progress=False, timeout=15)
-                if not df.empty and len(df) >= 50:
-                    break
-            except Exception:
-                time.sleep(2)
-
+        df = yf.download(ticker, period="6mo", interval="1d", progress=False)
         if df.empty or len(df) < 50: return None
         if isinstance(df.columns, pd.MultiIndex): df.columns = df.columns.droplevel(1)
         df = df.dropna(subset=['Close', 'High', 'Low', 'Volume'])
 
-        preco = float(df['Close'].iloc[-1])
-        if preco < 5.00: return None
+        df.ta.rsi(length=2, append=True)
+        df.ta.sma(length=200, append=True)
+        df.ta.atr(length=14, append=True)
 
-        # 1. Bollinger Bands (SMA 20, Desvio Padrão 2.0)
-        df['SMA_20'] = df['Close'].rolling(window=20).mean()
-        df['STD_20'] = df['Close'].rolling(window=20).std()
-        df['BB_Upper'] = df['SMA_20'] + (df['STD_20'] * 2.0)
-        df['BB_Lower'] = df['SMA_20'] - (df['STD_20'] * 2.0)
-
-        # 2. Keltner Channels (Fiel ao TradingView: EMA 20, ATR(20) com suavização RMA)
-        df['EMA_20'] = df['Close'].ewm(span=20, adjust=False).mean()
-        df.ta.atr(length=20, mamode="rma", append=True) # RMA = Rolling Moving Average de Wilder
-        
+        col_rsi = [c for c in df.columns if str(c).startswith('RSI_2')][0]
+        col_sma = [c for c in df.columns if str(c).startswith('SMA_200')][0]
         col_atr = [c for c in df.columns if str(c).startswith('ATRr_') or str(c).startswith('ATR_')][0]
-        
-        df['KC_Upper'] = df['EMA_20'] + (df[col_atr] * 1.5)
-        df['KC_Lower'] = df['EMA_20'] - (df[col_atr] * 1.5)
-
-        df = df.dropna(subset=['BB_Upper', 'BB_Lower', 'KC_Upper', 'KC_Lower', col_atr])
-        if df.empty: return None
-
-        # 3. Registo histórico de Squeeze (BB dentro dos KC) e Filtro de Squeeze Recente (últimos 5 dias)
-        df['Squeeze_On'] = (df['BB_Upper'] <= df['KC_Upper']) & (df['BB_Lower'] >= df['KC_Lower'])
-        df['Squeeze_Recente'] = df['Squeeze_On'].rolling(window=5).sum() > 0
 
         ultimo = df.iloc[-1]
-        bb_upper = float(ultimo['BB_Upper'])
-        bb_lower = float(ultimo['BB_Lower'])
-        kc_upper = float(ultimo['KC_Upper'])
-        kc_lower = float(ultimo['KC_Lower'])
+        preco = float(ultimo['Close'])
+        rsi2 = float(ultimo[col_rsi])
+        sma200 = float(ultimo[col_sma])
         atr = float(ultimo[col_atr])
-        maximo_hoje = float(ultimo['High'])
 
-        # Condição de Squeeze Estrita (Estado atual)
-        squeeze_on = bool(ultimo['Squeeze_On'])
-        
-        # Breakout válido: Só dispara se o preço romper o KC superior E tiver estado em Squeeze pelo menos 1 dia nos últimos 5 dias
-        breakout_alta = (
-            (preco > kc_upper) and 
-            (float(df['Close'].iloc[-2]) <= float(df['KC_Upper'].iloc[-2])) and 
-            bool(ultimo['Squeeze_Recente'])
-        )
-
-        # FILTRO DE EXAUSTÃO: Se o preço esticou mais de 1 ATR acima do Keltner, o comboio já partiu. Descarta.
-        limite_exaustao = kc_upper + (atr * 1.0)
-        if breakout_alta and preco > limite_exaustao:
-            breakout_alta = False # Anula o sinal por estar demasiado esticado
-            squeeze_on = False
-
-        if breakout_alta or squeeze_on:
-            entrada_gatilho = round(maximo_hoje * 1.002, 2)
+        # CONDIÇÕES: Preço acima da SMA200 (Tendência de Alta) E RSI(2) <= 10 (Sobrevendido Extremo)
+        if preco > sma200 and rsi2 <= 10.0:
+            entrada_gatilho = round(preco, 2)
             stop_loss = round(entrada_gatilho - (atr * 1.5), 2)
-            
             risco = entrada_gatilho - stop_loss
             alvo_tp = round(entrada_gatilho + (risco * 2.0), 2)
-
-            if alvo_tp <= entrada_gatilho:
-                alvo_tp = round(entrada_gatilho + (risco * 1.5), 2)
 
             qtd_calc = round(vol_diaria_usd / risco, 2) if risco > 0 else 0.0
             val_calc = entrada_gatilho * qtd_calc
@@ -284,39 +208,37 @@ def analisar_squeeze(ativo_info):
             return {
                 "ticker": ticker,
                 "preco_atual": round(preco, 2),
+                "rsi2": round(rsi2, 2),
                 "gatilho": entrada_gatilho,
                 "stop_loss": stop_loss,
                 "alvo_tp": alvo_tp,
                 "qtd_acoes": qtd_calc,
-                "valor_investir": round(val_calc, 2),
-                "estado_squeeze": "A ATIVAR (Breakout Detetado)" if breakout_alta else "EM COMPRESSÃO EXTREMA"
+                "valor_investir": round(val_calc, 2)
             }
         return None
     except Exception as e:
-        print(f"[ERRO] Falha ao processar ativo {ativo_info.get('ticker')}: {e}")
+        print(f"[ERRO] Falha ao analisar RSI Drop em {ativo_info.get('ticker')}: {e}")
         return None
 
 # ===================================================================
-# 6. EXECUÇÃO PRINCIPAL E RELATÓRIO DETALHADO
+# 6. EXECUÇÃO PRINCIPAL E RELATÓRIO
 # ===================================================================
 def executar_motor():
-    if not ativos_sheets: sys.exit(0)
-
-    alertas_squeeze = []
+    alertas_rsi = []
     total_analisados = 0
-    
-    for ativo_info in ativos_sheets:
-        ticker = ativo_info.get("ticker")
-        if not ticker or ticker == "#N/A": continue
-        
-        total_analisados += 1
-        res = analisar_squeeze(ativo_info)
-        if res: alertas_squeeze.append(res)
+
+    if ativos_sheets:
+        for ativo_info in ativos_sheets:
+            ticker = ativo_info.get("ticker")
+            if not ticker or ticker == "#N/A": continue
+            total_analisados += 1
+            res = analisar_rsi_drop(ativo_info)
+            if res: alertas_rsi.append(res)
 
     data_hoje = datetime.now(ZoneInfo("Europe/Lisbon")).strftime("%d/%m/%Y %H:%M")
     
     bloco_texto = (
-        f"⚡ RELATÓRIO DETALHADO - MOTOR 19: VOLATILITY SQUEEZE BREAKOUT ({data_hoje})\n"
+        f"⚡ RELATÓRIO DETALHADO - MOTOR 17: 2-DAY RSI DROP & REBOUND ({data_hoje})\n"
         f"==================================================================\n\n"
     )
 
@@ -325,62 +247,48 @@ def executar_motor():
     else:
         bloco_texto += "📌 GESTÃO DE POSIÇÕES ATIVAS: Nenhuma posição ativa detetada para este motor.\n--------------------------------------------------\n\n"
 
-    if alertas_squeeze:
-        bloco_texto += f"🎯 NOVOS SINAIS DE EXPANSÃO DE VOLATILIDADE ({len(alertas_squeeze)}):\n\n"
-        for a in alertas_squeeze:
+    if alertas_rsi:
+        bloco_texto += f"🎯 SINAIS DE REVERSÃO À MÉDIA DETETADOS ({len(alertas_rsi)}):\n\n"
+        for a in alertas_rsi:
             info_ativo = next((item for item in ativos_sheets if str(item.get("ticker","")).strip().upper() == a['ticker']), {})
-            
-            nome_empresa = info_ativo.get("nome") or info_ativo.get("nomeEmpresa") or info_ativo.get("name") or "N/A"
-            
-            # Tenta várias chaves possíveis do Sheets para o setor
-            setor = (
-                info_ativo.get("setor") or 
-                info_ativo.get("setorAtivo") or 
-                info_ativo.get("sector") or 
-                info_ativo.get("Setor")
-            )
-            
-            # Se não estiver presente ou preenchido no Sheets, obtém via YFinance
-            if not setor or str(setor).strip().lower() in ["desconhecido", "n/a", "none", "#n/a", ""]:
-                setor = obter_setor_yf(a['ticker'])
-
+            nome_empresa = info_ativo.get("nome") or "N/A"
+            setor = info_ativo.get("setor") or "N/A"
             rs_score = info_ativo.get("rs_score", "N/A")
-            
+
             bloco_texto += (
                 f"🔹 [{a['ticker']}] - {nome_empresa} ({setor})\n"
-                f"   - 📊 Contexto Técnico: {a['estado_squeeze']} (Bollinger Bands inseridas nos Keltner Channels)\n"
-                f"   - ⚙️ Tática: Breakout Explosivo de Curto Prazo (Hit & Run 48h-72h)\n"
-                f"   - 📋 Tipo de Ordem: BUY STOP (Gatilho na quebra da máxima diária)\n"
-                f"   - 🔢 Dados Exatos: Gatilho Compra: ${a['gatilho']} | Stop Loss: ${a['stop_loss']} | Alvo: ${a['alvo_tp']}\n"
-                f"   - 💰 Dimensionamento: Qtd: {a['qtd_acoes']} | Valor a Investir: ~${a['valor_investir']} USD\n"
-                f"   - 📈 RS Score Institucional: {rs_score}\n"
+                f"    - 📊 Contexto Técnico: RSI(2) em {a['rsi2']} (Sobrevendido Extremo sobre SMA200)\n"
+                f"    - ⚙️ Tática: Reversão à Média Expressa (Hit & Run 48h-72h)\n"
+                f"    - 📋 Tipo de Ordem: MARKET / LIMIT no fecho/abertura\n"
+                f"    - 🔢 Dados Exatos: Entrada: ${a['gatilho']} | Stop Loss: ${a['stop_loss']} | Alvo TP: ${a['alvo_tp']}\n"
+                f"    - 💰 Dimensionamento: Qtd: {a['qtd_acoes']} | Valor a Investir: ~${a['valor_investir']} USD\n"
+                f"    - 📈 RS Score Institucional: {rs_score}\n"
                 f"--------------------------------------------------\n"
             )
     else:
-        bloco_texto += "✅ Nenhum novo sinal de Squeeze / Breakout detetado hoje.\n"
+        bloco_texto += "✅ Nenhum novo sinal de RSI Drop detetado hoje.\n"
 
-    # Enviar o relatório por e-mail
-    enviar_email(bloco_texto)
-
-    # 📌 GRAVAR FICHEIRO TEMPORÁRIO PARA O LOOP GERAL / AGENTE IA
-    with open("comboio_squeeze_temp.txt", "w", encoding="utf-8") as f:
+    # GRAVAÇÃO DO FICHEIRO TEMPORÁRIO
+    with open("comboio_rsi_temp.txt", "w", encoding="utf-8") as f:
         f.write(bloco_texto)
 
-    # ===================================================================
-    # 7. NOTIFICAÇÃO TELEGRAM DEBUG
-    # ===================================================================
+    # ENVIO DE E-MAIL
+    assunto_email = f"⚡🎯 tradingRelatorioIA US - MOTOR 17 RSI DROP ({datetime.now(ZoneInfo('Europe/Lisbon')).strftime('%d/%m/%Y')})"
+    enviar_email(assunto_email, bloco_texto)
+
+    # NOTIFICAÇÃO TELEGRAM (DEBUG OU ALERTA)
     debug_telegram_ativado = str(configs_dict.get("TELEGRAM_NOTIFICATIONS_DEBUG", "false")).strip().lower() in ["true", "1", "sim", "yes"]
 
-    if debug_telegram_ativado:
-        print("A enviar notificação de Debug para o Telegram via função modular...")
-        total_acionados = len(alertas_squeeze)
-        mensagem_debug = (
-            f"19 ⚡ *MOTOR 19 (SQUEEZE BREAKOUT)*\n\n"
-            f"🔍 [DEBUG] Execução concluída com sucesso.\n"
+    if debug_telegram_ativado or len(alertas_rsi) > 0:
+        print("A enviar notificação para o Telegram via função modular...")
+        total_acionados = len(alertas_rsi)
+        mensagem_telegram = (
+            f"17 ⚡ *MOTOR 17 (RSI DROP & REBOUND)*\n\n"
+            f"🔍 [STATUS] Execução concluída com sucesso.\n"
             f"📊 Ativos analisados: *{total_analisados}* | Acionados: *{total_acionados}*\n"
-            f"✉️ Relatório de expansão de volatilidade gerado e enviado por e-mail."
+            f"✉️ Relatório de reversão à média gerado e enviado por e-mail."
         )
-        enviar_alerta(mensagem_debug)
+        enviar_alerta(mensagem_telegram)
 
 if __name__ == "__main__":
     executar_motor()
