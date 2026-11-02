@@ -214,15 +214,30 @@ else:
     bloco_texto += f"✅ Watchlist auditada e pronta com {len(ativos_sheets)} ativos ativos.\n"
 
 # ===================================================================
-# 7. GRAVAÇÃO DO FICHEIRO E ENVIO
+# 7. GRAVAÇÃO DO FICHEIRO, ENVIO DE E-MAIL E TELEGRAM
 # ===================================================================
 print("A gravar ficheiro temporário 'comboio_temp.txt'...")
 with open("comboio_temp.txt", "w", encoding="utf-8") as f:
     f.write(bloco_texto)
 
-# ASSUNTO DO E-MAIL COM OS ÍCONES CORRIGIDOS:
+# ASSUNTO DO E-MAIL COM ÍCONES:
 assunto_email = f"📥⚡ tradingRelatorioIA US - EXTRATOR DE DADOS 🛡️ ({datetime.now(ZoneInfo('Europe/Lisbon')).strftime('%d/%m/%Y')})"
 enviar_email(assunto_email, bloco_texto)
+
+# NOTIFICAÇÃO TELEGRAM:
+debug_telegram_ativado = str(configs_dict.get("TELEGRAM_NOTIFICATIONS_DEBUG", "false")).strip().lower() in ["true", "1", "sim", "yes"]
+
+if debug_telegram_ativado or veto_macro_ativo:
+    print("A enviar notificação para o Telegram via função modular...")
+    status_macro = "🚨 *VETO MACRO ATIVADO*" if veto_macro_ativo else "🟢 *MERCADO ESTÁVEL*"
+    mensagem_telegram = (
+        f"📥⚡ *EXTRATOR DE DADOS US*\n\n"
+        f"🔍 [STATUS] Extração e auditoria concluídas.\n"
+        f"📊 Estado Macro: {status_macro}\n"
+        f"📈 Ativos na Watchlist: *{len(ativos_sheets)}* | Posições auditadas: *{len(posicoes_ativas_dict)}*\n"
+        f"✉️ Relatório gerado e enviado por e-mail."
+    )
+    enviar_alerta(mensagem_telegram)
 
 print("[SUCESSO] Extração e auditoria concluídas sem bloqueio de pipeline.")
 sys.exit(0)
