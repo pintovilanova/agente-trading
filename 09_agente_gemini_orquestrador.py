@@ -155,7 +155,7 @@ ficheiros_alvo = [
     "comboio_connors_temp.txt",     # Motor 05 (REVERSAO)
     "comboio_carver_temp.txt",      # Motor 06 (Fast Trend Carver)
     "comboio_holygrail_temp.txt",   # Motor 10 (Holy Grail Pullbacks)
-    "comboio_rotacao_temp.txt",     # Motor 11 (Rotação Setorial)   
+    "comboio_rotacao_temp.txt",     # Motor 11 (Rotação Setorial)    
     "comboio_correlacao_temp.txt",  # Motor 12 (Correlação de Risco)
     "comboio_exaustao_temp.txt",    # Motor 13 (Exaustão Climática)
     "comboio_sazonalidade_temp.txt",# Motor 14 (Sazonalidade)
@@ -189,14 +189,23 @@ if not ficheiros_existentes:
         sys.exit(1)
 else:
     for ficheiro in ficheiros_alvo:
+        conteudo_bruto_total += f"\n\n==================================\n"
+        conteudo_bruto_total += f"📁 FONTE: {ficheiro}\n"
+        conteudo_bruto_total += f"==================================\n"
+
         if os.path.exists(ficheiro):
             with open(ficheiro, "r", encoding="utf-8") as f:
                 dados = f.read().strip()
-                
-                conteudo_bruto_total += f"\n\n==================================\n"
-                conteudo_bruto_total += f"📁 FONTE: {ficheiro}\n"
-                conteudo_bruto_total += f"==================================\n"
-                
+            
+            # CORREÇÃO CRUCIAL: Tratamento especial e robusto para o Motor 17 e restantes motores
+            if ficheiro == "comboio_rsi_rebound_temp.txt":
+                if dados and ("SINAIS DE REVERSÃO" in dados or "DETETADOS" in dados):
+                    conteudo_bruto_total += f"{dados}\n"
+                    print(f"[ENCONTRADO] Sinais ativos detetados e validados no {ficheiro}.")
+                else:
+                    conteudo_bruto_total += "✅ Nenhum ativo em retração extrema de 2 dias com RSI(2) < 10 hoje. (Modo Silêncio ativo).\n"
+                    print(f"[VAZIO] {ficheiro} lido, sem sinais ativos.")
+            else:
                 if dados and "Nenhum ativo" not in dados and "[SEM OPORTUNIDADES]" not in dados and "[MERCADO FRACO]" not in dados:
                     conteudo_bruto_total += f"{dados}\n"
                     print(f"[ENCONTRADO] Dados detetados no {ficheiro}.")
@@ -204,10 +213,6 @@ else:
                     conteudo_bruto_total += "[SEM SINAIS OU OPORTUNIDADES PARA ESTA ESTRATÉGIA HOJE]\n"
                     print(f"[VAZIO] {ficheiro} lido, adicionado como sem sinais ao relatório.")
         else:
-            conteudo_bruto_total += f"\n\n==================================\n"
-            conteudo_bruto_total += f"📁 FONTE: {ficheiro}\n"
-            conteudo_bruto_total += f"==================================\n"
-            
             if ficheiro == "comboio_exaustao_temp.txt":
                 conteudo_bruto_total += "✅ Nenhuma anomalia parabólica detetada. As posições ativas estão saudáveis e dentro dos parâmetros normais. (Modo Silêncio ativo).\n"
             elif ficheiro == "comboio_harvest_temp.txt":
@@ -254,8 +259,8 @@ A tua missão é ler integralmente este conteúdo, processar **TODOS** os ativos
    - Se o Motor 21 reportar "SINAIS DE ALTA PROBABILIDADE (SNIPER)", DEVES OBRIGATORIAMENTE criar um destaque gigante logo no topo (após o VIX) intitulado "🚨🚨 ALERTA SNIPER: CONFLUÊNCIA SUPREMA DETETADA 🚨🚨".
    - O Motor 21 é o modelo quantitativo absoluto com Risco/Retorno 3:1. Dá-lhe a máxima importância.
 3. ⚠️ DIRETIVA ANTI-OMISSÃO ESTRITA (MOTOR 17 & REVERSÃO):
-   - Os dados fornecidos no Motor 17 (comboio_rsi_rebound_temp.txt) contêm múltiplos sinais detetados (ex: ABNB, ANET, CRM, CSCO, DBX, DDOG, DELL, HPE, MDB, MRVL, MSFT, NET, NVDA, PLTR, SHOP, TEAM, U, TSM, SNOW, FTNT, etc.).
-   - É ESTRITAMENTE PROIBIDO resumir, omitir, truncar ou ignorar qualquer ativo presente nos relatórios dos motores. **DEVES LISTAR INTEGRALMENTE TODOS OS ATIVOS ACIONADOS NO MOTOR 17 NA SECÇÃO CORRESPONDENTE.**
+   - Os dados fornecidos no Motor 17 (comboio_rsi_rebound_temp.txt) contêm múltiplos sinais detetados (ex: AMD, CSCO, DBX, DDOG, DELL, HPE, MDB, MSFT, NET, PANW, PLTR, TEAM, UNH, TSM, SNOW, FTNT, OKTA, CRWD, ZS, etc.).
+   - É ESTRITAMENTE PROIBIDO resumir, omitir, truncar ou ignorar qualquer ativo presente nos relatórios dos motores. **DEVES LISTAR INTEGRALMENTE TODOS OS ATIVOS ACIONADOS NO MOTOR 17 NA SECÇÃO CORRESPONDENTE E INCLUÍ-LOS NA TABELA FINAL.**
 4. ZERO CRIATIVIDADE DE DADOS: Não inventes preços, tickers, stops ou tamanhos de posição. Utiliza unicamente e na íntegra os dados fornecidos.
 5. VETO DE SOBREPOSIÇÃO: Posições ativas na carteira (com 'PosicaoAtiva: SIM' ou detidas) NÃO PODEM ter novas ordens de compra sugeridas.
 6. TABELA FINAL OBRIGATÓRIA (SÍNTESE DE ORDENS):
@@ -315,7 +320,7 @@ if not relatorio_final:
     print("\n[ALERTA DE IA] Não foi possível obter resposta de nenhum modelo Gemini.")
     assunto_erro = f"tradingRelatorioIA - ⚠️ AVISO: FALHA NA IA ({data_hoje})"
     corpo_erro = "Ocorreu um erro ao comunicar com a API do Gemini."
-    email_status = enviar_email(assunto_erro, corpo_erro) # Citação:
+    email_status = enviar_email(assunto_erro, corpo_erro)
     sys.exit(0)
 
 # ===================================================================
