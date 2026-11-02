@@ -20,6 +20,7 @@ import json
 import warnings
 warnings.filterwarnings("ignore")
 
+# Importação da função modular de notificação do Telegram
 from F01_notificador_telegram import enviar_alerta
 
 # ===================================================================
@@ -272,11 +273,11 @@ def executar_motor():
     with open("comboio_rsi_temp.txt", "w", encoding="utf-8") as f:
         f.write(bloco_texto)
 
-    # ENVIO DE E-MAIL
+    # ENVIO DE E-MAIL COM ÍCONES PADRONIZADOS
     assunto_email = f"⚡🎯 tradingRelatorioIA US - MOTOR 17 RSI DROP ({datetime.now(ZoneInfo('Europe/Lisbon')).strftime('%d/%m/%Y')})"
     enviar_email(assunto_email, bloco_texto)
 
-    # NOTIFICAÇÃO TELEGRAM (DEBUG OU ALERTA)
+    # 📌 NOTIFICAÇÃO TELEGRAM REINTEGRADA
     debug_telegram_ativado = str(configs_dict.get("TELEGRAM_NOTIFICATIONS_DEBUG", "false")).strip().lower() in ["true", "1", "sim", "yes"]
 
     if debug_telegram_ativado or len(alertas_rsi) > 0:
