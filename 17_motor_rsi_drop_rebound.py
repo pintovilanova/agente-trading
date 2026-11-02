@@ -168,7 +168,7 @@ for chave_pos, info in posicoes_ativas_dict.items():
             print(f"[ERRO] Falha ao auditar posição ativa {chave_pos}: {e}")
 
 # ===================================================================
-# 5. MOTOR MATEMÁTICO: 2-DAY RSI DROP & REBOUND
+# 5. MOTOR MATEMÁTICO: 2-DAY RSI DROP & REBOUND (CORRIGIDO)
 # ===================================================================
 def analisar_rsi_drop(ativo_info):
     try:
@@ -177,18 +177,35 @@ def analisar_rsi_drop(ativo_info):
         if ticker in posicoes_ativas_dict: return None
         if ticker == "BRK-A": ticker = "BRK-B"
 
-        df = yf.download(ticker, period="6mo", interval="1d", progress=False)
-        if df.empty or len(df) < 50: return None
-        if isinstance(df.columns, pd.MultiIndex): df.columns = df.columns.droplevel(1)
+        df = yf.download(ticker, period="1y", interval="1d", progress=False)
+        if df.empty or len(df) < 200: return None
+        
+        # Achatar MultiIndex se existir
+        if isinstance(df.columns, pd.MultiIndex): 
+            df.columns = df.columns.droplevel(1)
+            
         df = df.dropna(subset=['Close', 'High', 'Low', 'Volume'])
+        if len(df) < 200: return None
 
+        # Cálculo dos Indicadores
         df.ta.rsi(length=2, append=True)
         df.ta.sma(length=200, append=True)
         df.ta.atr(length=14, append=True)
 
-        col_rsi = [c for c in df.columns if str(c).startswith('RSI_2')][0]
-        col_sma = [c for c in df.columns if str(c).startswith('SMA_200')][0]
-        col_atr = [c for c in df.columns if str(c).startswith('ATRr_') or str(c).startswith('ATR_')][0]
+        # Mapeamento Seguro de Colunas (Evita 'list index out of range')
+        cols_rsi = [c for c in df.columns if str(c).startswith('RSI_2')]
+        cols_sma = [c for c in df.columns if str(c).startswith('SMA_200')]
+        cols_atr = [c for c in df.columns if str(c).startswith('ATRr_') or str(c).startswith('ATR_') or str(c).startswith('ATRe_')]
+
+        if not cols_rsi or not cols_sma or not cols_atr:
+            return None
+
+        col_rsi = cols_rsi[0]
+        col_sma = cols_sma[0]
+        col_atr = cols_atr[0]
+
+        df = df.dropna(subset=[col_rsi, col_sma, col_atr])
+        if df.empty: return None
 
         ultimo = df.iloc[-1]
         preco = float(ultimo['Close'])
