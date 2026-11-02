@@ -124,10 +124,6 @@ print(f"[CONFIG] Capital Total: ${capital:,.2f} | Risco/Trade: {pct_risco*100:.1
 bloco_posicoes_ativas = ""
 
 def obter_preco_realtime_premarket(ticker):
-    """
-    Usa o motor intraday do yfinance para descarregar o gráfico de 1 minuto 
-    com a flag prepost=True. Apanha a última transação de Pre-Market/After-Hours.
-    """
     try:
         df_rt = yf.download(ticker, period="5d", interval="1m", prepost=True, progress=False)
         if not df_rt.empty:
@@ -156,7 +152,6 @@ def obter_preco_realtime_premarket(ticker):
     return 0.0
 
 def obter_dados_posicao_m17(ticker):
-    """Obtém o preço em tempo real (Pre-Market forçado) e calcula a EMA5 diária"""
     preco_atual = 0.0
     ema5_atual = 0.0
     
@@ -273,8 +268,36 @@ def analisar_rsi_drop(ativo_info):
             qtd_calc = round(vol_diaria_usd / risco, 2) if risco > 0 else 0.0
             val_calc = entrada_gatilho * qtd_calc
 
+            # Extração robusta do Nome e Setor com fallbacks múltiplos
+            nome_empresa = (
+                ativo_info.get("nome") or 
+                ativo_info.get("nomeEmpresa") or 
+                ativo_info.get("name") or "N/A"
+            )
+            
+            setor = (
+                ativo_info.get("setor") or 
+                ativo_info.get("setorAtivo") or 
+                ativo_info.get("sector") or 
+                ativo_info.get("Setor") or "Desconhecido"
+            )
+
+            # Fallback adicional via yfinance se vier a N/A ou Desconhecido
+            if nome_empresa == "N/A" or setor == "Desconhecido":
+                try:
+                    t_obj = yf.Ticker(ticker)
+                    info_t = t_obj.info
+                    if nome_empresa == "N/A":
+                        nome_empresa = info_t.get("longName") or info_t.get("shortName") or "N/A"
+                    if setor == "Desconhecido":
+                        setor = info_t.get("sector") or "Desconhecido"
+                except:
+                    pass
+
             return {
                 "ticker": ticker,
+                "nome_empresa": nome_empresa,
+                "setor": setor,
                 "preco_atual": round(preco, 2),
                 "rsi2": round(rsi2, 2),
                 "gatilho": entrada_gatilho,
@@ -319,12 +342,10 @@ def executar_motor():
         bloco_texto += f"🎯 SINAIS DE REVERSÃO À MÉDIA DETETADOS ({len(alertas_rsi)}):\n\n"
         for a in alertas_rsi:
             info_ativo = next((item for item in ativos_sheets if str(item.get("ticker","")).strip().upper() == a['ticker']), {})
-            nome_empresa = info_ativo.get("nome") or "N/A"
-            setor = info_ativo.get("setor") or "N/A"
             rs_score = info_ativo.get("rs_score", "N/A")
 
             bloco_texto += (
-                f"🔹 [{a['ticker']}] - {nome_empresa} ({setor})\n"
+                f"🔹 [{a['ticker']}] - {a['nome_empresa']} ({a['setor']})\n"
                 f"    - 📊 Contexto Técnico: RSI(2) em {a['rsi2']} (Sobrevendido Extremo sobre SMA200)\n"
                 f"    - ⚙️ Tática: Reversão à Média Expressa (Hit & Run 48h-72h)\n"
                 f"    - 📋 Tipo de Ordem: MARKET / LIMIT no fecho/abertura\n"
@@ -336,13 +357,11 @@ def executar_motor():
     else:
         bloco_texto += "✅ Nenhum novo sinal de RSI Drop detetado hoje.\n"
 
-    # ===================================================================
-    # GRAVAÇÃO DO FICHEIRO TEMPORÁRIO (CORRIGIDO COM A EXTENSÃO .TXT)
-    # ===================================================================
+    # GRAVAÇÃO DO FICHEIRO TEMPORÁRIO (.TXT)
     with open("comboio_rsi_rebound_temp.txt", "w", encoding="utf-8") as f:
         f.write(bloco_texto)
 
-    # ENVIO DE E-MAIL COM ÍCONES PADRONIZADOS
+    # ENVIO DE E-MAIL
     assunto_email = f"⚡🎯 tradingRelatorioIA US - MOTOR 17 RSI DROP ({datetime.now(ZoneInfo('Europe/Lisbon')).strftime('%d/%m/%Y')})"
     enviar_email(assunto_email, bloco_texto)
 
