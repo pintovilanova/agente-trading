@@ -347,7 +347,7 @@ def executar_motor():
         bloco_texto += "✅ Nenhum novo sinal de RSI Drop detetado hoje.\n"
 
     # GRAVAÇÃO DO FICHEIRO TEMPORÁRIO
-    with open("comboio_rsi_temp.txt", "w", encoding="utf-8") as f:
+    with open("comboio_rsi_rebound_temp", "w", encoding="utf-8") as f:
         f.write(bloco_texto)
 
     # ENVIO DE E-MAIL COM ÍCONES PADRONIZADOS
