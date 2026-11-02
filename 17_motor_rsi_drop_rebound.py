@@ -119,31 +119,29 @@ vol_diaria_usd = capital * pct_risco
 print(f"[CONFIG] Capital Total: ${capital:,.2f} | Risco/Trade: {pct_risco*100:.1f}% (${vol_diaria_usd:,.2f} USD)\n")
 
 # ===================================================================
-# 4. AUDITAR POSIÇÕES EM CARTEIRA (ESTRITO: ATIVA_M17 - PRE-MARKET DIRETO & EMA5)
+# 4. AUDITAR POSIÇÕES EM CARTEIRA (ESTRITO: ATIVA_M17 - PRE-MARKET FORÇADO & EMA5)
 # ===================================================================
 bloco_posicoes_ativas = ""
 
-ddef obter_preco_realtime_premarket(ticker):
+def obter_preco_realtime_premarket(ticker):
     """
-    Usa o motor intraday do yfinance (com bypass de cookies) para descarregar o gráfico
-    de 1 minuto com a flag prepost=True. Apanha a última transação de Pre-Market/After-Hours.
+    Usa o motor intraday do yfinance para descarregar o gráfico de 1 minuto 
+    com a flag prepost=True. Apanha a última transação de Pre-Market/After-Hours.
     """
     try:
-        # period="5d" garante que apanha a sessão atual mesmo à segunda-feira
+        # period="5d" garante que apanha a sessão atual mesmo após fim de semana
         df_rt = yf.download(ticker, period="5d", interval="1m", prepost=True, progress=False)
         if not df_rt.empty:
-            # Achatar MultiIndex (comportamento padrão do yfinance >= 0.2.40)
             if isinstance(df_rt.columns, pd.MultiIndex):
                 df_rt.columns = df_rt.columns.get_level_values(0)
             
-            # Pega na última transação validada (ex: às 06:30 AM EST)
             ultimo_preco_premarket = float(df_rt['Close'].dropna().iloc[-1])
             if ultimo_preco_premarket > 0:
                 return round(ultimo_preco_premarket, 2)
     except Exception as e:
         print(f"[AVISO] Falha ao extrair intraday pre-market para {ticker}: {e}")
         
-    # Fallback caso o download falhe: tenta ler a propriedade interna do objeto Ticker
+    # Fallback via fast_info
     try:
         t = yf.Ticker(ticker)
         fast = t.fast_info
@@ -164,7 +162,7 @@ def obter_dados_posicao_m17(ticker):
     preco_atual = 0.0
     ema5_atual = 0.0
     
-    # 1. CAMADA BASE DIÁRIA: Garante o cálculo da EMA5 e preço base
+    # 1. CAMADA BASE DIÁRIA: Garante o cálculo da EMA5
     try:
         df_pos = yf.download(ticker, period="1mo", interval="1d", progress=False)
         if not df_pos.empty:
@@ -179,7 +177,7 @@ def obter_dados_posicao_m17(ticker):
     except Exception as e:
         print(f"[AVISO] Falha ao obter dados diários para {ticker}: {e}")
 
-    # 2. CAMADA PRE-MARKET FORÇADA: Sobrepõe o preço com o valor em tempo real
+    # 2. CAMADA PRE-MARKET FORÇADA
     preco_realtime = obter_preco_realtime_premarket(ticker)
     if preco_realtime > 0:
         preco_atual = preco_realtime
@@ -194,7 +192,7 @@ for chave_pos, info in posicoes_ativas_dict.items():
         try:
             ticker = "AI" if chave_pos.lower() in ["c3.ai", "c3"] else chave_pos.strip().upper()
             
-            # Obtém cotação (com Pre-Market forçado) e EMA5 diária
+            # Obtém cotação (com Pre-Market forçado) e EMA5
             preco_atual, ema5_dinamica = obter_dados_posicao_m17(ticker)
             
             stop = limpar_float(info.get("stopAtual")) or limpar_float(info.get("stopLoss")) or 0.0
@@ -230,7 +228,7 @@ for chave_pos, info in posicoes_ativas_dict.items():
             print(f"[ERRO] Falha ao auditar posição ativa {chave_pos}: {e}")
 
 # ===================================================================
-# 5. MOTOR MATEMÁTICO: 2-DAY RSI DROP & REBOUND (CORRIGIDO)
+# 5. MOTOR MATEMÁTICO: 2-DAY RSI DROP & REBOUND
 # ===================================================================
 def analisar_rsi_drop(ativo_info):
     try:
@@ -254,7 +252,7 @@ def analisar_rsi_drop(ativo_info):
         df.ta.sma(length=200, append=True)
         df.ta.atr(length=14, append=True)
 
-        # Mapeamento Seguro de Colunas (Evita 'list index out of range')
+        # Mapeamento Seguro de Colunas
         cols_rsi = [c for c in df.columns if str(c).startswith('RSI_2')]
         cols_sma = [c for c in df.columns if str(c).startswith('SMA_200')]
         cols_atr = [c for c in df.columns if str(c).startswith('ATRr_') or str(c).startswith('ATR_') or str(c).startswith('ATRe_')]
@@ -356,7 +354,7 @@ def executar_motor():
     assunto_email = f"⚡🎯 tradingRelatorioIA US - MOTOR 17 RSI DROP ({datetime.now(ZoneInfo('Europe/Lisbon')).strftime('%d/%m/%Y')})"
     enviar_email(assunto_email, bloco_texto)
 
-    # 📌 NOTIFICAÇÃO TELEGRAM REINTEGRADA
+    # 📌 NOTIFICAÇÃO TELEGRAM
     debug_telegram_ativado = str(configs_dict.get("TELEGRAM_NOTIFICATIONS_DEBUG", "false")).strip().lower() in ["true", "1", "sim", "yes"]
 
     if debug_telegram_ativado or len(alertas_rsi) > 0:
