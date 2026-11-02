@@ -220,7 +220,8 @@ print("A gravar ficheiro temporário 'comboio_temp.txt'...")
 with open("comboio_temp.txt", "w", encoding="utf-8") as f:
     f.write(bloco_texto)
 
-assunto_email = f"tradingRelatorioIA US - EXTRATOR DE DADOS ({datetime.now(ZoneInfo('Europe/Lisbon')).strftime('%d/%m/%Y')})"
+# ASSUNTO DO E-MAIL COM OS ÍCONES CORRIGIDOS:
+assunto_email = f"📥⚡ tradingRelatorioIA US - EXTRATOR DE DADOS 🛡️ ({datetime.now(ZoneInfo('Europe/Lisbon')).strftime('%d/%m/%Y')})"
 enviar_email(assunto_email, bloco_texto)
 
 print("[SUCESSO] Extração e auditoria concluídas sem bloqueio de pipeline.")
