@@ -22,7 +22,7 @@ from F01_notificador_telegram import enviar_alerta
 dia_da_semana = datetime.now(ZoneInfo("Europe/Lisbon")).weekday()
 if dia_da_semana >= 5:
     print("[INFO] Fim de semana detetado. O mercado está fechado. O Disjuntor Macro vai descansar.")
-    # sys.exit(0)
+    # Permite continuar para testes ou em produção
 
 # ===================================================================
 # 1. CONFIGURAÇÕES E CREDENCIAIS
@@ -33,7 +33,7 @@ WEBHOOK_URL = os.environ.get("WEBHOOK_URL")
 SMTP_SERVER = "smtp.gmail.com"
 SMTP_PORT = 587
 
-# Função para buscar configurações do Google Sheets (para ler o TELEGRAM_NOTIFICATIONS)
+# Função para buscar configurações do Google Sheets
 def buscar_configs_sheets():
     if not WEBHOOK_URL: 
         return {}
@@ -73,18 +73,17 @@ def enviar_alerta_macro(assunto, corpo):
         except Exception as e:
             print(f"[ERRO] Falha ao enviar email macro: {e}")
 
-    # 2. Envio por Telegram (Respeitando o interruptor do Google Sheets)
+    # 2. Envio por Telegram
     telegram_ativado = str(configs_dict.get("TELEGRAM_NOTIFICATIONS", "true")).strip().lower() in ["true", "1", "sim", "yes"]
     
     if not telegram_ativado:
-        print("[INFO] Notificações de Telegram desativadas no Google Sheets (TELEGRAM_NOTIFICATIONS = false).")
+        print("[INFO] Notificações de Telegram desativadas no Google Sheets.")
     else:
         print("A enviar notificação macro para o Telegram...")
-        # Mensagem simples a avisar que o processo vai iniciar
         mensagem_tg = "🛡️ *DISJUNTOR MACRO US*\n\n⏳ O processo de auditoria macro vai iniciar..."
         enviar_alerta(mensagem_tg)
 
-# Função robusta de extração para evitar bloqueios do Yahoo Finance
+# Função robusta de extração
 def get_yf_data(ticker, period="1y"):
     for _ in range(3):
         try:
@@ -112,7 +111,8 @@ try:
     
     if df_spy.empty or df_vix.empty:
         print("[ERRO CRÍTICO] Não foi possível obter dados macro base (SPY/VIX).")
-        sys.exit(1)
+        # Permite que a pipeline continue para gerir as posições ativas
+        sys.exit(0)
 
     motivos_bloqueio = []
     alertas_amarelos = []
@@ -137,7 +137,6 @@ try:
     if not df_vix3m.empty:
         vix3m_hoje = float(df_vix3m['Close'].iloc[-1])
         razao_vix = vix_hoje / vix3m_hoje
-        # Se o VIX > VIX3M (Rácio >= 1.0), o mercado está em Backwardation (Estresse Imediato Máximo)
         if razao_vix >= 1.0:
             motivos_bloqueio.append(f"Curva VIX Invertida (Backwardation). VIX ({vix_hoje:.2f}) > VIX3M ({vix3m_hoje:.2f}). Liquidez institucional a secar.")
         elif razao_vix > 0.90:
@@ -148,7 +147,6 @@ try:
         df_credito = pd.DataFrame()
         df_credito['HYG'] = df_hyg['Close']
         df_credito['IEF'] = df_ief['Close']
-        # Criação de um rácio de apetite por risco (Lixo vs Segurança)
         df_credito['Ratio'] = df_credito['HYG'] / df_credito['IEF']
         df_credito['Ratio_SMA50'] = df_credito['Ratio'].rolling(window=50).mean()
         df_credito = df_credito.dropna()
@@ -156,8 +154,6 @@ try:
         if not df_credito.empty:
             ratio_atual = float(df_credito['Ratio'].iloc[-1])
             ratio_sma50 = float(df_credito['Ratio_SMA50'].iloc[-1])
-            
-            # Se o rácio cai mais de 1.5% abaixo da sua média móvel de 50 dias, há fuga maciça para segurança.
             if ratio_atual < (ratio_sma50 * 0.985):
                 motivos_bloqueio.append(f"Estresse de Crédito Institucional detetado. Rácio HYG/IEF caiu abaixo do suporte crítico.")
 
@@ -165,30 +161,36 @@ try:
     # 3. VEREDICTO E AÇÃO DO DISJUNTOR (COM PAINEL VISUAL)
     # ===================================================================
     
-    # Função auxiliar para desenhar o termómetro
     def desenhar_barra(valor, maximo=100, tamanho=10):
         preenchido = int((valor / maximo) * tamanho)
-        preenchido = min(max(preenchido, 0), tamanho) # Limita entre 0 e o tamanho máximo
+        preenchido = min(max(preenchido, 0), tamanho)
         return f"[{'█' * preenchido}{'░' * (tamanho - preenchido)}]"
 
     if motivos_bloqueio:
-        corpo_email = "🚨 [DISJUNTOR MACRO ATIVADO] - EXECUÇÃO DE PIPELINE ABORTADA\n\n"
-        corpo_email += "O Motor Macro detetou hostilidades sistémicas no mercado norte-americano.\nPara proteger o capital, a abertura de novas posições foi totalmente bloqueada hoje.\n\n"
+        corpo_email = "🚨 [ALERTA MACRO] - MERCADO HOSTIL (NOVAS COMPRAS BLOQUEADAS)\n\n"
+        corpo_email += "O Motor Macro detetou hostilidades sistémicas no mercado norte-americano.\n"
+        corpo_email += "⚠️ ATENÇÃO: As novas posições estão bloqueadas, mas a pipeline vai continuar a rodar para auditar e gerir as POSIÇÕES ATIVAS em segurança.\n\n"
         corpo_email += "MOTIVOS CRÍTICOS DETETADOS:\n"
         for m in motivos_bloqueio:
             corpo_email += f"❌ {m}\n"
         
         corpo_email += f"\nData/Hora: {datetime.now(ZoneInfo('Europe/Lisbon')).strftime('%d/%m/%Y %H:%M:%S')}"
-        enviar_alerta_macro("tradingRelatorioIA US - 🚨 BLOQUEIO MACRO (DISJUNTOR ATIVO)", corpo_email)
-        print(f"\n[BLOQUEIO] Condições macro hostis detetadas. A abortar pipeline.")
-        sys.exit(1)  
+        enviar_alerta_macro("tradingRelatorioIA US - 🚨 ALERTA MACRO (NOVAS COMPRAS BLOQUEADAS)", corpo_email)
+        
+        print(f"\n[ALERTA MACRO] Condições macro hostis. Novas compras bloqueadas. Pipeline segue para gestão de ativas.")
+        
+        # Gerar ficheiro temporário para leitura do Orquestrador IA
+        with open("comboio_macro_temp.txt", "w", encoding="utf-8") as f:
+            f.write(corpo_email)
+            
+        # Saída limpa (0) para não abortar os jobs seguintes do GitHub Actions
+        sys.exit(0)  
 
     else:
         print("\n[OK] Mercado Saudável. Disjuntor Macro em verde. Pipeline autorizada.")
         
         distancia_sma = ((preco_spy - sma200_spy) / sma200_spy) * 100
-        
-        # Rácio VIX com fallback caso o VIX3M falhe
+        razao_vix = vix_hoje / vix3m_hoje if vix3m_hoje else 0
         racio_str = f"{razao_vix:.2f}" if vix3m_hoje else "N/A"
         racio_pct = (razao_vix * 100) if vix3m_hoje else 0
         
@@ -221,8 +223,12 @@ try:
         corpo_verde += f"Data/Hora de Execução: {datetime.now(ZoneInfo('Europe/Lisbon')).strftime('%d/%m/%Y %H:%M:%S')}"
         
         enviar_alerta_macro("tradingRelatorioIA US - ✅ MERCADO SAUDÁVEL", corpo_verde)
+        
+        with open("comboio_macro_temp.txt", "w", encoding="utf-8") as f:
+            f.write(corpo_verde)
+            
         sys.exit(0) 
 
 except Exception as e:
     print(f"[ERRO CRÍTICO] Falha na auditoria macro: {e}")
-    sys.exit(1)
+    sys.exit(0)
