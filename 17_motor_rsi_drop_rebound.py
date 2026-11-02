@@ -124,12 +124,40 @@ print(f"[CONFIG] Capital Total: ${capital:,.2f} | Risco/Trade: {pct_risco*100:.1
 bloco_posicoes_ativas = ""
 
 def obter_dados_posicao_m17(ticker):
-    """Obtém o preço em tempo real e calcula a EMA5 diária para o alvo dinâmico"""
+    """Obtém o preço em tempo real (dando prioridade total ao Pre-Market) e calcula a EMA5 diária"""
     preco_atual = 0.0
     ema5_atual = 0.0
     
     try:
-        # 1. Descarrega dados diários recentes para calcular a EMA5
+        t = yf.Ticker(ticker)
+        
+        # 1. PRIORIDADE ABSOLUTA: Tenta capturar preço em Pre-Market / Extensão
+        try:
+            fast = t.fast_info
+            p_pre = getattr(fast, 'pre_market_price', None)
+            p_last = getattr(fast, 'last_price', None)
+            
+            if p_pre and not np.isnan(p_pre) and p_pre > 0:
+                preco_atual = round(float(p_pre), 2)
+            elif p_last and not np.isnan(p_last) and p_last > 0:
+                preco_atual = round(float(p_last), 2)
+        except Exception:
+            pass
+
+        # 2. SE O PRE-MARKET NÃO VEIO VIA FAST_INFO, TENTA O INTRADAY COM PREPOST=TRUE
+        if preco_atual == 0.0:
+            try:
+                df_intra = yf.download(ticker, period="2d", interval="1m", prepost=True, progress=False)
+                if not df_intra.empty:
+                    if isinstance(df_intra.columns, pd.MultiIndex):
+                        df_intra.columns = df_intra.columns.droplevel(1)
+                    p_intra = float(df_intra['Close'].dropna().iloc[-1])
+                    if p_intra > 0:
+                        preco_atual = round(p_intra, 2)
+            except Exception:
+                pass
+
+        # 3. CÁLCULO DA EMA5 DIÁRIA (E FALLBACK DE PREÇO SE TUDO O RESTO FALHAR)
         df_pos = yf.download(ticker, period="1mo", interval="1d", progress=False)
         if not df_pos.empty:
             if isinstance(df_pos.columns, pd.MultiIndex):
@@ -139,61 +167,15 @@ def obter_dados_posicao_m17(ticker):
             if len(df_pos) >= 5:
                 df_pos['EMA5'] = df_pos['Close'].ewm(span=5, adjust=False).mean()
                 ema5_atual = round(float(df_pos['EMA5'].iloc[-1]), 2)
-                preco_atual = round(float(df_pos['Close'].iloc[-1]), 2)
-
-        # 2. Tenta obter preço em tempo real (Pre-Market / Last Price) via fast_info
-        t = yf.Ticker(ticker)
-        fast = t.fast_info
-        preco_fast = getattr(fast, 'last_price', None) or getattr(fast, 'pre_market_price', None)
-        if preco_fast and not np.isnan(preco_fast) and preco_fast > 0:
-            preco_atual = round(float(preco_fast), 2)
+                
+                # Só usa o fecho diário se o Pre-Market não tiver sido encontrado
+                if preco_atual == 0.0:
+                    preco_atual = round(float(df_pos['Close'].iloc[-1]), 2)
 
     except Exception as e:
-        print(f"[AVISO] Falha ao obter dados estendidos para {ticker}: {e}")
+        print(f"[AVISO] Falha ao obter dados para {ticker}: {e}")
         
     return preco_atual, ema5_atual
-
-for chave_pos, info in posicoes_ativas_dict.items():
-    if not isinstance(info, dict): continue
-    status = str(info.get("status", "")).strip().upper()
-    
-    if status == "ATIVA_M17":
-        try:
-            ticker = "AI" if chave_pos.lower() in ["c3.ai", "c3"] else chave_pos.strip().upper()
-            
-            # Obtém cotação em tempo real e a EMA5 diária
-            preco_atual, ema5_dinamica = obter_dados_posicao_m17(ticker)
-            
-            stop = limpar_float(info.get("stopAtual")) or limpar_float(info.get("stopLoss")) or 0.0
-            entrada = limpar_float(info.get("precoEntrada")) or preco_atual
-            
-            # Tenta ler TP fixo do Sheets; se for 0.0/None, usa a EMA5 calculada
-            tp_sheets = (
-                limpar_float(info.get("alvoTp")) or 
-                limpar_float(info.get("takeProfit")) or 
-                limpar_float(info.get("alvo_tp")) or 
-                0.0
-            )
-            
-            alvo_efetivo = tp_sheets if tp_sheets > 0 else ema5_dinamica
-            label_alvo = f"${alvo_efetivo}" if tp_sheets > 0 else f"${alvo_efetivo} (EMA5)"
-            
-            qtd = info.get("quantidade", "N/A")
-            
-            if preco_atual > 0:
-                if alvo_efetivo > 0 and preco_atual >= alvo_efetivo:
-                    acao = f"🎯 ALVO ALCANÇADO ({label_alvo})! Recomendado FECHAR POSIÇÃO com Lucro (WIN)."
-                elif stop > 0 and preco_atual <= stop:
-                    acao = f"🚨 STOP LOSS ATINGIDO (${stop})! Recomendado LIQUIDAR POSIÇÃO (LOSS)."
-                else:
-                    acao = f"⏳ MANTER POSIÇÃO (RSI Rebound). Alvo: {label_alvo} | Stop: ${stop}."
-                
-                bloco_posicoes_ativas += (
-                    f"📌 [{status}] {ticker} ({chave_pos}) | Qtd: {qtd} | Entrada: ${entrada} | "
-                    f"Atual: ${preco_atual} | {acao}\n"
-                )
-        except Exception as e:
-            print(f"[ERRO] Falha ao auditar posição ativa {chave_pos}: {e}")
 
 # ===================================================================
 # 5. MOTOR MATEMÁTICO: 2-DAY RSI DROP & REBOUND (CORRIGIDO)
