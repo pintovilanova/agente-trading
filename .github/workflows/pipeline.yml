@@ -160,8 +160,15 @@ jobs:
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
         run: python 15_motor_profit_harvest.py
       - name: 🛡️ 16 - Executar Motor Volatility Regime & VIX
+        continue-on-error: true
+        env:
+          WEBHOOK_URL: ${{ secrets.WEBHOOK_URL }}
+          TELEGRAM_BOT_TOKEN_GERAL: ${{ secrets.TELEGRAM_BOT_TOKEN_GERAL }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
         run: python 16_motor_vix_volatility_regime.py
-      - name: ⚡17 - Executar Motor 2-Day RSI Drop & Rebound
+
+      - name: ⚡ 17 - Executar Motor 2-Day RSI Drop & Rebound
+        continue-on-error: true
         env:
           WEBHOOK_URL: ${{ secrets.WEBHOOK_URL }}
           EMAIL_USER: ${{ secrets.EMAIL_USER }}
