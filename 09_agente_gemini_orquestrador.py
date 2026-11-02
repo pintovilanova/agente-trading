@@ -1,3 +1,7 @@
+# ===================================================================
+# SISTEMA DE TRADING INSTITUCIONAL - AGENTE IA ORQUESTRADOR (PIPELINE)
+# ===================================================================
+
 import os
 import sys
 import time
@@ -23,10 +27,6 @@ try:
 except ImportError:
     import google.generativeai as genai
     USE_NEW_GENAI = False
-
-# ===================================================================
-# SISTEMA DE TRADING INSTITUCIONAL - AGENTE IA ORQUESTRADOR (PIPELINE)
-# ===================================================================
 
 # 1. CREDENCIAIS (GitHub Secrets)
 EMAIL_USER = os.environ.get("EMAIL_USER")
@@ -239,24 +239,25 @@ if not veio_do_email:
     enviar_email(assunto_backup, conteudo_bruto_total)
 
 # ===================================================================
-# PROMPT DE ORQUESTRAÇÃO COM TABELA DE SÍNTESE OBRIGATÓRIA
+# PROMPT DE ORQUESTRAÇÃO COM DIRETIVA ANTI-OMISSÃO OBRIGATÓRIA
 # ===================================================================
 prompt_orquestrador = f"""
 És o Analista Quantitativo Principal (Agente Orquestrador).
 Abaixo estão os relatórios em bruto e os dados gerados dinamicamente pelos Extratores de Mercado (US e Europa) e pelos vários Motores de Estratégia no fecho do mercado de hoje.
 
-A tua missão é ler integralmente este conteúdo, processar todos os ativos e compilar um ÚNICO relatório consolidado, limpo, detalhado e altamente profissional para o Gestor de Conta aprovar na corretora.
+A tua missão é ler integralmente este conteúdo, processar **TODOS** os ativos de **TODOS** os motores e compilar um ÚNICO relatório consolidado, limpo, detalhado e altamente profissional para o Gestor de Conta aprovar na corretora.
 
-🚨 REGRAS ESTRITAS DE ESTRUTURA E FECHO 🚨
+🚨 REGRAS ESTRITAS DE ESTRUTURA, INTEGRIDADE E FECHO 🚨
 
 1. REGIME DE VOLATILIDADE VIX (MOTOR 16): Lê a diretriz do Motor 16 e indica explicitamente no topo do relatório o Regime do VIX. Aplica a percentagem de lote indicada pelo Motor 16 (100%, 75%, 50% ou 0%) ao calcular o tamanho e alocação de TODAS as novas sugestões de entrada.
 2. PRIORIDADE ABSOLUTA - MOTOR 21 (CONFLUÊNCIA SUPREMA):
    - Se o Motor 21 reportar "SINAIS DE ALTA PROBABILIDADE (SNIPER)", DEVES OBRIGATORIAMENTE criar um destaque gigante logo no topo (após o VIX) intitulado "🚨🚨 ALERTA SNIPER: CONFLUÊNCIA SUPREMA DETETADA 🚨🚨".
    - O Motor 21 é o modelo quantitativo absoluto com Risco/Retorno 3:1. Dá-lhe a máxima importância.
-3. ZERO CRIATIVIDADE DE DADOS: Não inventes preços, tickers, stops ou tamanhos de posição. Utiliza unicamente e na íntegra os dados fornecidos.
-4. VETO DE SOBREPOSIÇÃO: Posições ativas na carteira (com 'PosicaoAtiva: SIM') NÃO PODEM ter novas ordens de compra sugeridas.
-5. SÍNTESE ESTRATÉGICA (MOTORES 18, 19 e 20):
-   - Se existirem sinais nestes motores de curto prazo (Momentum Burst, Squeeze Breakout, Pullback EMA 20), agrupa-os de forma lógica e organizada na secção central do relatório, indicando claramente a tática, Entrada, Stop Loss e Alvo TP de 2:1.
+3. ⚠️ DIRETIVA ANTI-OMISSÃO ESTRITA (MOTOR 17 & REVERSÃO):
+   - Os dados fornecidos no Motor 17 (comboio_rsi_rebound_temp.txt) contêm múltiplos sinais detetados (ex: ABNB, ANET, CRM, CSCO, DBX, DDOG, DELL, HPE, MDB, MRVL, MSFT, NET, NVDA, PLTR, SHOP, TEAM, U, TSM, SNOW, FTNT, etc.).
+   - É ESTRITAMENTE PROIBIDO resumir, omitir, truncar ou ignorar qualquer ativo presente nos relatórios dos motores. **DEVES LISTAR INTEGRALMENTE TODOS OS ATIVOS ACIONADOS NO MOTOR 17 NA SECÇÃO CORRESPONDENTE.**
+4. ZERO CRIATIVIDADE DE DADOS: Não inventes preços, tickers, stops ou tamanhos de posição. Utiliza unicamente e na íntegra os dados fornecidos.
+5. VETO DE SOBREPOSIÇÃO: Posições ativas na carteira (com 'PosicaoAtiva: SIM' ou detidas) NÃO PODEM ter novas ordens de compra sugeridas.
 6. TABELA FINAL OBRIGATÓRIA (SÍNTESE DE ORDENS):
    É ESTRITAMENTE OBRIGATÓRIO terminar o relatório com uma secção final intitulada "## 12. SÍNTESE DE ORDENS PARA APROVAÇÃO DO GESTOR DE CONTA" contendo uma tabela Markdown formatada exatamente com esta estrutura:
 
@@ -266,7 +267,7 @@ A tua missão é ler integralmente este conteúdo, processar todos os ativos e c
    - Inclui TODAS as ordens de colheita parcial de lucro a 2R (Profit Harvest) geradas pelo Motor 15 no topo da tabela.
    - Inclui TODAS as ações ativas em carteira que exijam fecho ou ajuste de stop (Auditorias de posições ativas dos Motores).
    - Inclui TODAS as novas ordens aprovadas ajustadas pelo Lote Máximo do VIX (Motor 16).
-   - Inclui os sinais do Motor 17, 18, 19 e 20 com os respetivos alvos TP e dados de entrada exatos.
+   - **Inclui TODOS os sinais gerados pelo Motor 17 (RSI Drop & Rebound), Motor 18, Motor 19 e Motor 20 com os respetivos alvos TP e dados de entrada exatos.**
    - Inclui os sinais do Motor 21 com nota explícita de "SNIPER 3:1" nas Notas Táticas.
    - Respeita rigorosamente a moeda de cada ativo (USD ou EUR).
 
@@ -314,7 +315,7 @@ if not relatorio_final:
     print("\n[ALERTA DE IA] Não foi possível obter resposta de nenhum modelo Gemini.")
     assunto_erro = f"tradingRelatorioIA - ⚠️ AVISO: FALHA NA IA ({data_hoje})"
     corpo_erro = "Ocorreu um erro ao comunicar com a API do Gemini."
-    enviar_email(assunto_erro, corpo_erro)
+    email_status = enviar_email(assunto_erro, corpo_erro) # Citação:
     sys.exit(0)
 
 # ===================================================================
