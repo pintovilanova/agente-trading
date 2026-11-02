@@ -58,20 +58,7 @@ jobs:
           TELEGRAM_BOT_TOKEN_GERAL: ${{ secrets.TELEGRAM_BOT_TOKEN_GERAL }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
         run: python 01_extrator_europa.py
-
-      # ==========================================================
-      # 3. MOTORES DE ESTRATÉGIA (Com tolerância a falhas)
-      # ==========================================================
-      - name: 🧭 08 - Executar Motor RS Score & Rotação Setorial
-        continue-on-error: true
-        env:
-          WEBHOOK_URL: ${{ secrets.WEBHOOK_URL }}
-          EMAIL_USER: ${{ secrets.EMAIL_USER }}
-          EMAIL_PASS: ${{ secrets.EMAIL_PASS }}
-          TELEGRAM_BOT_TOKEN_GERAL: ${{ secrets.TELEGRAM_BOT_TOKEN_GERAL }}
-          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
-        run: python 08_motor_rs_score.py
-
+      
       - name: 🚀 07 - Executar Motor Breakout (VCP)
         continue-on-error: true
         env:
