@@ -61,7 +61,6 @@ def limpar_float(val):
 def buscar_dados_completos():
     print("A carregar Watchlist, Posições Ativas e Configs a partir do Google Sheets...")
     if not WEBHOOK_URL: 
-        print("[ERRO] WEBHOOK_URL não configurado.")
         return [], {}, {}
     try:
         url_alvo = WEBHOOK_URL if "?" in WEBHOOK_URL else f"{WEBHOOK_URL}?aba=Analise Compra"
@@ -163,6 +162,10 @@ for ticker, info in posicoes_ativas_dict.items():
                 qtd = info.get("quantidade", "N/A")
                 maxima_efetiva = max(maxima_hoje, preco_atual)
                 
+                # REFORÇO: Se o TP estiver a 0 nas posições ativas, calcula automaticamente 2R com base na entrada e stop
+                if alvo_tp <= 0 and stop > 0 and entrada > stop:
+                    alvo_tp = round(entrada + ((entrada - stop) * 2.0), 2)
+                
                 if alvo_tp > 0 and maxima_efetiva >= alvo_tp:
                     acao = f"🎯 ALVO ALCANÇADO (TP em ${alvo_tp})! Recomendado FECHAR POSIÇÃO com Lucro (WIN)."
                 elif stop > 0 and minima_hoje <= stop:
@@ -191,7 +194,6 @@ def analisar_momentum_burst(ativo_info):
             ativo_info.get("name") or "N/A"
         )
         
-        # Tenta várias chaves do Sheets para o setor
         setor = (
             ativo_info.get("setor") or 
             ativo_info.get("setorAtivo") or 
@@ -201,7 +203,7 @@ def analisar_momentum_burst(ativo_info):
         setor = str(setor).strip()
 
         if not ticker or ticker == "#N/A" or ticker == "NONE": return None
-        if ticker in posicoes_ativas_dict: return None # Ignora se já estiver em carteira
+        if ticker in posicoes_ativas_dict: return None
         if ticker == "BRK-A": ticker = "BRK-B"
 
         time.sleep(random.uniform(0.8, 1.8))
@@ -212,7 +214,6 @@ def analisar_momentum_burst(ativo_info):
             ticker_obj = yf.Ticker(ticker)
             info_dados = ticker_obj.info
             
-            # Fallback de setor via yfinance caso esteja ausente no Sheets
             if not setor or setor.lower() in ["desconhecido", "n/a", "", "none", "#n/a"]:
                 setor = info_dados.get('sector') or obter_setor_yf(ticker)
 
@@ -274,6 +275,7 @@ def analisar_momentum_burst(ativo_info):
             entrada_gatilho = round(maximo_hoje * 1.002, 2)
             stop_loss = round(min(minimo_hoje * 0.99, entrada_gatilho - (atr * 1.5)), 2)
             
+            # CÁLCULO ROBUSTO DO ALVO TP (Garante proporção de Risco/Retorno 2:1)
             risco = entrada_gatilho - stop_loss
             alvo_tp = round(entrada_gatilho + (risco * 2.0), 2)
 
