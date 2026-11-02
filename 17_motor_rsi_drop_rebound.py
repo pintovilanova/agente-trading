@@ -119,16 +119,63 @@ vol_diaria_usd = capital * pct_risco
 print(f"[CONFIG] Capital Total: ${capital:,.2f} | Risco/Trade: {pct_risco*100:.1f}% (${vol_diaria_usd:,.2f} USD)\n")
 
 # ===================================================================
-# 4. AUDITAR POSIÇÕES EM CARTEIRA (ESTRITO: ATIVA_M17 - BLINDAGEM DE PRE-MARKET E EMA5)
+# 4. AUDITAR POSIÇÕES EM CARTEIRA (ESTRITO: ATIVA_M17 - PRE-MARKET DIRETO & EMA5)
 # ===================================================================
 bloco_posicoes_ativas = ""
 
+def obter_preco_realtime_premarket(ticker):
+    """
+    Obtém a cotação exata em tempo real (dando prioridade ao Pre-Market / After-Hours)
+    através do endpoint de Quote da Yahoo Finance API.
+    """
+    url = f"https://query1.finance.yahoo.com/v6/finance/quote?symbols={ticker}"
+    headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)'}
+    
+    try:
+        resp = requests.get(url, headers=headers, timeout=5)
+        if resp.status_code == 200:
+            dados = resp.json()
+            result = dados.get('quoteResponse', {}).get('result', [])
+            if result:
+                q = result[0]
+                # 1. Prioridade: Pre-Market
+                p_pre = q.get('preMarketPrice')
+                if p_pre and float(p_pre) > 0:
+                    return round(float(p_pre), 2)
+                
+                # 2. Prioridade: Post-Market / After-Hours
+                p_post = q.get('postMarketPrice')
+                if p_post and float(p_post) > 0:
+                    return round(float(p_post), 2)
+                
+                # 3. Regular Market Price
+                p_reg = q.get('regularMarketPrice')
+                if p_reg and float(p_reg) > 0:
+                    return round(float(p_reg), 2)
+    except Exception as e:
+        print(f"[AVISO] Falha na consulta direta de Quote para {ticker}: {e}")
+        
+    # Fallback via fast_info do yfinance
+    try:
+        t = yf.Ticker(ticker)
+        fast = t.fast_info
+        p_pre = getattr(fast, 'pre_market_price', None)
+        p_last = getattr(fast, 'last_price', None)
+        if p_pre and not np.isnan(p_pre) and p_pre > 0:
+            return round(float(p_pre), 2)
+        elif p_last and not np.isnan(p_last) and p_last > 0:
+            return round(float(p_last), 2)
+    except Exception:
+        pass
+        
+    return 0.0
+
 def obter_dados_posicao_m17(ticker):
-    """Obtém o preço (prioridade Pre-Market) e a EMA5 diária sem risco de zerar os dados"""
+    """Obtém o preço em tempo real (Pre-Market forçado) e calcula a EMA5 diária"""
     preco_atual = 0.0
     ema5_atual = 0.0
     
-    # 1. CAMADA BASE DIÁRIA (Garante sempre EMA5 e Preço Base do Fecho)
+    # 1. CAMADA BASE DIÁRIA: Garante o cálculo da EMA5 e preço base
     try:
         df_pos = yf.download(ticker, period="1mo", interval="1d", progress=False)
         if not df_pos.empty:
@@ -141,22 +188,13 @@ def obter_dados_posicao_m17(ticker):
                 ema5_atual = round(float(df_pos['EMA5'].iloc[-1]), 2)
                 preco_atual = round(float(df_pos['Close'].iloc[-1]), 2)
     except Exception as e:
-        print(f"[AVISO] Falha ao obter diário para {ticker}: {e}")
+        print(f"[AVISO] Falha ao obter dados diários para {ticker}: {e}")
 
-    # 2. CAMADA PRE-MARKET (Tenta sobrepor o preço com o valor fora de horas)
-    try:
-        t = yf.Ticker(ticker)
-        fast = t.fast_info
-        p_pre = getattr(fast, 'pre_market_price', None)
-        p_last = getattr(fast, 'last_price', None)
-        
-        if p_pre and not np.isnan(p_pre) and p_pre > 0:
-            preco_atual = round(float(p_pre), 2)
-        elif p_last and not np.isnan(p_last) and p_last > 0:
-            preco_atual = round(float(p_last), 2)
-    except Exception:
-        pass # Se falhar o Pre-Market, mantém com segurança o preço obtido na Camada 1
-        
+    # 2. CAMADA PRE-MARKET FORÇADA: Sobrepõe o preço com o valor em tempo real
+    preco_realtime = obter_preco_realtime_premarket(ticker)
+    if preco_realtime > 0:
+        preco_atual = preco_realtime
+
     return preco_atual, ema5_atual
 
 for chave_pos, info in posicoes_ativas_dict.items():
@@ -167,7 +205,7 @@ for chave_pos, info in posicoes_ativas_dict.items():
         try:
             ticker = "AI" if chave_pos.lower() in ["c3.ai", "c3"] else chave_pos.strip().upper()
             
-            # Obtém cotação (com Pre-Market) e EMA5
+            # Obtém cotação (com Pre-Market forçado) e EMA5 diária
             preco_atual, ema5_dinamica = obter_dados_posicao_m17(ticker)
             
             stop = limpar_float(info.get("stopAtual")) or limpar_float(info.get("stopLoss")) or 0.0
@@ -185,7 +223,6 @@ for chave_pos, info in posicoes_ativas_dict.items():
             label_alvo = f"${alvo_efetivo}" if tp_sheets > 0 else f"${alvo_efetivo} (EMA5)"
             qtd = info.get("quantidade", "N/A")
             
-            # Se mesmo assim o preço for 0.0, força a entrada como fallback de apresentação
             if preco_atual == 0.0:
                 preco_atual = entrada
 
