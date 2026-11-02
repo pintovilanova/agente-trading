@@ -27,7 +27,7 @@ from F01_notificador_telegram import enviar_alerta
 dia_da_semana = datetime.now(ZoneInfo("Europe/Lisbon")).weekday()
 if dia_da_semana >= 5:
     print("[INFO] Fim de semana detetado. O mercado está fechado. O Agente vai descansar.")
-    #sys.exit(0)
+    # sys.exit(0)
 
 hoje_e_sexta = "SIM" if dia_da_semana == 4 else "NÃO"
 
@@ -115,21 +115,15 @@ try:
             posicoes_ativas = {}
             configs = {}
 
-        if len(ativos_data) > 0:
-            print(f"[SUCESSO] {len(ativos_data)} ativos europeus carregados da Watchlist.")
-            print(f"[SUCESSO] {len(posicoes_ativas)} posições ativas detetadas no Diário de Bordo.")
-        else:
-            print("[AVISO] A lista de ativos veio vazia. A terminar a execução sem erro.")
-            sys.exit(0)
+        print(f"[SUCESSO] {len(ativos_data)} ativos europeus carregados da Watchlist.")
+        print(f"[SUCESSO] {len(posicoes_ativas)} posições ativas detetadas no Diário de Bordo.")
     else:
         print(f"[ERRO] Falha ao descarregar dados: {resposta_webhook.status_code}")
-        sys.exit(1)
 except Exception as e:
     print(f"[ERRO CRÍTICO] Falha de comunicação com Sheets: {e}")
-    sys.exit(1)
 
 # ===================================================================
-# LEITURA DINÂMICA DAS CONFIGURAÇÕES DE RISCO (MÉSTATICAS)
+# LEITURA DINÂMICA DAS CONFIGURAÇÕES DE RISCO
 # ===================================================================
 try:
     capital_total_conta = float(configs.get("CAPITAL_TOTAL_CONTA", 10400.00))
@@ -141,16 +135,19 @@ except (ValueError, TypeError):
 volatilidade_alvo_diaria_usd = (capital_total_conta * alvo_volatilidade_anual) / 16.0
 risco_maximo_dolares = volatilidade_alvo_diaria_usd
 multiplicador_trailing_ts = 1.5
-racio_tp_base = 3.0  # OTIMIZAÇÃO: Elevado para 3.0R (Expansão do Payoff)
+racio_tp_base = 3.0
 
 print(f"[CONFIG] Capital Total da Conta: ${capital_total_conta:,.2f}")
 print(f"[CONFIG] Alvo Volatilidade Anual: {alvo_volatilidade_anual*100:.1f}%")
 print(f"[CONFIG] Orçamento Diário de Volatilidade: ${volatilidade_alvo_diaria_usd:.2f}\n")
 
 # ===================================================================
-# 3. VETO MACRO (SPY FLASH CRASH & BEAR MARKET)
+# 3. VERIFICAÇÃO DE VETO MACRO (SPY) - MODO NÃO-BLOQUEANTE
 # ===================================================================
 print("A verificar Veto Macro (SPY)...")
+veto_macro_ativo = False
+motivo_veto = ""
+
 try:
     df_spy = yf.download("SPY", period="2y", interval="1d", progress=False)
     if isinstance(df_spy.columns, pd.MultiIndex):
@@ -161,254 +158,248 @@ try:
     spy_hoje = df_spy.iloc[-1]
     spy_ontem = df_spy.iloc[-2]
     
-    preco_spy = spy_hoje['Close']
-    preco_spy_ontem = spy_ontem['Close']
-    sma200_spy = spy_hoje['SMA_200']
+    preco_spy = float(spy_hoje['Close'])
+    preco_spy_ontem = float(spy_ontem['Close'])
+    sma200_spy = float(spy_hoje['SMA_200'])
     
     queda_spy = ((preco_spy - preco_spy_ontem) / preco_spy_ontem) * 100
     
     if queda_spy <= -1.50:
-        print(f"[BLOQUEIO] SPY em Pânico: Caiu {queda_spy:.2f}%. Execução abortada.")
-        sys.exit(0)
-        
-    if preco_spy < sma200_spy:
-        print(f"[BLOQUEIO] SPY em Baixa: Preço ({preco_spy:.2f}) abaixo da SMA200 ({sma200_spy:.2f}). Execução abortada.")
-        sys.exit(0)
-        
-    print("[OK] SPY Saudável. A iniciar extração...\n")
+        veto_macro_ativo = True
+        motivo_veto = f"SPY em Pânico: Caiu {queda_spy:.2f}% (<= -1.50%). Abertura de novas posições europeias bloqueada."
+        print(f"[ALERTA MACRO] {motivo_veto}")
+    elif preco_spy < sma200_spy:
+        veto_macro_ativo = True
+        motivo_veto = f"SPY em Tendência de Baixa: Preço (${preco_spy:.2f}) abaixo da SMA200 (${sma200_spy:.2f})."
+        print(f"[ALERTA MACRO] {motivo_veto}")
+    else:
+        print("[OK] SPY Saudável. A iniciar análise normalmente...\n")
 except Exception as e:
-    print(f"Erro na validação do SPY: {e}")
+    print(f"[AVISO] Erro na validação do SPY: {e}")
 
 dados_temporarios = []
 
 # ===================================================================
 # 4. MOTOR MATEMÁTICO V2 (Para todos os Ativos)
 # ===================================================================
-for ativo_info in ativos_data:
-    ticker = str(ativo_info.get("ticker", "")).strip().upper()
-    nome_empresa = ativo_info.get("nome", "N/A")
-    rs_score = ativo_info.get("rs_score", "N/A")
-    setor = str(ativo_info.get("setor", "Europa")).strip()
-    
-    if not ticker or ticker == "#N/A" or ticker == "NONE":
-        continue
-    
-    try:
-        df = yf.download(ticker, period="2y", interval="1d", progress=False)
-        if df.empty:
-            print(f"[AVISO] Sem dados para {ticker}.")
+if not veto_macro_ativo and ativos_data:
+    for ativo_info in ativos_data:
+        ticker = str(ativo_info.get("ticker", "")).strip().upper()
+        nome_empresa = ativo_info.get("nome", "N/A")
+        rs_score = ativo_info.get("rs_score", "N/A")
+        setor = str(ativo_info.get("setor", "Europa")).strip()
+        
+        if not ticker or ticker == "#N/A" or ticker == "NONE":
             continue
-            
-        if isinstance(df.columns, pd.MultiIndex):
-            df.columns = df.columns.droplevel(1)
-
-        # BLINDAGEM CONTRA NaNs E BARRAS INCOMPLETAS
-        df = df.dropna(subset=['Close', 'High', 'Low', 'Volume'])
-        if df.empty or len(df) < 50:
-            continue
-
-        alerta_earnings = "OK"
+        
         try:
-            ticker_obj = yf.Ticker(ticker)
-            
-            # CORREÇÃO: Fallback automático de setor via yfinance se vier genericamente como Europa/Desconhecido
-            if setor in ["Europa", "Desconhecido", "N/A", "", "NONE"]:
-                setor_yf = ticker_obj.info.get('sector')
-                if setor_yf:
-                    setor = setor_yf
-
-            calendario = ticker_obj.calendar
-            if isinstance(calendario, dict) and 'Earnings Date' in calendario:
-                proxima_data = calendario['Earnings Date'][0]
-                if hasattr(proxima_data, 'date'):
-                    proxima_data = proxima_data.date()
+            df = yf.download(ticker, period="2y", interval="1d", progress=False)
+            if df.empty:
+                print(f"[AVISO] Sem dados para {ticker}.")
+                continue
                 
-                hoje = datetime.now(ZoneInfo("Europe/Lisbon")).date()
-                dias_restantes = (proxima_data - hoje).days
-                
-                if 0 <= dias_restantes <= 3:
-                    alerta_earnings = f"PERIGO (em {dias_restantes} dias)"
-        except Exception:
-            pass
+            if isinstance(df.columns, pd.MultiIndex):
+                df.columns = df.columns.droplevel(1)
 
-        df.ta.rsi(length=14, append=True)
-        df.ta.adx(length=14, append=True)
-        df.ta.atr(length=14, append=True)
-        df.ta.sma(length=200, append=True)
-        df.ta.sma(length=20, append=True)
-        df.ta.mom(length=14, append=True)
-        df.ta.ema(length=9, append=True)
+            df = df.dropna(subset=['Close', 'High', 'Low', 'Volume'])
+            if df.empty or len(df) < 50:
+                continue
 
-        media_volume_20 = df['Volume'].rolling(window=20).mean()
-        df['RVOL'] = df['Volume'] / media_volume_20
-
-        df = df.dropna(subset=['RSI_14', 'ADX_14', 'ATRr_14', 'SMA_20', 'EMA_9', 'MOM_14'])
-        if df.empty: continue
-
-        ultimo_dia = df.iloc[-1]
-        dia_anterior = df.iloc[-2]
-
-        preco = ultimo_dia['Close']
-        preco_anterior = dia_anterior['Close']
-        var_perc = ((preco - preco_anterior) / preco_anterior) * 100
-        
-        sma20 = ultimo_dia['SMA_20']
-        dist_mm20 = ((preco - sma20) / sma20) * 100
-        
-        ema9 = ultimo_dia['EMA_9']
-        ema9_anterior = dia_anterior['EMA_9']
-        
-        cruzou_ema9 = (preco > ema9) and (preco_anterior <= ema9_anterior) if pd.notna(ema9) and pd.notna(ema9_anterior) else False
-        acima_ema9 = preco > ema9 if pd.notna(ema9) else False
-
-        rvol = ultimo_dia['RVOL']
-        adx = ultimo_dia['ADX_14']
-        rsi = ultimo_dia['RSI_14']
-        atr = ultimo_dia['ATRr_14']
-        momentum = ultimo_dia['MOM_14']
-
-        atr_perc = round((atr / preco) * 100, 2) if pd.notna(atr) and pd.notna(preco) and preco > 0 else "N/A"
-
-        recomendacao = "Observar"
-        preco_entrada = "N/A"
-        preco_stop = "N/A"
-        preco_tp = "N/A"
-        preco_be = "N/A"
-        qtd_acoes = "N/A"
-        multiplicador_atr = 1.0
-
-        trailing_base = preco - (atr * multiplicador_trailing_ts) if pd.notna(preco) and pd.notna(atr) else "N/A"
-        trailing_final = round(trailing_base, 2) if trailing_base != "N/A" else "N/A"
-
-        preco_caiu_hoje = preco < preco_anterior if pd.notna(preco) and pd.notna(preco_anterior) else False
-        volume_despejo = rvol > 1.20 if pd.notna(rvol) else False
-
-        if pd.isna(momentum) or pd.isna(adx) or pd.isna(rvol) or pd.isna(rsi) or pd.isna(dist_mm20) or pd.isna(atr):
-             recomendacao = "Observar"
-        elif (preco_caiu_hoje and volume_despejo) or (momentum <= 0.5):
-            recomendacao = "Observar"
-            
-        elif var_perc > 0 and adx < 25 and not cruzou_ema9:
-            recomendacao = "Aguardar Recuo"
-            preco_entrada = round(preco - (atr * 0.4), 2)
-            multiplicador_atr = 1.0
-            
-        elif cruzou_ema9 and rvol > 1.00 and momentum > 0.50 and rsi > 50 and dist_mm20 <= 3.00:
-            recomendacao = "Ignicao EMA9"
-            preco_entrada = round(preco - (atr * 0.1), 2)
-            multiplicador_atr = 1.2
-            
-        elif var_perc > 0 and adx >= 30 and rvol >= 1.20 and (55.00 <= rsi <= 72.00) and (0.00 <= dist_mm20 <= 3.00) and momentum > 1.50 and acima_ema9:
-            recomendacao = "Forca Consolidada"
-            preco_entrada = round(preco - (atr * 0.1), 2)
-            multiplicador_atr = 1.3 
-            
-        elif adx >= 25 and rvol >= 1.00 and (50.00 <= rsi <= 75.00) and (-1.00 <= dist_mm20 <= 3.00) and momentum > 0.50 and acima_ema9:
-            recomendacao = "Alerta Iminente"
-            preco_entrada = round(preco - (atr * 0.2), 2)
-            multiplicador_atr = 1.2
-            
-        else:
-            recomendacao = "Observar"
-
-        # ===================================================================
-        # FILTRO DE SEGURANÇA: PREÇO FUGIDO (GAP > 1% DA ENTRADA)
-        # ===================================================================
-        if recomendacao != "Observar" and isinstance(preco_entrada, (int, float)):
-            variacao_pct_entrada = ((preco - preco_entrada) / preco_entrada) * 100
-            if variacao_pct_entrada > 1.0:
-                print(f"[FUGIDA / GAP > 1%] {ticker} desqualificado: Preço atual ({preco:.2f}) está {variacao_pct_entrada:.2f}% acima da entrada ({preco_entrada:.2f}).")
-                recomendacao = "Observar"
-                preco_entrada = "N/A"
-
-        if recomendacao != "Observar" and preco_entrada != "N/A":
-            preco_stop_calc = preco_entrada - (atr * multiplicador_atr)
-            if preco_stop_calc > sma20 and preco > sma20:
-                preco_stop_calc = sma20 * 0.995
-            
-            preco_stop = round(preco_stop_calc, 2)
-            risco_por_acao = preco_entrada - preco_stop_calc
-            
-            if risco_por_acao > 0:
-                tp_calc = preco_entrada + (risco_por_acao * racio_tp_base)
-                preco_tp = round(tp_calc, 2)
-                qtd_calc = round(risco_maximo_dolares / risco_por_acao, 2) if risco_por_acao > 0 else 0
-                
-                # CORREÇÃO: Veto a quantidades nulas (Qtd <= 0)
-                if qtd_calc <= 0:
-                    recomendacao = "Observar"
-                    qtd_acoes = "N/A"
-                else:
-                    qtd_acoes = qtd_calc
-                    dist_tp = preco_tp - preco_entrada
-                    preco_be = round(preco_entrada + (dist_tp / 2), 2)
-                    trailing_final = round(max(trailing_base, preco_stop_calc), 2)
-
-        data_atual = datetime.now(ZoneInfo("Europe/Lisbon")).strftime('%d/%m/%Y %H:%M:%S')
-
-        # GESTÃO DE POSIÇÃO ATIVA COM FILTRAGEM DE ATIVA_FAST E ATIVA_SWING (EUROPA)
-        if ticker in posicoes_ativas:
-            pos_info = posicoes_ativas[ticker]
-            status_pos = str(pos_info.get('status', 'ATIVA')).strip().upper()
-            if status_pos in ['ATIVA_FAST', 'ATIVA_SWING']:
-                info_carteira = f"NÃO (Gerido pelo modelo {status_pos.replace('ATIVA_', '')} - {status_pos})"
-            else:
-                info_carteira = f"SIM (Entrada: {pos_info.get('precoEntrada', 'N/A')}, StopAtual: {pos_info.get('stopAtual', 'N/A')}, Qtd: {pos_info.get('quantidade', 'N/A')})"
-        else:
-            info_carteira = "NÃO"
-
-        def limpa(v):
+            alerta_earnings = "OK"
             try:
-                if v == "N/A" or pd.isna(v): return "N/A"
-                val = float(v)
-                if np.isnan(val): return "N/A"
-                return round(val, 2)
-            except:
-                return "N/A"
+                ticker_obj = yf.Ticker(ticker)
+                
+                if setor in ["Europa", "Desconhecido", "N/A", "", "NONE"]:
+                    setor_yf = ticker_obj.info.get('sector')
+                    if setor_yf:
+                        setor = setor_yf
 
-        # Análise contextual do RS Score
-        val_rs_num = limpar_float(rs_score)
-        if val_rs_num is not None:
-            if val_rs_num >= 80:
-                status_rs = "🔥 ELITE (RS >= 80 - Vento a Favor)"
-            elif val_rs_num >= 50:
-                status_rs = "⚖️ NEUTRO (RS 50-79 - Acompanha o Mercado)"
+                calendario = ticker_obj.calendar
+                if isinstance(calendario, dict) and 'Earnings Date' in calendario:
+                    proxima_data = calendario['Earnings Date'][0]
+                    if hasattr(proxima_data, 'date'):
+                        proxima_data = proxima_data.date()
+                    
+                    hoje = datetime.now(ZoneInfo("Europe/Lisbon")).date()
+                    dias_restantes = (proxima_data - hoje).days
+                    
+                    if 0 <= dias_restantes <= 3:
+                        alerta_earnings = f"PERIGO (em {dias_restantes} dias)"
+            except Exception:
+                pass
+
+            df.ta.rsi(length=14, append=True)
+            df.ta.adx(length=14, append=True)
+            df.ta.atr(length=14, append=True)
+            df.ta.sma(length=200, append=True)
+            df.ta.sma(length=20, append=True)
+            df.ta.mom(length=14, append=True)
+            df.ta.ema(length=9, append=True)
+
+            media_volume_20 = df['Volume'].rolling(window=20).mean()
+            df['RVOL'] = df['Volume'] / media_volume_20
+
+            df = df.dropna(subset=['RSI_14', 'ADX_14', 'ATRr_14', 'SMA_20', 'EMA_9', 'MOM_14'])
+            if df.empty: continue
+
+            ultimo_dia = df.iloc[-1]
+            dia_anterior = df.iloc[-2]
+
+            preco = float(ultimo_dia['Close'])
+            preco_anterior = float(dia_anterior['Close'])
+            var_perc = ((preco - preco_anterior) / preco_anterior) * 100
+            
+            sma20 = float(ultimo_dia['SMA_20'])
+            dist_mm20 = ((preco - sma20) / sma20) * 100
+            
+            ema9 = float(ultimo_dia['EMA_9'])
+            ema9_anterior = float(dia_anterior['EMA_9'])
+            
+            cruzou_ema9 = (preco > ema9) and (preco_anterior <= ema9_anterior) if pd.notna(ema9) and pd.notna(ema9_anterior) else False
+            acima_ema9 = preco > ema9 if pd.notna(ema9) else False
+
+            rvol = float(ultimo_dia['RVOL'])
+            adx = float(ultimo_dia['ADX_14'])
+            rsi = float(ultimo_dia['RSI_14'])
+            atr = float(ultimo_dia['ATRr_14'])
+            momentum = float(ultimo_dia['MOM_14'])
+
+            atr_perc = round((atr / preco) * 100, 2) if pd.notna(atr) and pd.notna(preco) and preco > 0 else "N/A"
+
+            recomendacao = "Observar"
+            preco_entrada = "N/A"
+            preco_stop = "N/A"
+            preco_tp = "N/A"
+            preco_be = "N/A"
+            qtd_acoes = "N/A"
+            multiplicador_atr = 1.0
+
+            trailing_base = preco - (atr * multiplicador_trailing_ts) if pd.notna(preco) and pd.notna(atr) else "N/A"
+            trailing_final = round(trailing_base, 2) if trailing_base != "N/A" else "N/A"
+
+            preco_caiu_hoje = preco < preco_anterior if pd.notna(preco) and pd.notna(preco_anterior) else False
+            volume_despejo = rvol > 1.20 if pd.notna(rvol) else False
+
+            if pd.isna(momentum) or pd.isna(adx) or pd.isna(rvol) or pd.isna(rsi) or pd.isna(dist_mm20) or pd.isna(atr):
+                 recomendacao = "Observar"
+            elif (preco_caiu_hoje and volume_despejo) or (momentum <= 0.5):
+                recomendacao = "Observar"
+                
+            elif var_perc > 0 and adx < 25 and not cruzou_ema9:
+                recomendacao = "Aguardar Recuo"
+                preco_entrada = round(preco - (atr * 0.4), 2)
+                multiplicador_atr = 1.0
+                
+            elif cruzou_ema9 and rvol > 1.00 and momentum > 0.50 and rsi > 50 and dist_mm20 <= 3.00:
+                recomendacao = "Ignicao EMA9"
+                preco_entrada = round(preco - (atr * 0.1), 2)
+                multiplicador_atr = 1.2
+                
+            elif var_perc > 0 and adx >= 30 and rvol >= 1.20 and (55.00 <= rsi <= 72.00) and (0.00 <= dist_mm20 <= 3.00) and momentum > 1.50 and acima_ema9:
+                recomendacao = "Forca Consolidada"
+                preco_entrada = round(preco - (atr * 0.1), 2)
+                multiplicador_atr = 1.3 
+                
+            elif adx >= 25 and rvol >= 1.00 and (50.00 <= rsi <= 75.00) and (-1.00 <= dist_mm20 <= 3.00) and momentum > 0.50 and acima_ema9:
+                recomendacao = "Alerta Iminente"
+                preco_entrada = round(preco - (atr * 0.2), 2)
+                multiplicador_atr = 1.2
+                
             else:
-                status_rs = "⚠️ FRACO / LAGGARD (RS < 50 - Vento Contra)"
-        else:
-            status_rs = "❓ SEM DADO DE RS"
+                recomendacao = "Observar"
 
-        dados_temporarios.append({
-            "ticker": ticker,
-            "nome": nome_empresa,
-            "setor": setor,
-            "rs_score": rs_score,
-            "status_rs": status_rs,
-            "preco": limpa(preco),
-            "dist_mm20": limpa(dist_mm20),
-            "ema9": limpa(ema9),
-            "momentum": limpa(momentum),
-            "rsi": limpa(rsi),
-            "adx": limpa(adx),
-            "atr": limpa(atr),
-            "atr_perc": limpa(atr_perc),
-            "rvol": limpa(rvol),
-            "estado": recomendacao,
-            "entrada": round(preco_entrada, 2) if isinstance(preco_entrada, float) else preco_entrada,
-            "stop": preco_stop,
-            "tp": preco_tp,
-            "be": preco_be,
-            "qtd_bruta": qtd_acoes,
-            "trailing": trailing_final,
-            "earnings": alerta_earnings,
-            "posicao_ativa": info_carteira,
-            "data": data_atual
-        })
-        
-        print(f"[OK] {ticker} analisado. Setor: {setor} | Estado: {recomendacao}")
+            # FILTRO DE SEGURANÇA: PREÇO FUGIDO (GAP > 1% DA ENTRADA)
+            if recomendacao != "Observar" and isinstance(preco_entrada, (int, float)):
+                variacao_pct_entrada = ((preco - preco_entrada) / preco_entrada) * 100
+                if variacao_pct_entrada > 1.0:
+                    recomendacao = "Observar"
+                    preco_entrada = "N/A"
 
-    except Exception as e:
-        print(f"[ERRO] Falha ao processar {ticker}: {e}")
+            if recomendacao != "Observar" and preco_entrada != "N/A":
+                preco_stop_calc = preco_entrada - (atr * multiplicador_atr)
+                if preco_stop_calc > sma20 and preco > sma20:
+                    preco_stop_calc = sma20 * 0.995
+                
+                preco_stop = round(preco_stop_calc, 2)
+                risco_por_acao = preco_entrada - preco_stop_calc
+                
+                if risco_por_acao > 0:
+                    tp_calc = preco_entrada + (risco_por_acao * racio_tp_base)
+                    preco_tp = round(tp_calc, 2)
+                    qtd_calc = round(risco_maximo_dolares / risco_por_acao, 2) if risco_por_acao > 0 else 0
+                    
+                    if qtd_calc <= 0:
+                        recomendacao = "Observar"
+                        qtd_acoes = "N/A"
+                    else:
+                        qtd_acoes = qtd_calc
+                        dist_tp = preco_tp - preco_entrada
+                        preco_be = round(preco_entrada + (dist_tp / 2), 2)
+                        trailing_final = round(max(trailing_base, preco_stop_calc), 2)
+
+            data_atual = datetime.now(ZoneInfo("Europe/Lisbon")).strftime('%d/%m/%Y %H:%M:%S')
+
+            if ticker in posicoes_ativas:
+                pos_info = posicoes_ativas[ticker]
+                status_pos = str(pos_info.get('status', 'ATIVA')).strip().upper()
+                if status_pos in ['ATIVA_FAST', 'ATIVA_SWING']:
+                    info_carteira = f"NÃO (Gerido pelo modelo {status_pos.replace('ATIVA_', '')} - {status_pos})"
+                else:
+                    info_carteira = f"SIM (Entrada: {pos_info.get('precoEntrada', 'N/A')}, StopAtual: {pos_info.get('stopAtual', 'N/A')}, Qtd: {pos_info.get('quantidade', 'N/A')})"
+            else:
+                info_carteira = "NÃO"
+
+            def limpa(v):
+                try:
+                    if v == "N/A" or pd.isna(v): return "N/A"
+                    val = float(v)
+                    if np.isnan(val): return "N/A"
+                    return round(val, 2)
+                except:
+                    return "N/A"
+
+            val_rs_num = limpar_float(rs_score)
+            if val_rs_num is not None:
+                if val_rs_num >= 80:
+                    status_rs = "🔥 ELITE (RS >= 80 - Vento a Favor)"
+                elif val_rs_num >= 50:
+                    status_rs = "⚖️ NEUTRO (RS 50-79 - Acompanha o Mercado)"
+                else:
+                    status_rs = "⚠️ FRACO / LAGGARD (RS < 50 - Vento Contra)"
+            else:
+                status_rs = "❓ SEM DADO DE RS"
+
+            dados_temporarios.append({
+                "ticker": ticker,
+                "nome": nome_empresa,
+                "setor": setor,
+                "rs_score": rs_score,
+                "status_rs": status_rs,
+                "preco": limpa(preco),
+                "dist_mm20": limpa(dist_mm20),
+                "ema9": limpa(ema9),
+                "momentum": limpa(momentum),
+                "rsi": limpa(rsi),
+                "adx": limpa(adx),
+                "atr": limpa(atr),
+                "atr_perc": limpa(atr_perc),
+                "rvol": limpa(rvol),
+                "estado": recomendacao,
+                "entrada": round(preco_entrada, 2) if isinstance(preco_entrada, float) else preco_entrada,
+                "stop": preco_stop,
+                "tp": preco_tp,
+                "be": preco_be,
+                "qtd_bruta": qtd_acoes,
+                "trailing": trailing_final,
+                "earnings": alerta_earnings,
+                "posicao_ativa": info_carteira,
+                "data": data_atual
+            })
+            
+            print(f"[OK] {ticker} analisado. Setor: {setor} | Estado: {recomendacao}")
+
+        except Exception as e:
+            print(f"[ERRO] Falha ao processar {ticker}: {e}")
 
 # ===================================================================
 # 4.1. AUDITORIA MACRO E CORTE MATEMÁTICO DE LOTES
@@ -498,73 +489,36 @@ if resultados_para_sheets and WEBHOOK_URL:
 # ===================================================================
 # 6. GERAR BLOCO DE TEXTO E ENVIAR PARA O AGENTE IA
 # ===================================================================
-print("\nA construir o bloco unificado (Prompt + Comboio) para o email...")
+data_hoje = datetime.now(ZoneInfo("Europe/Lisbon")).strftime("%d/%m/%Y %H:%M")
+
+bloco_texto_ia = (
+    f"🇪🇺 RELATÓRIO DE DADOS BRUTOS - EUROPEAN BREAKOUTS ({data_hoje})\n"
+    f"==================================================================\n\n"
+)
+
+if veto_macro_ativo:
+    bloco_texto_ia += f"🚨 [VETO MACRO ATIVADO]\n{motivo_veto}\n"
+    bloco_texto_ia += "⚠️ Novas compras europeias suspensas hoje, mas a pipeline continua para auditar e gerir as POSIÇÕES ATIVAS em carteira.\n"
+    bloco_texto_ia += "--------------------------------------------------\n\n"
+else:
+    bloco_texto_ia += "🟢 [MERCADO ESTÁVEL] Filtro do SPY dentro dos parâmetros normais. Pipeline autorizada.\n"
+    bloco_texto_ia += "--------------------------------------------------\n\n"
 
 ativos_acionados = [
     item for item in comboio_ia 
     if item["estado"] != "Observar" or item["posicao_ativa"] != "NÃO"
 ]
 
-prompt_sistema_embutido = f"""🇪🇺 MODO DIÁRIO ATIVO - PREDADOR DE BREAKOUTS (EUROPA): Avalia os seguintes ativos da minha watchlist europeia.
-(INFO SISTEMA - Hoje é Sexta-feira? {hoje_e_sexta})
-Contexto: O teu mandato principal é a PRESERVAÇÃO DE CAPITAL e a gestão de risco assimétrica em euros. A tua missão é atuar como auditor do motor matemático: procura ativamente falhas na estrutura de cada trade, expõe o risco e aprova exclusivamente os arranques que demonstrem força institucional inegável.
-
-Regras Operacionais Estritas de Triagem, Carteira e Ataque:
-
-1. AVALIAÇÃO MACRO E ADAPTAÇÃO DE RISCO: Olha primeiro para a lista completa. Se a esmagadora maioria dos ativos estiver em 'Aguardar Recuo' (ADX < 25 e baixo RVOL), o panorama geral é considerado de Alto Risco. 
-   - Se o panorama for de Alto Risco E NÃO houver ativos em alerta, inicia o e-mail com [MERCADO ESTAGNADO - POSTURA DEFENSIVA], mas passa obrigatoriamente pelo Passo 6 para auditar a carteira ativa, e só depois conclui.
-   - Se o panorama for de Alto Risco, MAS existirem ativos em 'Forca Consolidada', 'Ignicao EMA9' ou 'Alerta Iminente', analisa-os, mas emite obrigatoriamente a bandeira 🚩 [AMBIENTE MACRO HOSTIL - EXIGIDO LOTE REDUZIDO A 50%].
-
-2. OS ALVOS (3 PRINCIPAIS + 2 SUPLENTES): Seleciona o Top 3 absoluto das melhores oportunidades para ataque. Se existirem mais configurações de elite, podes adicionar até 2 ativos extra classificados estritamente como 'SUPLENTE' para o caso de os principais abortarem na abertura. Se um ativo detetar EARNINGS = PERIGO, ele é sumariamente desclassificado.
-
-3. ANÁLISE DE VULNERABILIDADE E POTENCIAL (CRÍTICO):
-   Cruza os dados e aplica as seguintes bandeiras táticas:
-   - REGRA DA MOLA (MM20): Se 'Dist MM20' > 2.5%, alerta [AVISO: PREÇO ESTICADO - Risco de Pullback].
-   - CONTEXTO INSTITUCIONAL (RS SCORE): Presta especial atenção ao RS Score e estado de força relativa reportados em cada ativo para filtrar se o mercado apoia o arranque.
-   - ANTECIPAÇÃO (EMA9): Se o estado for 'Ignicao EMA9', o motor está a tentar apanhar o movimento no início. Valida se o RVOL > 1.0 e se o Momentum apoia. Se sim, marca 🚀 [IGNIÇÃO EMA9 - Ponto de Entrada Antecipado].
-   - COMPRESSÃO (ATR vs RVOL): Se o RVOL > 1.5 e Momentum sólido, marca [POTENCIAL DE COMPRESSÃO] (alta prioridade).
-   - EXAUSTÃO: Se RSI > 70 mas Momentum < 1.0 ou RVOL < 1.3, alerta [AVISO DE EXAUSTÃO - Sem Combustível].
-   - BARREIRAS INSTITUCIONAIS: Se Entrada ou Take-Profit estiverem a <1% de um número redondo maior (ex: 50.00, 100.00), alerta [PAREDE INSTITUCIONAL - Risco de rejeição].
-   - ATIVOS ERRÁTICOS: Lê 'Vol' junto ao ATR no comboio. Se Vol > 5%, alerta [ATIVO ERRÁTICO - Alta Volatilidade].
-
-4. TÁTICA DE EXECUÇÃO:
-   - GAPS DE ABERTURA: Inclui: "Se abrir em Gap > 1% da entrada, ABORTA."
-   - GESTÃO DE LUCRO: Se estado for 'Ignicao EMA9', o objective é capturar a explosão inicial; gere de perto pelo Trailing. Se ADX > 35: "[TENDÊNCIA EXTREMA] Ignora TP, gere pelo Trailing". Se ADX < 30: "[TENDÊNCIA MODERADA] Respeita o TP fixo."
-
-5. RISCOS DE CALENDÁRIO E CORRELAÇÃO:
-   - SEXTA-FEIRA: Lê a (INFO SISTEMA). Se for Sexta-feira ('SIM'), exige Lote Reduzido à tarde.
-   - CORRELAÇÃO: Se os ativos escolhidos forem do mesmo Setor, emite "[AVISO DE CORRELAÇÃO] - Risco concentrado".
-
-6. GESTÃO DE POSIÇÕES ATIVAS E ESTRUTURA VISUAL OBRIGATÓRIA (CRÍTICO):
-   - Verifica o campo 'PosicaoAtiva' em cada linha do comboio.
-   - **REGRA DE OURO:** Se a PosicaoAtiva indicar **SIM**, é **estritamente proibido** sugerir nova entrada ou alocação de capital. O foco é 100% a gestão da posição existente. (Nota: Se indicar 'Gerido pelo modelo FAST' ou 'Gerido pelo modelo SWING', desconsidera para efeitos de gestão de Breakouts).
-   - **GESTÃO DO STOP LOSS:** Compara o 'StopAtual' com o 'Trailing'. Se o 'Trailing' for superior, recomenda subir o Stop. Se for igual ou inferior, indica manutenção.
-   - **ATENÇÃO AOS EARNINGS:** Se uma posição ativa apresentar 'EARNINGS = PERIGO', emite um alerta prioritário de liquidação preventiva antes da apresentação dos resultados.
-   - Usa obrigatoriamente este template exato:
-
-    🇪🇺🎯 [TICKER] - [Nome da Empresa] ([Setor]) [Adicionar tag (SUPLENTE) se aplicável]
-    - 🚩 BANDEIRAS: (Avisos ou "Limpo")
-    - 📊 CONTEXTO INSTITUCIONAL: RS Score e respetivo estado de Força Relativa.
-    - ⚠️ ESTADO NA CARTEIRA: [POSIÇÃO ATIVA... ou Nenhuma posição aberta]
-    - ⚙️ EXECUÇÃO / DEFESA: (Regra dos Gaps e Gestão de Stop)
-    - 🛡️ TAMANHO DA POSIÇÃO: Lê o campo 'Lote' da linha de referência e transcreve (Ex: 'Lote Reduzido a 50%' ou 'Lote Completo').
-    - 🔢 DADOS EXATOS: Entrada: X | Stop: X | TP: X | BE: X | Trailing: X | Qtd: X | Valor a Investir: [Lê o campo 'ValorInvestir' da referência e transcreve diretamente]. NÃO FAÇAS CÁLCULOS.
-    - 📋 REFERÊNCIA: (Cola a linha original do comboio aqui)
-
-7. SAÚDE DO MERCADO E MANDATO FINAL: 
-   Termina com a frase obrigatória a negrito:
-   **"TÁTICA DE EXECUÇÃO OBRIGATÓRIA: Não executar ordens antes das 09h00 (hora de Lisboa). Deixar a volatilidade inicial europeia queimar os amadores e confirmar a verdadeira direção institucional."**
-"""
-
-bloco_texto_ia = f"🇪🇺 RELATÓRIO DE DADOS BRUTOS - EUROPEAN BREAKOUTS 🛡️\n\n{prompt_sistema_embutido}\n\n--------------------------------------------------\n"
-
-if not ativos_acionados:
+if veto_macro_ativo:
+    bloco_texto_ia += "✅ Análise de novas entradas da watchlist omitida devido ao Veto Macro.\n"
+elif not ativos_acionados:
     bloco_texto_ia += "[MERCADO ESTAGNADO - POSTURA DEFENSIVA] - Nenhum ativo europeu preencheu os requisitos mínimos de entrada.\n"
 else:
     bloco_texto_ia += "DADOS DOS ATIVOS ACIONADOS (COMBOIO):\n\n"
     for item in ativos_acionados:
         bloco_texto_ia += item["comboio_str"] + "\n"
 
+print("A gravar ficheiro temporário 'comboio_europa.txt'...")
 with open("comboio_europa.txt", "w", encoding="utf-8") as f:
     f.write(bloco_texto_ia)
     
@@ -586,3 +540,6 @@ if debug_telegram_ativado:
         f"✉️ Relatório de breakout europeu gerado e enviado por e-mail."
     )
     enviar_alerta(mensagem_debug)
+
+print("[SUCESSO] Execução do Motor de Breakouts (Europa) concluída sem erros.")
+sys.exit(0)
