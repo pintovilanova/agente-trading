@@ -108,6 +108,15 @@ def enviar_email(conteudo):
         except Exception as e:
             if tentativa < 2: time.sleep(5)
 
+def obter_setor_yf(ticker):
+    """Fallback para obter o setor diretamente do yfinance caso falhe no Sheets"""
+    try:
+        t = yf.Ticker(ticker)
+        setor = t.info.get('sector')
+        return setor if setor else "Desconhecido"
+    except Exception:
+        return "Desconhecido"
+
 # ===================================================================
 # 3. CARGA DE DADOS E PARAMETRIZAÇÃO
 # ===================================================================
@@ -175,8 +184,21 @@ for ticker, info in posicoes_ativas_dict.items():
 def analisar_momentum_burst(ativo_info):
     try:
         ticker = str(ativo_info.get("ticker", "")).strip().upper()
-        nome_empresa = ativo_info.get("nome", "N/A")
-        setor = str(ativo_info.get("setor", "Desconhecido")).strip()
+        
+        nome_empresa = (
+            ativo_info.get("nome") or 
+            ativo_info.get("nomeEmpresa") or 
+            ativo_info.get("name") or "N/A"
+        )
+        
+        # Tenta várias chaves do Sheets para o setor
+        setor = (
+            ativo_info.get("setor") or 
+            ativo_info.get("setorAtivo") or 
+            ativo_info.get("sector") or 
+            ativo_info.get("Setor") or ""
+        )
+        setor = str(setor).strip()
 
         if not ticker or ticker == "#N/A" or ticker == "NONE": return None
         if ticker in posicoes_ativas_dict: return None # Ignora se já estiver em carteira
@@ -189,8 +211,11 @@ def analisar_momentum_burst(ativo_info):
         try:
             ticker_obj = yf.Ticker(ticker)
             info_dados = ticker_obj.info
-            if setor in ["Desconhecido", "N/A", "", "NONE"]:
-                setor = info_dados.get('sector', setor)
+            
+            # Fallback de setor via yfinance caso esteja ausente no Sheets
+            if not setor or setor.lower() in ["desconhecido", "n/a", "", "none", "#n/a"]:
+                setor = info_dados.get('sector') or obter_setor_yf(ticker)
+
             max_52s = info_dados.get('fiftyTwoWeekHigh', None)
 
             calendario = ticker_obj.calendar
@@ -201,7 +226,8 @@ def analisar_momentum_burst(ativo_info):
                 if 0 <= dias_restantes <= 3:
                     alerta_earnings = f"PERIGO (em {dias_restantes} dias)"
         except:
-            pass
+            if not setor or setor.lower() in ["desconhecido", "n/a", "", "none", "#n/a"]:
+                setor = obter_setor_yf(ticker)
 
         df = pd.DataFrame()
         for _ in range(3):
