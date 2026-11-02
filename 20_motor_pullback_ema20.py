@@ -111,6 +111,15 @@ def enviar_email(conteudo):
             if tentativa < 2: time.sleep(5)
     return False
 
+def obter_setor_yf(ticker):
+    """Fallback para obter o setor diretamente do yfinance caso falhe no Sheets"""
+    try:
+        t = yf.Ticker(ticker)
+        setor = t.info.get('sector')
+        return setor if setor else "Desconhecido"
+    except Exception:
+        return "Desconhecido"
+
 # ===================================================================
 # 3. CARGA DE DADOS E PARAMETRIZAÇÃO DE RISCO
 # ===================================================================
@@ -296,8 +305,21 @@ def executar_motor():
         bloco_texto += f"🎯 NOVOS SINAIS DE PULLBACK À EMA 20 ({len(alertas_pullback)}):\n\n"
         for a in alertas_pullback:
             info_ativo = next((item for item in ativos_sheets if str(item.get("ticker","")).strip().upper() == a['ticker']), {})
-            nome_empresa = info_ativo.get("nome", "N/A")
-            setor = info_ativo.get("setor", "Desconhecido")
+            
+            nome_empresa = info_ativo.get("nome") or info_ativo.get("nomeEmpresa") or info_ativo.get("name") or "N/A"
+            
+            # Tenta várias chaves possíveis do Sheets para o setor
+            setor = (
+                info_ativo.get("setor") or 
+                info_ativo.get("setorAtivo") or 
+                info_ativo.get("sector") or 
+                info_ativo.get("Setor")
+            )
+            
+            # Se não estiver presente ou preenchido no Sheets, obtém via YFinance
+            if not setor or str(setor).strip().lower() in ["desconhecido", "n/a", "none", "#n/a", ""]:
+                setor = obter_setor_yf(a['ticker'])
+
             rs_score = info_ativo.get("rs_score", "N/A")
             
             bloco_texto += (
