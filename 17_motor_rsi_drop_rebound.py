@@ -123,44 +123,33 @@ print(f"[CONFIG] Capital Total: ${capital:,.2f} | Risco/Trade: {pct_risco*100:.1
 # ===================================================================
 bloco_posicoes_ativas = ""
 
-def obter_preco_realtime_premarket(ticker):
+ddef obter_preco_realtime_premarket(ticker):
     """
-    Obtém a cotação exata em tempo real (dando prioridade ao Pre-Market / After-Hours)
-    através do endpoint de Quote da Yahoo Finance API.
+    Usa o motor intraday do yfinance (com bypass de cookies) para descarregar o gráfico
+    de 1 minuto com a flag prepost=True. Apanha a última transação de Pre-Market/After-Hours.
     """
-    url = f"https://query1.finance.yahoo.com/v6/finance/quote?symbols={ticker}"
-    headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)'}
-    
     try:
-        resp = requests.get(url, headers=headers, timeout=5)
-        if resp.status_code == 200:
-            dados = resp.json()
-            result = dados.get('quoteResponse', {}).get('result', [])
-            if result:
-                q = result[0]
-                # 1. Prioridade: Pre-Market
-                p_pre = q.get('preMarketPrice')
-                if p_pre and float(p_pre) > 0:
-                    return round(float(p_pre), 2)
-                
-                # 2. Prioridade: Post-Market / After-Hours
-                p_post = q.get('postMarketPrice')
-                if p_post and float(p_post) > 0:
-                    return round(float(p_post), 2)
-                
-                # 3. Regular Market Price
-                p_reg = q.get('regularMarketPrice')
-                if p_reg and float(p_reg) > 0:
-                    return round(float(p_reg), 2)
+        # period="5d" garante que apanha a sessão atual mesmo à segunda-feira
+        df_rt = yf.download(ticker, period="5d", interval="1m", prepost=True, progress=False)
+        if not df_rt.empty:
+            # Achatar MultiIndex (comportamento padrão do yfinance >= 0.2.40)
+            if isinstance(df_rt.columns, pd.MultiIndex):
+                df_rt.columns = df_rt.columns.get_level_values(0)
+            
+            # Pega na última transação validada (ex: às 06:30 AM EST)
+            ultimo_preco_premarket = float(df_rt['Close'].dropna().iloc[-1])
+            if ultimo_preco_premarket > 0:
+                return round(ultimo_preco_premarket, 2)
     except Exception as e:
-        print(f"[AVISO] Falha na consulta direta de Quote para {ticker}: {e}")
+        print(f"[AVISO] Falha ao extrair intraday pre-market para {ticker}: {e}")
         
-    # Fallback via fast_info do yfinance
+    # Fallback caso o download falhe: tenta ler a propriedade interna do objeto Ticker
     try:
         t = yf.Ticker(ticker)
         fast = t.fast_info
         p_pre = getattr(fast, 'pre_market_price', None)
         p_last = getattr(fast, 'last_price', None)
+        
         if p_pre and not np.isnan(p_pre) and p_pre > 0:
             return round(float(p_pre), 2)
         elif p_last and not np.isnan(p_last) and p_last > 0:
