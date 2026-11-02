@@ -233,11 +233,21 @@ def analisar_confluencia_suprema(ativo_info):
 def executar_motor():
     if not ativos_sheets: sys.exit(0)
     
-    # 1. Verifica Filtro Macro (Se o mercado estiver fraco, aborta novas compras)
+    # 1. Verifica Filtro Macro (Se o mercado estiver fraco, notifica e regista, mas envia sempre os alertas)
     if not mercado_em_alta():
-        print("[MERCADO FRACO] O SPY está abaixo da EMA 20. O Motor 21 não autoriza novas entradas (Modo Defensivo).")
+        aviso_defensivo = "✅ [MERCADO FRACO] O SPY encontra-se abaixo da EMA 20. O Motor 21 bloqueou novos sinais para proteger capital (Modo Defensivo).\n"
+        print(aviso_defensivo)
+        
+        # Gravação do ficheiro para o Orquestrador
         with open("comboio_confluencia_temp.txt", "w", encoding="utf-8") as f:
-            f.write("✅ [MERCADO FRACO] O SPY encontra-se abaixo da EMA 20. O Motor 21 bloqueou novos sinais para proteger capital.\n")
+            f.write(aviso_defensivo)
+            
+        # Envio forçado de E-mail
+        enviar_email(aviso_defensivo)
+        
+        # Envio forçado para o Telegram
+        enviar_alerta("21 ⚡ *MOTOR 21 (CONFLUÊNCIA SUPREMA)*\n\n🛡️ *MODO DEFENSIVO ATIVO*\nO SPY está abaixo da EMA 20. Novas entradas bloqueadas.")
+        
         sys.exit(0)
 
     alertas_confluencia = []
@@ -272,8 +282,8 @@ def executar_motor():
     with open("comboio_confluencia_temp.txt", "w", encoding="utf-8") as f:
         f.write(bloco_texto)
 
-    if str(configs_dict.get("TELEGRAM_NOTIFICATIONS_DEBUG", "false")).strip().lower() in ["true", "1", "sim", "yes"]:
-        enviar_alerta(f"21 ⚡ *MOTOR 21 (CONFLUÊNCIA)*\n\n🔍 Execução Concluída.\n🎯 Acionados: *{len(alertas_confluencia)}*")
+    # Notificação no Telegram (respeitando ou não o debug, ou forçada se pretendido)
+    enviar_alerta(f"21 ⚡ *MOTOR 21 (CONFLUÊNCIA)*\n\n🔍 Execução Concluída.\n🎯 Acionados: *{len(alertas_confluencia)}*")
 
 if __name__ == "__main__":
     executar_motor()
