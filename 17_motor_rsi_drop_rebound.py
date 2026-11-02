@@ -129,7 +129,6 @@ def obter_preco_realtime_premarket(ticker):
     com a flag prepost=True. Apanha a última transação de Pre-Market/After-Hours.
     """
     try:
-        # period="5d" garante que apanha a sessão atual mesmo após fim de semana
         df_rt = yf.download(ticker, period="5d", interval="1m", prepost=True, progress=False)
         if not df_rt.empty:
             if isinstance(df_rt.columns, pd.MultiIndex):
@@ -141,7 +140,6 @@ def obter_preco_realtime_premarket(ticker):
     except Exception as e:
         print(f"[AVISO] Falha ao extrair intraday pre-market para {ticker}: {e}")
         
-    # Fallback via fast_info
     try:
         t = yf.Ticker(ticker)
         fast = t.fast_info
@@ -162,7 +160,6 @@ def obter_dados_posicao_m17(ticker):
     preco_atual = 0.0
     ema5_atual = 0.0
     
-    # 1. CAMADA BASE DIÁRIA: Garante o cálculo da EMA5
     try:
         df_pos = yf.download(ticker, period="1mo", interval="1d", progress=False)
         if not df_pos.empty:
@@ -177,7 +174,6 @@ def obter_dados_posicao_m17(ticker):
     except Exception as e:
         print(f"[AVISO] Falha ao obter dados diários para {ticker}: {e}")
 
-    # 2. CAMADA PRE-MARKET FORÇADA
     preco_realtime = obter_preco_realtime_premarket(ticker)
     if preco_realtime > 0:
         preco_atual = preco_realtime
@@ -192,13 +188,11 @@ for chave_pos, info in posicoes_ativas_dict.items():
         try:
             ticker = "AI" if chave_pos.lower() in ["c3.ai", "c3"] else chave_pos.strip().upper()
             
-            # Obtém cotação (com Pre-Market forçado) e EMA5
             preco_atual, ema5_dinamica = obter_dados_posicao_m17(ticker)
             
             stop = limpar_float(info.get("stopAtual")) or limpar_float(info.get("stopLoss")) or 0.0
             entrada = limpar_float(info.get("precoEntrada")) or preco_atual
             
-            # Leitura do TP fixo do Sheets ou fallback para EMA5
             tp_sheets = (
                 limpar_float(info.get("alvoTp")) or 
                 limpar_float(info.get("takeProfit")) or 
@@ -240,19 +234,16 @@ def analisar_rsi_drop(ativo_info):
         df = yf.download(ticker, period="1y", interval="1d", progress=False)
         if df.empty or len(df) < 200: return None
         
-        # Achatar MultiIndex se existir
         if isinstance(df.columns, pd.MultiIndex): 
             df.columns = df.columns.droplevel(1)
             
         df = df.dropna(subset=['Close', 'High', 'Low', 'Volume'])
         if len(df) < 200: return None
 
-        # Cálculo dos Indicadores
         df.ta.rsi(length=2, append=True)
         df.ta.sma(length=200, append=True)
         df.ta.atr(length=14, append=True)
 
-        # Mapeamento Seguro de Colunas
         cols_rsi = [c for c in df.columns if str(c).startswith('RSI_2')]
         cols_sma = [c for c in df.columns if str(c).startswith('SMA_200')]
         cols_atr = [c for c in df.columns if str(c).startswith('ATRr_') or str(c).startswith('ATR_') or str(c).startswith('ATRe_')]
@@ -273,7 +264,6 @@ def analisar_rsi_drop(ativo_info):
         sma200 = float(ultimo[col_sma])
         atr = float(ultimo[col_atr])
 
-        # CONDIÇÕES: Preço acima da SMA200 (Tendência de Alta) E RSI(2) <= 10 (Sobrevendido Extremo)
         if preco > sma200 and rsi2 <= 10.0:
             entrada_gatilho = round(preco, 2)
             stop_loss = round(entrada_gatilho - (atr * 1.5), 2)
@@ -346,8 +336,10 @@ def executar_motor():
     else:
         bloco_texto += "✅ Nenhum novo sinal de RSI Drop detetado hoje.\n"
 
-    # GRAVAÇÃO DO FICHEIRO TEMPORÁRIO
-    with open("comboio_rsi_rebound_temp", "w", encoding="utf-8") as f:
+    # ===================================================================
+    # GRAVAÇÃO DO FICHEIRO TEMPORÁRIO (CORRIGIDO COM A EXTENSÃO .TXT)
+    # ===================================================================
+    with open("comboio_rsi_rebound_temp.txt", "w", encoding="utf-8") as f:
         f.write(bloco_texto)
 
     # ENVIO DE E-MAIL COM ÍCONES PADRONIZADOS
