@@ -1,5 +1,5 @@
 # ===================================================================================
-# SISTEMA DE TRADING INSTITUCIONAL - EXTRATOR DE DADOS & AUDITORIA DE ATIVAS
+# SISTEMA DE TRADING INSTITUCIONAL - EXTRATOR DE DADOS & US BREAKOUTS
 # ===================================================================================
 
 import os
@@ -18,7 +18,6 @@ from zoneinfo import ZoneInfo
 import warnings
 warnings.filterwarnings("ignore")
 
-# Importação da função modular de notificação do Telegram
 from F01_notificador_telegram import enviar_alerta
 
 # ===================================================================
@@ -27,10 +26,9 @@ from F01_notificador_telegram import enviar_alerta
 dia_da_semana = datetime.now(ZoneInfo("Europe/Lisbon")).weekday()
 if dia_da_semana >= 5:
     print("[INFO] Fim de semana detetado. O Extrator de Dados vai descansar.")
-    # Permite continuar para testes se necessário
 
 # ===================================================================
-# 1. CONFIGURAÇÕES E CREDENCIAIS (GitHub Secrets)
+# 1. CONFIGURAÇÕES E CREDENCIAIS
 # ===================================================================
 WEBHOOK_URL = os.environ.get('WEBHOOK_URL')
 EMAIL_USER = os.environ.get('EMAIL_USER')
@@ -49,7 +47,7 @@ def limpar_float(val):
         return None
 
 # ===================================================================
-# 2. FUNÇÃO DE REDE: LER DADOS DO GOOGLE SHEETS VIA WEBHOOK
+# 2. FUNÇÕES DE REDE
 # ===================================================================
 def buscar_dados_completos():
     print("A carregar a Watchlist, Posições Ativas e Configurações a partir do Google Sheets...")
@@ -59,14 +57,8 @@ def buscar_dados_completos():
     try:
         url_alvo = WEBHOOK_URL if "?" in WEBHOOK_URL else f"{WEBHOOK_URL}?aba=Analise Compra"
         resp = requests.get(url_alvo, timeout=15)
-        
         if resp.status_code == 200:
-            try:
-                dados = resp.json()
-            except json.JSONDecodeError:
-                print(f"[ERRO] O Webhook não retornou um JSON válido.")
-                return [], {}, {}
-
+            dados = resp.json()
             if isinstance(dados, dict):
                 ativos = dados.get("ativos", [])
                 posicoes = dados.get("posicoesAtivas", {}) or dados.get("posicoes", {})
@@ -82,7 +74,7 @@ def buscar_dados_completos():
 def enviar_email(assunto, conteudo):
     print(f"\nA enviar e-mail ('{assunto}')...")
     if not EMAIL_USER or not EMAIL_PASS:
-        print("[AVISO] EMAIL_USER ou EMAIL_PASS não configurados. E-mail não enviado.")
+        print("[AVISO] EMAIL_USER ou EMAIL_PASS não configurados.")
         return False
     try:
         msg = MIMEMultipart()
@@ -103,12 +95,11 @@ def enviar_email(assunto, conteudo):
         return False
 
 # ===================================================================
-# 3. EXECUÇÃO DA CARGA DE DADOS
+# 3. CARGA DE DADOS
 # ===================================================================
 ativos_sheets, posicoes_ativas_dict, configs_dict = buscar_dados_completos()
-
 print(f"[SUCESSO] {len(ativos_sheets)} ativos carregados da Watchlist.")
-print(f"[SUCESSO] {len(posicoes_ativas_dict)} posições ativas detetadas no Diário de Bordo.\n")
+print(f"[SUCESSO] {len(posicoes_ativas_dict)} posições ativas detetadas.\n")
 
 # ===================================================================
 # 4. AUDITAR POSIÇÕES EM CARTEIRA
@@ -121,7 +112,6 @@ for chave_pos, info in posicoes_ativas_dict.items():
     if status and status != "FECHADA":
         try:
             ticker = "AI" if chave_pos.lower() in ["c3.ai", "c3"] else chave_pos.strip().upper()
-            
             df_pos = yf.download(ticker, period="1mo", interval="1d", progress=False)
             if not df_pos.empty:
                 if isinstance(df_pos.columns, pd.MultiIndex):
@@ -161,10 +151,9 @@ for chave_pos, info in posicoes_ativas_dict.items():
             print(f"[ERRO] Falha ao auditar posição ativa {chave_pos}: {e}")
 
 # ===================================================================
-# 5. VERIFICAÇÃO DE VETO MACRO (SPY) - MODO NÃO-BLOQUEANTE
+# 5. VERIFICAÇÃO DE VETO MACRO (SPY)
 # ===================================================================
 print("A verificar Veto Macro (SPY)...")
-
 veto_macro_ativo = False
 motivo_veto = ""
 
@@ -186,7 +175,69 @@ except Exception as e:
     print(f"[AVISO] Falha ao verificar filtro SPY: {e}")
 
 # ===================================================================
-# 6. MONTAGEM DO FICHEIRO TEMPORÁRIO E RELATÓRIO
+# 6. RASTREIO DE ATIVOS US BREAKOUT (NOVA SECÇÃO)
+# ===================================================================
+bloco_us_breakouts = ""
+
+if not veto_macro_ativo and ativos_sheets:
+    print("\nA iniciar rastreio técnico para US Breakouts...")
+    
+    for item in ativos_sheets:
+        if isinstance(item, dict):
+            ticker = item.get("ticker", "").strip().upper()
+            nome = item.get("nome", ticker)
+            setor = item.get("setor", "Desconhecido")
+            rs_score = item.get("rsScore", "N/A")
+            earnings = item.get("earnings", "OK")
+        else:
+            ticker = str(item).strip().upper()
+            nome, setor, rs_score, earnings = ticker, "Desconhecido", "N/A", "OK"
+
+        if not ticker or "." in ticker:  # Filtra ativos não-US (ex: .PA, .DE, .LS)
+            continue
+
+        try:
+            df = yf.download(ticker, period="3mo", interval="1d", progress=False)
+            if df.empty or len(df) < 20: continue
+            if isinstance(df.columns, pd.MultiIndex): df.columns = df.columns.droplevel(1)
+
+            preco = round(float(df['Close'].iloc[-1]), 2)
+            mm20 = df['Close'].rolling(20).mean().iloc[-1]
+            dist_mm20 = round(((preco - mm20) / mm20) * 100, 2)
+            ema9 = round(float(df['Close'].ewm(span=9).mean().iloc[-1]), 2)
+            
+            # Cálculo de ATR (14)
+            high_low = df['High'] - df['Low']
+            high_cp = (df['High'] - df['Close'].shift(1)).abs()
+            low_cp = (df['Low'] - df['Close'].shift(1)).abs()
+            tr = pd.concat([high_low, high_cp, low_cp], axis=1).max(axis=1)
+            atr = round(float(tr.rolling(14).mean().iloc[-1]), 2)
+            vol_percent = round((atr / preco) * 100, 2)
+
+            # Volume Relativo (RVOL)
+            vol_media = df['Volume'].rolling(20).mean().iloc[-1]
+            rvol = round(float(df['Volume'].iloc[-1] / vol_media), 2) if vol_media > 0 else 1.0
+
+            # Condição de Breakout (Exemplo: Próximo ou acima da máxima de 20 dias com volume)
+            max_20 = df['High'].iloc[-21:-1].max()
+            if preco >= (max_20 * 0.98) and rvol >= 1.2:
+                gatilho = round(max_20 * 1.005, 2)
+                stop = round(gatilho - (2 * atr), 2)
+                tp = round(gatilho + (4 * atr), 2)
+                qtd = round(500 / (gatilho - stop), 2) if (gatilho - stop) > 0 else 1.0
+                
+                linha_breakout = (
+                    f"{ticker},Nome: {nome},Setor: {setor},Preço: {preco},RS Score: {rs_score},"
+                    f"Dist MM20: {dist_mm20}%,EMA9: {ema9},ATR: {atr} (Vol: {vol_percent}%),RVOL: {rvol},"
+                    f"Estado: Aguardar Recuo,Entrada: {gatilho},Stop: {stop},Take-Profit: {tp},"
+                    f"Qtd: {qtd},ValorInvestir: ~{round(qtd*gatilho, 2)} USD,Earnings: {earnings}\n"
+                )
+                bloco_us_breakouts += linha_breakout
+        except Exception:
+            continue
+
+# ===================================================================
+# 7. MONTAGEM DO FICHEIRO TEMPORÁRIO E RELATÓRIO
 # ===================================================================
 data_hoje = datetime.now(ZoneInfo("Europe/Lisbon")).strftime("%d/%m/%Y %H:%M")
 
@@ -211,24 +262,27 @@ else:
 if veto_macro_ativo:
     bloco_texto += "✅ Análise de novas entradas da watchlist omitida devido ao Veto Macro.\n"
 else:
-    bloco_texto += f"✅ Watchlist auditada e pronta com {len(ativos_sheets)} ativos ativos.\n"
+    bloco_texto += "DADOS DOS ATIVOS ACIONADOS (US BREAKOUTS):\n\n"
+    if bloco_us_breakouts:
+        bloco_texto += bloco_us_breakouts
+    else:
+        bloco_texto += "[SEM SINAIS US BREAKOUT] Nenhum ativo atendeu aos critérios de breakout de volume hoje.\n\n"
+    bloco_texto += f"--------------------------------------------------\nWatchlist auditada e pronta com {len(ativos_sheets)} ativos ativos.\n"
 
 # ===================================================================
-# 7. GRAVAÇÃO DO FICHEIRO, ENVIO DE E-MAIL E TELEGRAM
+# 8. GRAVAÇÃO DO FICHEIRO E NOTIFICAÇÕES
 # ===================================================================
 print("A gravar ficheiro temporário 'comboio_temp.txt'...")
 with open("comboio_temp.txt", "w", encoding="utf-8") as f:
     f.write(bloco_texto)
 
-# ASSUNTO DO E-MAIL COM ÍCONES:
 assunto_email = f"📥⚡ tradingRelatorioIA US - EXTRATOR DE DADOS 🛡️ ({datetime.now(ZoneInfo('Europe/Lisbon')).strftime('%d/%m/%Y')})"
 enviar_email(assunto_email, bloco_texto)
 
-# NOTIFICAÇÃO TELEGRAM:
 debug_telegram_ativado = str(configs_dict.get("TELEGRAM_NOTIFICATIONS_DEBUG", "false")).strip().lower() in ["true", "1", "sim", "yes"]
 
 if debug_telegram_ativado or veto_macro_ativo:
-    print("A enviar notificação para o Telegram via função modular...")
+    print("A enviar notificação para o Telegram...")
     status_macro = "🚨 *VETO MACRO ATIVADO*" if veto_macro_ativo else "🟢 *MERCADO ESTÁVEL*"
     mensagem_telegram = (
         f"📥⚡ *EXTRATOR DE DADOS US*\n\n"
@@ -239,5 +293,5 @@ if debug_telegram_ativado or veto_macro_ativo:
     )
     enviar_alerta(mensagem_telegram)
 
-print("[SUCESSO] Extração e auditoria concluídas sem bloqueio de pipeline.")
+print("[SUCESSO] Extração e rastreio US concluídos com sucesso.")
 sys.exit(0)
