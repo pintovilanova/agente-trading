@@ -102,7 +102,7 @@ print(f"[SUCESSO] {len(ativos_sheets)} ativos carregados da Watchlist.")
 print(f"[SUCESSO] {len(posicoes_ativas_dict)} posições ativas detetadas.\n")
 
 # ===================================================================
-# 4. AUDITAR POSIÇÕES EM CARTEIRA
+# 4. AUDITAR POSIÇÕES EM CARTEIRA (BUG CORRIGIDO)
 # ===================================================================
 bloco_posicoes_ativas = ""
 for chave_pos, info in posicoes_ativas_dict.items():
@@ -126,11 +126,9 @@ for chave_pos, info in posicoes_ativas_dict.items():
                         df_intra.columns = df_intra.columns.droplevel(1)
                     preco_atual = round(float(df_intra['Close'].iloc[-1]), 2)
                     maxima_hoje = round(float(df_intra['High'].max()), 2)
-                    minima_hoje = round(float(df_intra['Low'].min()), 2)
                 except Exception:
                     preco_atual = round(float(df_pos['Close'].iloc[-1]), 2)
                     maxima_hoje = round(float(df_pos['High'].iloc[-1]), 2)
-                    minima_hoje = round(float(df_pos['Low'].iloc[-1]), 2)
                 
                 entrada = limpar_float(info.get("precoEntrada")) or preco_atual
                 qtd = info.get("quantidade", "N/A")
@@ -138,8 +136,11 @@ for chave_pos, info in posicoes_ativas_dict.items():
                 
                 if alvo_tp > 0 and maxima_efetiva >= alvo_tp:
                     acao = f"🎯 ALVO ALCANÇADO (TP em ${alvo_tp})! Recomendado FECHAR POSIÇÃO com Lucro (WIN)."
-                elif stop > 0 and minima_hoje <= stop:
+                
+                # CÓDIGO CORRIGIDO: Comparação de Stop diretamente contra o preço atual
+                elif stop > 0 and preco_atual <= stop:
                     acao = f"🚨 STOP LOSS ATINGIDO (${stop})! Recomendado LIQUIDAR POSIÇÃO (LOSS)."
+                
                 else:
                     acao = f"⏳ MANTER POSIÇÃO. Alvo TP: ${alvo_tp} | Stop: ${stop}."
                 
@@ -175,7 +176,7 @@ except Exception as e:
     print(f"[AVISO] Falha ao verificar filtro SPY: {e}")
 
 # ===================================================================
-# 6. RASTREIO DE ATIVOS US BREAKOUT (NOVA SECÇÃO)
+# 6. RASTREIO DE ATIVOS US BREAKOUT
 # ===================================================================
 bloco_us_breakouts = ""
 
