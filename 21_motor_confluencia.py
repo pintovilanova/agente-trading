@@ -266,12 +266,12 @@ def executar_motor():
             info_ativo = next((item for item in ativos_sheets if str(item.get("ticker","")).strip().upper() == a['ticker']), {})
             bloco_texto += (
                 f"💎 [{a['ticker']}] - {info_ativo.get('nome', 'N/A')} ({info_ativo.get('setor', 'Desconhecido')})\n"
-                f"   - 📊 Contexto Técnico: {a['estado_confluencia']}\n"
-                f"   - ⚙️ Tática: Breakout Sniper Assímetrico\n"
-                f"   - 📋 Tipo de Ordem: BUY STOP (Gatilho: ${a['gatilho']})\n"
-                f"   - 🔢 Risco/Retorno (3:1): Stop Loss: ${a['stop_loss']} | Alvo: ${a['alvo_tp']}\n"
-                f"   - 💰 Dimensionamento: Qtd: {a['qtd_acoes']} | Investimento: ~${a['valor_investir']} USD\n"
-                f"   - 📈 Métricas de Força: RS Score >= 75 | RVOL: {a['rvol']}x\n"
+                f"    - 📊 Contexto Técnico: {a['estado_confluencia']}\n"
+                f"    - ⚙️ Tática: Breakout Sniper Assímetrico\n"
+                f"    - 📋 Tipo de Ordem: BUY STOP (Gatilho: ${a['gatilho']})\n"
+                f"    - 🔢 Risco/Retorno (3:1): Stop Loss: ${a['stop_loss']} | Alvo: ${a['alvo_tp']}\n"
+                f"    - 💰 Dimensionamento: Qtd: {a['qtd_acoes']} | Investimento: ~${a['valor_investir']} USD\n"
+                f"    - 📈 Métricas de Força: RS Score >= 75 | RVOL: {a['rvol']}x\n"
                 f"--------------------------------------------------\n"
             )
     else:
@@ -282,7 +282,7 @@ def executar_motor():
     with open("comboio_confluencia_temp.txt", "w", encoding="utf-8") as f:
         f.write(bloco_texto)
 
-    # Notificação no Telegram (respeitando ou não o debug, ou forçada se pretendido)
+    # Notificação no Telegram
     enviar_alerta(f"21 ⚡ *MOTOR 21 (CONFLUÊNCIA)*\n\n🔍 Execução Concluída.\n🎯 Acionados: *{len(alertas_confluencia)}*")
 
 if __name__ == "__main__":
