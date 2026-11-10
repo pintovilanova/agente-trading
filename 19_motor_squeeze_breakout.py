@@ -135,7 +135,7 @@ vol_diaria_usd = capital * pct_risco
 print(f"[CONFIG] Capital Total: ${capital:,.2f} | Risco/Trade: {pct_risco*100:.1f}% (${vol_diaria_usd:,.2f} USD)\n")
 
 # ===================================================================
-# 4. AUDITAR POSIÇÕES EM CARTEIRA (ESTRITO: ATIVA_M19)
+# 4. AUDITAR POSIÇÕES EM CARTEIRA (CORRIGIDO: PREÇO ATUAL VS STOP)
 # ===================================================================
 bloco_posicoes_ativas = ""
 for chave_pos, info in posicoes_ativas_dict.items():
@@ -160,19 +160,18 @@ for chave_pos, info in posicoes_ativas_dict.items():
                         df_intra.columns = df_intra.columns.droplevel(1)
                     preco_atual = round(float(df_intra['Close'].iloc[-1]), 2)
                     maxima_hoje = round(float(df_intra['High'].max()), 2)
-                    minima_hoje = round(float(df_intra['Low'].min()), 2)
                 except Exception:
                     preco_atual = round(float(df_pos['Close'].iloc[-1]), 2)
                     maxima_hoje = round(float(df_pos['High'].iloc[-1]), 2)
-                    minima_hoje = round(float(df_pos['Low'].iloc[-1]), 2)
                 
                 entrada = limpar_float(info.get("precoEntrada")) or preco_atual
                 qtd = info.get("quantidade", "N/A")
                 maxima_efetiva = max(maxima_hoje, preco_atual)
                 
+                # CORREÇÃO CRUCIAL: Comparação estrita entre PREÇO ATUAL e STOP LOSS
                 if alvo_tp > 0 and preco_atual >= alvo_tp:
                     acao = f"🎯 ALVO ALCANÇADO (TP em ${alvo_tp})! Recomendado FECHAR POSIÇÃO com Lucro (WIN)."
-                elif stop > 0 and minima_hoje <= stop:
+                elif stop > 0 and preco_atual <= stop:
                     acao = f"🚨 STOP LOSS ATINGIDO (${stop})! Recomendado LIQUIDAR POSIÇÃO (LOSS)."
                 else:
                     acao = f"⏳ MANTER POSIÇÃO (Squeeze Breakout). Alvo TP: ${alvo_tp} | Stop: ${stop}."
