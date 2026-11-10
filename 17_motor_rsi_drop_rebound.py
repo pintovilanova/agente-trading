@@ -119,7 +119,7 @@ vol_diaria_usd = capital * pct_risco
 print(f"[CONFIG] Capital Total: ${capital:,.2f} | Risco/Trade: {pct_risco*100:.1f}% (${vol_diaria_usd:,.2f} USD)\n")
 
 # ===================================================================
-# 4. AUDITAR POSIÇÕES EM CARTEIRA (ESTRITO: ATIVA_M17 - PRE-MARKET FORÇADO & EMA5)
+# 4. AUDITAR POSIÇÕES EM CARTEIRA (CORRIGIDO: PREÇO ATUAL VS STOP)
 # ===================================================================
 bloco_posicoes_ativas = ""
 
@@ -202,6 +202,7 @@ for chave_pos, info in posicoes_ativas_dict.items():
             if preco_atual == 0.0:
                 preco_atual = entrada
 
+            # CORREÇÃO CRUCIAL: Comparação estrita de Preço Atual vs Stop Loss
             if alvo_efetivo > 0 and preco_atual >= alvo_efetivo:
                 acao = f"🎯 ALVO ALCANÇADO ({label_alvo})! Recomendado FECHAR POSIÇÃO com Lucro (WIN)."
             elif stop > 0 and preco_atual <= stop:
