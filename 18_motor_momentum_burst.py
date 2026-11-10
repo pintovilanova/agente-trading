@@ -75,7 +75,7 @@ def buscar_dados_completos():
 
             if isinstance(dados, dict):
                 ativos = dados.get("ativos", [])
-                posicoes = dados.get("posicoesAtivas", {})
+                posicoes = dados.get("posicoesAtivas", {}) or dados.get("posicoes", {})
                 configs = dados.get("configs", {})
                 return ativos, posicoes, configs
             elif isinstance(dados, list):
@@ -131,10 +131,11 @@ vol_diaria_usd = (capital * vol_anual) / 16.0
 print(f"[CONFIG] Orçamento Diário de Volatilidade: ${vol_diaria_usd:.2f}\n")
 
 # ===================================================================
-# 4. AUDITAR POSIÇÕES EM CARTEIRA (ESTADO: ATIVA_M18)
+# 4. AUDITAR POSIÇÕES EM CARTEIRA (CORRIGIDO: PREÇO ATUAL VS STOP)
 # ===================================================================
 bloco_posicoes_ativas = ""
 for ticker, info in posicoes_ativas_dict.items():
+    if not isinstance(info, dict): continue
     status = str(info.get("status", "")).strip().upper()
     if status in ["ATIVA_M18", "ATIVA_SWING"]:
         try:
@@ -152,11 +153,9 @@ for ticker, info in posicoes_ativas_dict.items():
                         df_intra.columns = df_intra.columns.droplevel(1)
                     preco_atual = round(float(df_intra['Close'].iloc[-1]), 2)
                     maxima_hoje = round(float(df_intra['High'].max()), 2)
-                    minima_hoje = round(float(df_intra['Low'].min()), 2)
                 except Exception:
                     preco_atual = round(float(df_pos['Close'].iloc[-1]), 2)
                     maxima_hoje = round(float(df_pos['High'].iloc[-1]), 2)
-                    minima_hoje = round(float(df_pos['Low'].iloc[-1]), 2)
                 
                 entrada = limpar_float(info.get("precoEntrada")) or preco_atual
                 qtd = info.get("quantidade", "N/A")
@@ -166,9 +165,10 @@ for ticker, info in posicoes_ativas_dict.items():
                 if alvo_tp <= 0 and stop > 0 and entrada > stop:
                     alvo_tp = round(entrada + ((entrada - stop) * 2.0), 2)
                 
+                # CORREÇÃO CRUCIAL: Comparação estrita entre PREÇO ATUAL e STOP LOSS
                 if alvo_tp > 0 and maxima_efetiva >= alvo_tp:
                     acao = f"🎯 ALVO ALCANÇADO (TP em ${alvo_tp})! Recomendado FECHAR POSIÇÃO com Lucro (WIN)."
-                elif stop > 0 and minima_hoje <= stop:
+                elif stop > 0 and preco_atual <= stop:
                     acao = f"🚨 STOP LOSS ATINGIDO (${stop})! Recomendado LIQUIDAR POSIÇÃO (LOSS)."
                 else:
                     acao = f"⏳ MANTER POSIÇÃO (Hit and Run). Alvo TP: ${alvo_tp} | Stop Fixo/Trail: ${stop}."
