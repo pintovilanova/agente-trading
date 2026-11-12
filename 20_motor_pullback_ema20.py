@@ -168,11 +168,26 @@ for chave_pos, info in posicoes_ativas_dict.items():
                 qtd = info.get("quantidade", "N/A")
                 maxima_efetiva = max(maxima_hoje, preco_atual)
                 
-                # CORREÇÃO CRUCIAL: Comparação estrita entre PREÇO ATUAL e STOP LOSS
-                if alvo_tp > 0 and preco_atual >= alvo_tp:
+                # ATUALIZAÇÃO: Cálculo automático de TP 2R e Trailing Stop Break-Even
+                risco_inicial = entrada - stop if entrada > stop else 0.0
+                
+                # Se o alvo TP vier a zero do Sheets, calcula automaticamente 2R (Padrão para Pullback de Continuação)
+                if alvo_tp <= 0 and risco_inicial > 0:
+                    alvo_tp = round(entrada + (risco_inicial * 2.0), 2)
+                
+                # Se o preço efetivo avançou mais de 0.5R, recomenda subir o stop para Break-Even (+0.05% para comissões)
+                sugestao_stop = stop
+                if risco_inicial > 0 and maxima_efetiva >= (entrada + (risco_inicial * 0.5)):
+                    be_calculado = round(entrada * 1.0005, 2)
+                    if be_calculado > stop:
+                        sugestao_stop = be_calculado
+                
+                if alvo_tp > 0 and maxima_efetiva >= alvo_tp:
                     acao = f"🎯 ALVO ALCANÇADO (TP em ${alvo_tp})! Recomendado FECHAR POSIÇÃO com Lucro (WIN)."
                 elif stop > 0 and preco_atual <= stop:
                     acao = f"🚨 STOP LOSS ATINGIDO (${stop})! Recomendado LIQUIDAR POSIÇÃO (LOSS)."
+                elif sugestao_stop > stop:
+                    acao = f"🛡️ PROTEGER POSIÇÃO. +0.5R Atingido! Sobe o Stop para Break-Even: ${sugestao_stop} | Alvo TP: ${alvo_tp}."
                 else:
                     acao = f"⏳ MANTER POSIÇÃO (Pullback EMA 20). Alvo TP: ${alvo_tp} | Stop: ${stop}."
                 
