@@ -9,7 +9,6 @@
 
 import pandas as pd
 import yfinance as yf
-yf.cache.clear() # Limpa a cache para forçar a geração de um novo crumb válido
 import pandas_ta as ta
 import numpy as np
 from datetime import datetime
@@ -25,6 +24,14 @@ from email.mime.multipart import MIMEMultipart
 import json
 import warnings
 warnings.filterwarnings("ignore")
+
+# ===================================================================
+# BYPASS SESSÃO YAHOO FINANCE (PARA GITHUB ACTIONS)
+# ===================================================================
+session = requests.Session()
+session.headers.update({
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+})
 
 # Importação da função modular de notificação do Telegram
 from F01_notificador_telegram import enviar_alerta
@@ -111,7 +118,7 @@ def enviar_email(conteudo):
 def obter_setor_yf(ticker):
     """Fallback para obter o setor diretamente do yfinance caso falhe no Sheets"""
     try:
-        t = yf.Ticker(ticker)
+        t = yf.Ticker(ticker, session=session)
         setor = t.info.get('sector')
         return setor if setor else "Desconhecido"
     except Exception:
@@ -140,7 +147,7 @@ for ticker, info in posicoes_ativas_dict.items():
     status = str(info.get("status", "")).strip().upper()
     if status in ["ATIVA_M18", "ATIVA_SWING"]:
         try:
-            df_pos = yf.download(ticker, period="1mo", interval="1d", progress=False)
+            df_pos = yf.download(ticker, period="1mo", interval="1d", progress=False, session=session)
             if not df_pos.empty:
                 if isinstance(df_pos.columns, pd.MultiIndex):
                     df_pos.columns = df_pos.columns.droplevel(1)
@@ -149,7 +156,7 @@ for ticker, info in posicoes_ativas_dict.items():
                 alvo_tp = limpar_float(info.get("alvoTp")) or limpar_float(info.get("takeProfit")) or 0.0
                 
                 try:
-                    df_intra = yf.download(ticker, period="2d", interval="1m", prepost=True, progress=False)
+                    df_intra = yf.download(ticker, period="2d", interval="1m", prepost=True, progress=False, session=session)
                     if isinstance(df_intra.columns, pd.MultiIndex):
                         df_intra.columns = df_intra.columns.droplevel(1)
                     preco_atual = round(float(df_intra['Close'].iloc[-1]), 2)
@@ -162,15 +169,26 @@ for ticker, info in posicoes_ativas_dict.items():
                 qtd = info.get("quantidade", "N/A")
                 maxima_efetiva = max(maxima_hoje, preco_atual)
                 
-                # REFORÇO: Se o TP estiver a 0 nas posições ativas, calcula automaticamente 2R com base na entrada e stop
-                if alvo_tp <= 0 and stop > 0 and entrada > stop:
-                    alvo_tp = round(entrada + ((entrada - stop) * 2.0), 2)
+                # ATUALIZAÇÃO: Cálculo automático de TP 2R e Trailing Stop Break-Even
+                risco_inicial = entrada - stop if entrada > stop else 0.0
                 
-                # CORREÇÃO CRUCIAL: Comparação estrita entre PREÇO ATUAL e STOP LOSS
+                # Se o alvo TP vier a zero do Sheets, calcula automaticamente 2R
+                if alvo_tp <= 0 and risco_inicial > 0:
+                    alvo_tp = round(entrada + (risco_inicial * 2.0), 2)
+                
+                # Se o preço efetivo avançou mais de 0.5R, recomenda subir o stop para Break-Even (+0.05% para comissões)
+                sugestao_stop = stop
+                if risco_inicial > 0 and maxima_efetiva >= (entrada + (risco_inicial * 0.5)):
+                    be_calculado = round(entrada * 1.0005, 2)
+                    if be_calculado > stop:
+                        sugestao_stop = be_calculado
+                
                 if alvo_tp > 0 and maxima_efetiva >= alvo_tp:
                     acao = f"🎯 ALVO ALCANÇADO (TP em ${alvo_tp})! Recomendado FECHAR POSIÇÃO com Lucro (WIN)."
                 elif stop > 0 and preco_atual <= stop:
                     acao = f"🚨 STOP LOSS ATINGIDO (${stop})! Recomendado LIQUIDAR POSIÇÃO (LOSS)."
+                elif sugestao_stop > stop:
+                    acao = f"🛡️ PROTEGER POSIÇÃO. +0.5R Atingido! Sobe o Stop para Break-Even: ${sugestao_stop} | Alvo TP: ${alvo_tp}."
                 else:
                     acao = f"⏳ MANTER POSIÇÃO (Hit and Run). Alvo TP: ${alvo_tp} | Stop Fixo/Trail: ${stop}."
                 
@@ -212,7 +230,7 @@ def analisar_momentum_burst(ativo_info):
         max_52s = None
         alerta_earnings = "OK"
         try:
-            ticker_obj = yf.Ticker(ticker)
+            ticker_obj = yf.Ticker(ticker, session=session)
             info_dados = ticker_obj.info
             
             if not setor or setor.lower() in ["desconhecido", "n/a", "", "none", "#n/a"]:
@@ -234,7 +252,7 @@ def analisar_momentum_burst(ativo_info):
         df = pd.DataFrame()
         for _ in range(3):
             try:
-                df = yf.download(ticker, period="1y", interval="1d", progress=False, timeout=15)
+                df = yf.download(ticker, period="1y", interval="1d", progress=False, timeout=15, session=session)
                 if not df.empty and len(df) >= 60:
                     break
             except Exception:
