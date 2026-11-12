@@ -72,7 +72,7 @@ def buscar_dados_completos():
         return [], {}, {}
     try:
         url_alvo = WEBHOOK_URL if "?" in WEBHOOK_URL else f"{WEBHOOK_URL}?aba=Analise Compra"
-        resp = requests.get(url_alvo, timeout=15)
+        resp = requests.get(url_alvo, timeout=30)
         
         if resp.status_code == 200:
             try:
