@@ -13,6 +13,7 @@
 
 import pandas as pd
 import yfinance as yf
+yf.cache.clear() # Limpa a cache para forçar a geração de um novo crumb válido
 import pandas_ta as ta
 import numpy as np
 from datetime import datetime
