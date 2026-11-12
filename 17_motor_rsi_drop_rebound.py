@@ -20,6 +20,14 @@ import json
 import warnings
 warnings.filterwarnings("ignore")
 
+# ===================================================================
+# BYPASS SESSÃO YAHOO FINANCE (PARA GITHUB ACTIONS)
+# ===================================================================
+session = requests.Session()
+session.headers.update({
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+})
+
 # Importação da função modular de notificação do Telegram
 from F01_notificador_telegram import enviar_alerta
 
@@ -119,13 +127,13 @@ vol_diaria_usd = capital * pct_risco
 print(f"[CONFIG] Capital Total: ${capital:,.2f} | Risco/Trade: {pct_risco*100:.1f}% (${vol_diaria_usd:,.2f} USD)\n")
 
 # ===================================================================
-# 4. AUDITAR POSIÇÕES EM CARTEIRA (CORRIGIDO: PREÇO ATUAL VS STOP)
+# 4. AUDITAR POSIÇÕES EM CARTEIRA (CORRIGIDO E BLINDADO)
 # ===================================================================
 bloco_posicoes_ativas = ""
 
 def obter_preco_realtime_premarket(ticker):
     try:
-        df_rt = yf.download(ticker, period="5d", interval="1m", prepost=True, progress=False)
+        df_rt = yf.download(ticker, period="5d", interval="1m", prepost=True, progress=False, session=session)
         if not df_rt.empty:
             if isinstance(df_rt.columns, pd.MultiIndex):
                 df_rt.columns = df_rt.columns.get_level_values(0)
@@ -137,7 +145,7 @@ def obter_preco_realtime_premarket(ticker):
         print(f"[AVISO] Falha ao extrair intraday pre-market para {ticker}: {e}")
         
     try:
-        t = yf.Ticker(ticker)
+        t = yf.Ticker(ticker, session=session)
         fast = t.fast_info
         p_pre = getattr(fast, 'pre_market_price', None)
         p_last = getattr(fast, 'last_price', None)
@@ -154,26 +162,36 @@ def obter_preco_realtime_premarket(ticker):
 def obter_dados_posicao_m17(ticker):
     preco_atual = 0.0
     ema5_atual = 0.0
+    atr_atual = 0.0
+    maxima_hoje = 0.0
     
     try:
-        df_pos = yf.download(ticker, period="1mo", interval="1d", progress=False)
+        df_pos = yf.download(ticker, period="1mo", interval="1d", progress=False, session=session)
         if not df_pos.empty:
             if isinstance(df_pos.columns, pd.MultiIndex):
                 df_pos.columns = df_pos.columns.droplevel(1)
             
-            df_pos = df_pos.dropna(subset=['Close'])
-            if len(df_pos) >= 5:
+            df_pos = df_pos.dropna(subset=['Close', 'High', 'Low'])
+            if len(df_pos) >= 14:
                 df_pos['EMA5'] = df_pos['Close'].ewm(span=5, adjust=False).mean()
+                df_pos.ta.atr(length=14, append=True)
+                
+                cols_atr = [c for c in df_pos.columns if str(c).startswith('ATRr_') or str(c).startswith('ATR_') or str(c).startswith('ATRe_')]
+                if cols_atr:
+                    atr_atual = round(float(df_pos[cols_atr[0]].iloc[-1]), 2)
+
                 ema5_atual = round(float(df_pos['EMA5'].iloc[-1]), 2)
                 preco_atual = round(float(df_pos['Close'].iloc[-1]), 2)
+                maxima_hoje = round(float(df_pos['High'].iloc[-1]), 2)
     except Exception as e:
         print(f"[AVISO] Falha ao obter dados diários para {ticker}: {e}")
 
     preco_realtime = obter_preco_realtime_premarket(ticker)
     if preco_realtime > 0:
         preco_atual = preco_realtime
+        maxima_hoje = max(maxima_hoje, preco_atual)
 
-    return preco_atual, ema5_atual
+    return preco_atual, ema5_atual, atr_atual, maxima_hoje
 
 for chave_pos, info in posicoes_ativas_dict.items():
     if not isinstance(info, dict): continue
@@ -183,10 +201,14 @@ for chave_pos, info in posicoes_ativas_dict.items():
         try:
             ticker = "AI" if chave_pos.lower() in ["c3.ai", "c3"] else chave_pos.strip().upper()
             
-            preco_atual, ema5_dinamica = obter_dados_posicao_m17(ticker)
+            preco_atual, ema5_dinamica, atr_calc, maxima_hoje = obter_dados_posicao_m17(ticker)
             
             stop = limpar_float(info.get("stopAtual")) or limpar_float(info.get("stopLoss")) or 0.0
             entrada = limpar_float(info.get("precoEntrada")) or preco_atual
+            
+            # Se o stop vier a zero do Sheets, calcula automaticamente com base no ATR (1.5 * ATR)
+            if stop <= 0 and atr_calc > 0 and entrada > 0:
+                stop = round(entrada - (atr_calc * 1.5), 2)
             
             tp_sheets = (
                 limpar_float(info.get("alvoTp")) or 
@@ -198,15 +220,28 @@ for chave_pos, info in posicoes_ativas_dict.items():
             alvo_efetivo = tp_sheets if tp_sheets > 0 else ema5_dinamica
             label_alvo = f"${alvo_efetivo}" if tp_sheets > 0 else f"${alvo_efetivo} (EMA5)"
             qtd = info.get("quantidade", "N/A")
+            maxima_efetiva = max(maxima_hoje, preco_atual)
             
             if preco_atual == 0.0:
                 preco_atual = entrada
 
-            # CORREÇÃO CRUCIAL: Comparação estrita de Preço Atual vs Stop Loss
-            if alvo_efetivo > 0 and preco_atual >= alvo_efetivo:
+            # CÁLCULO DE TRAILING STOP BREAK-EVEN SEGURO
+            risco_inicial = entrada - stop if entrada > stop else 0.0
+            sugestao_stop = stop
+            patamar_lucro_meio_r = entrada + (risco_inicial * 0.5)
+
+            if risco_inicial > 0 and maxima_efetiva >= patamar_lucro_meio_r and preco_atual > entrada:
+                be_calculado = round(entrada * 1.0005, 2) # Break-even com folga de comissão (+0.05%)
+                if be_calculado > stop:
+                    sugestao_stop = be_calculado
+
+            # COMPARAÇÃO E AVALIAÇÃO DA TÁTICA
+            if alvo_efetivo > 0 and maxima_efetiva >= alvo_efetivo:
                 acao = f"🎯 ALVO ALCANÇADO ({label_alvo})! Recomendado FECHAR POSIÇÃO com Lucro (WIN)."
             elif stop > 0 and preco_atual <= stop:
                 acao = f"🚨 STOP LOSS ATINGIDO (${stop})! Recomendado LIQUIDAR POSIÇÃO (LOSS)."
+            elif sugestao_stop > stop and preco_atual > entrada:
+                acao = f"🛡️ PROTEGER POSIÇÃO. +0.5R Atingido! Sobe o Stop para Break-Even: ${sugestao_stop} | Alvo: {label_alvo}."
             else:
                 acao = f"⏳ MANTER POSIÇÃO (RSI Rebound). Alvo: {label_alvo} | Stop: ${stop}."
             
@@ -227,7 +262,7 @@ def analisar_rsi_drop(ativo_info):
         if ticker in posicoes_ativas_dict: return None
         if ticker == "BRK-A": ticker = "BRK-B"
 
-        df = yf.download(ticker, period="1y", interval="1d", progress=False)
+        df = yf.download(ticker, period="1y", interval="1d", progress=False, session=session)
         if df.empty or len(df) < 200: return None
         
         if isinstance(df.columns, pd.MultiIndex): 
@@ -269,7 +304,6 @@ def analisar_rsi_drop(ativo_info):
             qtd_calc = round(vol_diaria_usd / risco, 2) if risco > 0 else 0.0
             val_calc = entrada_gatilho * qtd_calc
 
-            # Extração robusta do Nome e Setor com fallbacks múltiplos
             nome_empresa = (
                 ativo_info.get("nome") or 
                 ativo_info.get("nomeEmpresa") or 
@@ -283,10 +317,9 @@ def analisar_rsi_drop(ativo_info):
                 ativo_info.get("Setor") or "Desconhecido"
             )
 
-            # Fallback adicional via yfinance se vier a N/A ou Desconhecido
             if nome_empresa == "N/A" or setor == "Desconhecido":
                 try:
-                    t_obj = yf.Ticker(ticker)
+                    t_obj = yf.Ticker(ticker, session=session)
                     info_t = t_obj.info
                     if nome_empresa == "N/A":
                         nome_empresa = info_t.get("longName") or info_t.get("shortName") or "N/A"
@@ -358,15 +391,12 @@ def executar_motor():
     else:
         bloco_texto += "✅ Nenhum novo sinal de RSI Drop detetado hoje.\n"
 
-    # GRAVAÇÃO DO FICHEIRO TEMPORÁRIO (.TXT)
     with open("comboio_rsi_rebound_temp.txt", "w", encoding="utf-8") as f:
         f.write(bloco_texto)
 
-    # ENVIO DE E-MAIL
     assunto_email = f"⚡🎯 tradingRelatorioIA US - MOTOR 17 RSI DROP ({datetime.now(ZoneInfo('Europe/Lisbon')).strftime('%d/%m/%Y')})"
     enviar_email(assunto_email, bloco_texto)
 
-    # 📌 NOTIFICAÇÃO TELEGRAM
     debug_telegram_ativado = str(configs_dict.get("TELEGRAM_NOTIFICATIONS_DEBUG", "false")).strip().lower() in ["true", "1", "sim", "yes"]
 
     if debug_telegram_ativado or len(alertas_rsi) > 0:
