@@ -126,6 +126,71 @@ except (ValueError, TypeError):
 vol_diaria_usd = capital * pct_risco
 
 # ===================================================================
+# 3B. AUDITAR POSIÇÕES EM CARTEIRA (CORRIGIDO: PREÇO ATUAL VS STOP)
+# ===================================================================
+bloco_posicoes_ativas = ""
+for chave_pos, info in posicoes_ativas_dict.items():
+    if not isinstance(info, dict): continue
+    status = str(info.get("status", "")).strip().upper()
+    
+    if status == "ATIVA_M21":
+        try:
+            ticker = "AI" if chave_pos.lower() in ["c3.ai", "c3"] else chave_pos.strip().upper()
+            
+            df_pos = yf.download(ticker, period="1mo", interval="1d", progress=False)
+            if not df_pos.empty:
+                if isinstance(df_pos.columns, pd.MultiIndex):
+                    df_pos.columns = df_pos.columns.droplevel(1)
+                
+                stop = limpar_float(info.get("stopAtual")) or limpar_float(info.get("stopLoss")) or 0.0
+                alvo_tp = limpar_float(info.get("alvoTp")) or limpar_float(info.get("takeProfit")) or 0.0
+                
+                try:
+                    df_intra = yf.download(ticker, period="2d", interval="1m", prepost=True, progress=False)
+                    if isinstance(df_intra.columns, pd.MultiIndex):
+                        df_intra.columns = df_intra.columns.droplevel(1)
+                    preco_atual = round(float(df_intra['Close'].iloc[-1]), 2)
+                    maxima_hoje = round(float(df_intra['High'].max()), 2)
+                except Exception:
+                    preco_atual = round(float(df_pos['Close'].iloc[-1]), 2)
+                    maxima_hoje = round(float(df_pos['High'].iloc[-1]), 2)
+                
+                entrada = limpar_float(info.get("precoEntrada")) or preco_atual
+                qtd = info.get("quantidade", "N/A")
+                maxima_efetiva = max(maxima_hoje, preco_atual)
+                
+                # ATUALIZAÇÃO: Cálculo automático de TP 3R e Trailing Stop Break-Even
+                risco_inicial = entrada - stop if entrada > stop else 0.0
+                
+                # Motor 21 é Sniper, alvo padrão é 3R
+                if alvo_tp <= 0 and risco_inicial > 0:
+                    alvo_tp = round(entrada + (risco_inicial * 3.0), 2)
+                
+                # Se o preço efetivo avançou mais de 1R (no motor 21 exige-se mais margem para não ser stopado à toa no ruído), 
+                # recomenda subir o stop para Break-Even (+0.05% para comissões)
+                sugestao_stop = stop
+                if risco_inicial > 0 and maxima_efetiva >= (entrada + (risco_inicial * 1.0)):
+                    be_calculado = round(entrada * 1.0005, 2)
+                    if be_calculado > stop:
+                        sugestao_stop = be_calculado
+                
+                if alvo_tp > 0 and maxima_efetiva >= alvo_tp:
+                    acao = f"🎯 ALVO ALCANÇADO (TP em ${alvo_tp})! Recomendado FECHAR POSIÇÃO com Lucro (WIN)."
+                elif stop > 0 and preco_atual <= stop:
+                    acao = f"🚨 STOP LOSS ATINGIDO (${stop})! Recomendado LIQUIDAR POSIÇÃO (LOSS)."
+                elif sugestao_stop > stop:
+                    acao = f"🛡️ PROTEGER POSIÇÃO. +1R Atingido! Sobe o Stop para Break-Even: ${sugestao_stop} | Alvo TP: ${alvo_tp}."
+                else:
+                    acao = f"⏳ MANTER POSIÇÃO (Confluência Suprema). Alvo TP: ${alvo_tp} | Stop: ${stop}."
+                
+                bloco_posicoes_ativas += (
+                    f"📌 [{status}] {ticker} ({chave_pos}) | Qtd: {qtd} | Entrada: ${entrada} | "
+                    f"Atual: ${preco_atual} | {acao}\n"
+                )
+        except Exception as e:
+            print(f"[ERRO] Falha ao auditar posição ativa {chave_pos}: {e}")
+
+# ===================================================================
 # 4. MOTOR MATEMÁTICO: A CONFLUÊNCIA DOS 3 PILARES
 # ===================================================================
 def analisar_confluencia_suprema(ativo_info):
@@ -259,6 +324,11 @@ def executar_motor():
 
     data_hoje = datetime.now(ZoneInfo("Europe/Lisbon")).strftime("%d/%m/%Y %H:%M")
     bloco_texto = f"⚡ RELATÓRIO DETALHADO - MOTOR 21: CONFLUÊNCIA SUPREMA ({data_hoje})\n==================================================================\n\n"
+
+    if bloco_posicoes_ativas:
+        bloco_texto += f"📌 GESTÃO DE POSIÇÕES ATIVAS:\n{bloco_posicoes_ativas}\n--------------------------------------------------\n\n"
+    else:
+        bloco_texto += "📌 GESTÃO DE POSIÇÕES ATIVAS: Nenhuma posição ativa detetada para este motor.\n--------------------------------------------------\n\n"
 
     if alertas_confluencia:
         bloco_texto += f"🎯 SINAIS DE ALTA PROBABILIDADE (SNIPER) ({len(alertas_confluencia)}):\n\n"
