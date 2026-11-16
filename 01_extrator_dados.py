@@ -18,6 +18,14 @@ from zoneinfo import ZoneInfo
 import warnings
 warnings.filterwarnings("ignore")
 
+# ===================================================================
+# BYPASS SESSÃO YAHOO FINANCE (PARA GITHUB ACTIONS)
+# ===================================================================
+session = requests.Session()
+session.headers.update({
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+})
+
 from F01_notificador_telegram import enviar_alerta
 
 # ===================================================================
@@ -47,7 +55,7 @@ def limpar_float(val):
         return None
 
 # ===================================================================
-# 2. FUNÇÕES DE REDE
+# 2. FUNÇÕES DE REDE (LEITURA E ESCRITA NO GOOGLE SHEETS)
 # ===================================================================
 def buscar_dados_completos():
     print("A carregar a Watchlist, Posições Ativas e Configurações a partir do Google Sheets...")
@@ -70,6 +78,38 @@ def buscar_dados_completos():
     except Exception as e:
         print(f"[ERRO CRÍTICO] Falha ao conectar ao Sheets: {e}")
         return [], {}, {}
+
+def escrever_resultados_sheets(lista_breakouts, lista_posicoes_auditadas, veto_macro, data_execucao):
+    print("\nA enviar resultados US Breakouts para o Google Sheets...")
+    if not WEBHOOK_URL:
+        print("[ERRO] WEBHOOK_URL não configurado. Impossível escrever no Sheets.")
+        return False
+
+    payload = {
+        "acao": "gravar_us_breakouts",
+        "aba": "Analise Compra",
+        "dataExecucao": data_execucao,
+        "vetoMacro": veto_macro,
+        "resultados": lista_breakouts,
+        "posicoesAuditadas": lista_posicoes_auditadas
+    }
+
+    try:
+        resp = requests.post(
+            WEBHOOK_URL,
+            json=payload,
+            headers={"Content-Type": "application/json"},
+            timeout=25
+        )
+        if resp.status_code == 200:
+            print(f"[SUCESSO] Dados gravados no Google Sheets! Resposta: {resp.text[:200]}")
+            return True
+        else:
+            print(f"[ERRO SHEETS] HTTP {resp.status_code}: {resp.text[:200]}")
+            return False
+    except Exception as e:
+        print(f"[ERRO CRÍTICO SHEETS POST] Falha ao gravar no Sheets: {e}")
+        return False
 
 def enviar_email(assunto, conteudo):
     print(f"\nA enviar e-mail ('{assunto}')...")
@@ -102,9 +142,11 @@ print(f"[SUCESSO] {len(ativos_sheets)} ativos carregados da Watchlist.")
 print(f"[SUCESSO] {len(posicoes_ativas_dict)} posições ativas detetadas.\n")
 
 # ===================================================================
-# 4. AUDITAR POSIÇÕES EM CARTEIRA (BUG CORRIGIDO)
+# 4. AUDITAR POSIÇÕES EM CARTEIRA
 # ===================================================================
 bloco_posicoes_ativas = ""
+posicoes_auditadas_lista = []
+
 for chave_pos, info in posicoes_ativas_dict.items():
     if not isinstance(info, dict): continue
     status = str(info.get("status", "")).strip().upper()
@@ -112,7 +154,7 @@ for chave_pos, info in posicoes_ativas_dict.items():
     if status and status != "FECHADA":
         try:
             ticker = "AI" if chave_pos.lower() in ["c3.ai", "c3"] else chave_pos.strip().upper()
-            df_pos = yf.download(ticker, period="1mo", interval="1d", progress=False)
+            df_pos = yf.download(ticker, period="1mo", interval="1d", progress=False, session=session)
             if not df_pos.empty:
                 if isinstance(df_pos.columns, pd.MultiIndex):
                     df_pos.columns = df_pos.columns.droplevel(1)
@@ -121,7 +163,7 @@ for chave_pos, info in posicoes_ativas_dict.items():
                 alvo_tp = limpar_float(info.get("alvoTp")) or limpar_float(info.get("takeProfit")) or 0.0
                 
                 try:
-                    df_intra = yf.download(ticker, period="2d", interval="1m", prepost=True, progress=False)
+                    df_intra = yf.download(ticker, period="2d", interval="1m", prepost=True, progress=False, session=session)
                     if isinstance(df_intra.columns, pd.MultiIndex):
                         df_intra.columns = df_intra.columns.droplevel(1)
                     preco_atual = round(float(df_intra['Close'].iloc[-1]), 2)
@@ -136,11 +178,8 @@ for chave_pos, info in posicoes_ativas_dict.items():
                 
                 if alvo_tp > 0 and maxima_efetiva >= alvo_tp:
                     acao = f"🎯 ALVO ALCANÇADO (TP em ${alvo_tp})! Recomendado FECHAR POSIÇÃO com Lucro (WIN)."
-                
-                # CÓDIGO CORRIGIDO: Comparação de Stop diretamente contra o preço atual
                 elif stop > 0 and preco_atual <= stop:
                     acao = f"🚨 STOP LOSS ATINGIDO (${stop})! Recomendado LIQUIDAR POSIÇÃO (LOSS)."
-                
                 else:
                     acao = f"⏳ MANTER POSIÇÃO. Alvo TP: ${alvo_tp} | Stop: ${stop}."
                 
@@ -148,6 +187,14 @@ for chave_pos, info in posicoes_ativas_dict.items():
                     f"📌 [{status}] {ticker} ({chave_pos}) | Qtd: {qtd} | Entrada: ${entrada} | "
                     f"Preço Atual: ${preco_atual} | {acao}\n"
                 )
+                posicoes_auditadas_lista.append({
+                    "ticker": ticker,
+                    "status": status,
+                    "precoAtual": preco_atual,
+                    "stop": stop,
+                    "alvoTp": alvo_tp,
+                    "acao": acao
+                })
         except Exception as e:
             print(f"[ERRO] Falha ao auditar posição ativa {chave_pos}: {e}")
 
@@ -159,7 +206,7 @@ veto_macro_ativo = False
 motivo_veto = ""
 
 try:
-    df_spy = yf.download("SPY", period="5d", interval="1d", progress=False)
+    df_spy = yf.download("SPY", period="5d", interval="1d", progress=False, session=session)
     if isinstance(df_spy.columns, pd.MultiIndex):
         df_spy.columns = df_spy.columns.droplevel(1)
         
@@ -179,26 +226,28 @@ except Exception as e:
 # 6. RASTREIO DE ATIVOS US BREAKOUT
 # ===================================================================
 bloco_us_breakouts = ""
+resultados_sheets_lista = []
 
 if not veto_macro_ativo and ativos_sheets:
     print("\nA iniciar rastreio técnico para US Breakouts...")
     
     for item in ativos_sheets:
         if isinstance(item, dict):
-            ticker = item.get("ticker", "").strip().upper()
+            ticker = str(item.get("ticker", "")).strip().upper()
             nome = item.get("nome", ticker)
             setor = item.get("setor", "Desconhecido")
-            rs_score = item.get("rsScore", "N/A")
+            rs_score = item.get("rsScore") or item.get("rs_score") or "N/A"
             earnings = item.get("earnings", "OK")
         else:
             ticker = str(item).strip().upper()
             nome, setor, rs_score, earnings = ticker, "Desconhecido", "N/A", "OK"
 
-        if not ticker or "." in ticker:  # Filtra ativos não-US (ex: .PA, .DE, .LS)
+        if not ticker or ticker == "#N/A" or "." in ticker:  # Filtra ativos não-US (ex: .PA, .DE, .LS)
             continue
 
         try:
-            df = yf.download(ticker, period="3mo", interval="1d", progress=False)
+            time.sleep(random.uniform(0.3, 0.8))
+            df = yf.download(ticker, period="3mo", interval="1d", progress=False, session=session)
             if df.empty or len(df) < 20: continue
             if isinstance(df.columns, pd.MultiIndex): df.columns = df.columns.droplevel(1)
 
@@ -219,28 +268,59 @@ if not veto_macro_ativo and ativos_sheets:
             vol_media = df['Volume'].rolling(20).mean().iloc[-1]
             rvol = round(float(df['Volume'].iloc[-1] / vol_media), 2) if vol_media > 0 else 1.0
 
-            # Condição de Breakout (Exemplo: Próximo ou acima da máxima de 20 dias com volume)
+            # Condição de Breakout (Próximo ou acima da máxima de 20 dias com volume)
             max_20 = df['High'].iloc[-21:-1].max()
             if preco >= (max_20 * 0.98) and rvol >= 1.2:
                 gatilho = round(max_20 * 1.005, 2)
                 stop = round(gatilho - (2 * atr), 2)
                 tp = round(gatilho + (4 * atr), 2)
                 qtd = round(500 / (gatilho - stop), 2) if (gatilho - stop) > 0 else 1.0
+                valor_investir = round(qtd * gatilho, 2)
                 
                 linha_breakout = (
                     f"{ticker},Nome: {nome},Setor: {setor},Preço: {preco},RS Score: {rs_score},"
                     f"Dist MM20: {dist_mm20}%,EMA9: {ema9},ATR: {atr} (Vol: {vol_percent}%),RVOL: {rvol},"
                     f"Estado: Aguardar Recuo,Entrada: {gatilho},Stop: {stop},Take-Profit: {tp},"
-                    f"Qtd: {qtd},ValorInvestir: ~{round(qtd*gatilho, 2)} USD,Earnings: {earnings}\n"
+                    f"Qtd: {qtd},ValorInvestir: ~{valor_investir} USD,Earnings: {earnings}\n"
                 )
                 bloco_us_breakouts += linha_breakout
-        except Exception:
+
+                # Adiciona ao payload estruturado para escrita no Google Sheets
+                resultados_sheets_lista.append({
+                    "ticker": ticker,
+                    "nome": nome,
+                    "setor": setor,
+                    "preco": preco,
+                    "rsScore": rs_score,
+                    "distMM20": dist_mm20,
+                    "ema9": ema9,
+                    "atr": atr,
+                    "volPercent": vol_percent,
+                    "rvol": rvol,
+                    "estado": "Aguardar Recuo",
+                    "entrada": gatilho,
+                    "stop": stop,
+                    "takeProfit": tp,
+                    "qtd": qtd,
+                    "valorInvestir": valor_investir,
+                    "earnings": earnings
+                })
+        except Exception as e:
+            print(f"[AVISO] Falha ao processar {ticker}: {e}")
             continue
 
 # ===================================================================
-# 7. MONTAGEM DO FICHEIRO TEMPORÁRIO E RELATÓRIO
+# 7. ESCRITA NO GOOGLE SHEETS + MONTAGEM DO RELATÓRIO
 # ===================================================================
 data_hoje = datetime.now(ZoneInfo("Europe/Lisbon")).strftime("%d/%m/%Y %H:%M")
+
+# Escreve os resultados de volta no Google Sheets via POST
+escrever_resultados_sheets(
+    lista_breakouts=resultados_sheets_lista,
+    lista_posicoes_auditadas=posicoes_auditadas_lista,
+    veto_macro=veto_macro_ativo,
+    data_execucao=data_hoje
+)
 
 bloco_texto = (
     f"⚡ RELATÓRIO EXTRATOR DE DADOS US ({data_hoje})\n"
@@ -289,8 +369,8 @@ if debug_telegram_ativado or veto_macro_ativo:
         f"📥⚡ *EXTRATOR DE DADOS US*\n\n"
         f"🔍 [STATUS] Extração e auditoria concluídas.\n"
         f"📊 Estado Macro: {status_macro}\n"
-        f"📈 Ativos na Watchlist: *{len(ativos_sheets)}* | Posições auditadas: *{len(posicoes_ativas_dict)}*\n"
-        f"✉️ Relatório gerado e enviado por e-mail."
+        f"📈 Ativos na Watchlist: *{len(ativos_sheets)}* | Sinais Breakout: *{len(resultados_sheets_lista)}*\n"
+        f"✉️ Relatório gerado, gravado no Sheets e enviado por e-mail."
     )
     enviar_alerta(mensagem_telegram)
 
