@@ -148,7 +148,7 @@ vol_diaria_usd = capital * pct_risco
 print(f"[CONFIG] Capital Total: ${capital:,.2f} | Risco/Trade: {pct_risco*100:.1f}% (${vol_diaria_usd:,.2f} USD)\n")
 
 # ===================================================================
-# 4. AUDITAR POSIÇÕES EM CARTEIRA (BLINDADO CONTRA FALSOS ALVOS)
+# 4. AUDITAR POSIÇÕES EM CARTEIRA (BLINDADO CONTRA SPIKES E FALSOS ALVOS)
 # ===================================================================
 bloco_posicoes_ativas = ""
 alerta_timestop_ativo = False
@@ -205,11 +205,12 @@ def obter_dados_posicao_m17(ticker, dt_abertura=None):
                     preco_atual = round(ultimo_rt, 2)
                 
                 # Filtra velas de 1m estritamente posteriores à hora de abertura na Coluna A
+                # Usa 'Close' em vez de 'High' para ignorar spikes/wicks fantasma de pré/pós-mercado
                 if dt_abertura is not None:
                     idx_lisbon = df_rt.index.tz_convert("Europe/Lisbon") if df_rt.index.tzinfo else df_rt.index.tz_localize("UTC").tz_convert("Europe/Lisbon")
                     df_pos_abertura = df_rt[idx_lisbon >= dt_abertura]
                     if not df_pos_abertura.empty:
-                        maxima_desde_abertura = round(float(df_pos_abertura['High'].max()), 2)
+                        maxima_desde_abertura = round(float(df_pos_abertura['Close'].max()), 2)
     except Exception as e:
         print(f"[AVISO] Falha ao extrair intraday para {ticker}: {e}")
 
@@ -287,8 +288,8 @@ for chave_pos, info in posicoes_ativas_dict.items():
                 if be_calculado > stop:
                     sugestao_stop = be_calculado
 
-            # COMPARAÇÃO E AVALIAÇÃO DA TÁTICA
-            if alvo_efetivo > 0 and maxima_efetiva >= alvo_efetivo:
+            # COMPARAÇÃO E AVALIAÇÃO DA TÁTICA (BLINDADA CONTRA SPIKES)
+            if alvo_efetivo > 0 and preco_atual >= alvo_efetivo:
                 acao = f"🎯 ALVO ALCANÇADO ({label_alvo})! Recomendado FECHAR POSIÇÃO com Lucro (WIN)."
             elif stop > 0 and preco_atual <= stop:
                 acao = f"🚨 STOP LOSS ATINGIDO (${stop})! Recomendado LIQUIDAR POSIÇÃO (LOSS)."
