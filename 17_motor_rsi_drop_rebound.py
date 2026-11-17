@@ -148,45 +148,29 @@ vol_diaria_usd = capital * pct_risco
 print(f"[CONFIG] Capital Total: ${capital:,.2f} | Risco/Trade: {pct_risco*100:.1f}% (${vol_diaria_usd:,.2f} USD)\n")
 
 # ===================================================================
-# 4. AUDITAR POSIÇÕES EM CARTEIRA (COM TIME-STOP HIT & RUN 72H)
+# 4. AUDITAR POSIÇÕES EM CARTEIRA (BLINDADO CONTRA FALSOS ALVOS)
 # ===================================================================
 bloco_posicoes_ativas = ""
 alerta_timestop_ativo = False
 
-def obter_preco_realtime_premarket(ticker):
-    try:
-        df_rt = yf.download(ticker, period="5d", interval="1m", prepost=True, progress=False, session=session)
-        if not df_rt.empty:
-            if isinstance(df_rt.columns, pd.MultiIndex):
-                df_rt.columns = df_rt.columns.get_level_values(0)
-            
-            ultimo_preco_premarket = float(df_rt['Close'].dropna().iloc[-1])
-            if ultimo_preco_premarket > 0:
-                return round(ultimo_preco_premarket, 2)
-    except Exception as e:
-        print(f"[AVISO] Falha ao extrair intraday pre-market para {ticker}: {e}")
-        
-    try:
-        t = yf.Ticker(ticker, session=session)
-        fast = t.fast_info
-        p_pre = getattr(fast, 'pre_market_price', None)
-        p_last = getattr(fast, 'last_price', None)
-        
-        if p_pre and not np.isnan(p_pre) and p_pre > 0:
-            return round(float(p_pre), 2)
-        elif p_last and not np.isnan(p_last) and p_last > 0:
-            return round(float(p_last), 2)
-    except Exception:
-        pass
-        
-    return 0.0
+def parse_data_abertura(data_abertura_str):
+    if not data_abertura_str:
+        return None
+    formatos = ("%d/%m/%Y %H:%M:%S", "%d/%m/%Y %H:%M", "%d/%m/%Y", "%Y-%m-%d %H:%M:%S", "%Y-%m-%d")
+    for fmt in formatos:
+        try:
+            return datetime.strptime(str(data_abertura_str).strip(), fmt).replace(tzinfo=ZoneInfo("Europe/Lisbon"))
+        except ValueError:
+            continue
+    return None
 
-def obter_dados_posicao_m17(ticker):
+def obter_dados_posicao_m17(ticker, dt_abertura=None):
     preco_atual = 0.0
     ema5_atual = 0.0
     atr_atual = 0.0
-    maxima_hoje = 0.0
+    maxima_desde_abertura = 0.0
     
+    # 1. Indicadores diários (EMA5 e ATR14)
     try:
         df_pos = yf.download(ticker, period="1mo", interval="1d", progress=False, session=session)
         if not df_pos.empty:
@@ -204,16 +188,47 @@ def obter_dados_posicao_m17(ticker):
 
                 ema5_atual = round(float(df_pos['EMA5'].iloc[-1]), 2)
                 preco_atual = round(float(df_pos['Close'].iloc[-1]), 2)
-                maxima_hoje = round(float(df_pos['High'].iloc[-1]), 2)
     except Exception as e:
         print(f"[AVISO] Falha ao obter dados diários para {ticker}: {e}")
 
-    preco_realtime = obter_preco_realtime_premarket(ticker)
-    if preco_realtime > 0:
-        preco_atual = preco_realtime
-        maxima_hoje = max(maxima_hoje, preco_atual)
+    # 2. Preço em tempo real e máxima APENAS após a abertura da posição (Coluna A)
+    try:
+        df_rt = yf.download(ticker, period="5d", interval="1m", prepost=True, progress=False, session=session)
+        if not df_rt.empty:
+            if isinstance(df_rt.columns, pd.MultiIndex):
+                df_rt.columns = df_rt.columns.get_level_values(0)
+            
+            df_rt = df_rt.dropna(subset=['Close', 'High'])
+            if not df_rt.empty:
+                ultimo_rt = float(df_rt['Close'].iloc[-1])
+                if ultimo_rt > 0:
+                    preco_atual = round(ultimo_rt, 2)
+                
+                # Filtra velas de 1m estritamente posteriores à hora de abertura na Coluna A
+                if dt_abertura is not None:
+                    idx_lisbon = df_rt.index.tz_convert("Europe/Lisbon") if df_rt.index.tzinfo else df_rt.index.tz_localize("UTC").tz_convert("Europe/Lisbon")
+                    df_pos_abertura = df_rt[idx_lisbon >= dt_abertura]
+                    if not df_pos_abertura.empty:
+                        maxima_desde_abertura = round(float(df_pos_abertura['High'].max()), 2)
+    except Exception as e:
+        print(f"[AVISO] Falha ao extrair intraday para {ticker}: {e}")
 
-    return preco_atual, ema5_atual, atr_atual, maxima_hoje
+    # Fallback para fast_info se o intraday 1m falhar
+    if preco_atual <= 0:
+        try:
+            t = yf.Ticker(ticker, session=session)
+            fast = t.fast_info
+            p_pre = getattr(fast, 'pre_market_price', None)
+            p_last = getattr(fast, 'last_price', None)
+            if p_pre and not np.isnan(p_pre) and p_pre > 0:
+                preco_atual = round(float(p_pre), 2)
+            elif p_last and not np.isnan(p_last) and p_last > 0:
+                preco_atual = round(float(p_last), 2)
+        except Exception:
+            pass
+
+    maxima_efetiva = max(maxima_desde_abertura, preco_atual)
+    return preco_atual, ema5_atual, atr_atual, maxima_efetiva
 
 for chave_pos, info in posicoes_ativas_dict.items():
     if not isinstance(info, dict): continue
@@ -223,19 +238,25 @@ for chave_pos, info in posicoes_ativas_dict.items():
         try:
             ticker = "AI" if chave_pos.lower() in ["c3.ai", "c3"] else chave_pos.strip().upper()
             
-            preco_atual, ema5_dinamica, atr_calc, maxima_hoje = obter_dados_posicao_m17(ticker)
+            data_abertura = info.get("dataAbertura", "")
+            dt_abertura = parse_data_abertura(data_abertura)
+            dias_uteis = calcular_dias_uteis(data_abertura)
+            tag_tempo = f" | {dias_uteis}d úteis" if dias_uteis is not None else ""
+            
+            preco_atual, ema5_dinamica, atr_calc, maxima_efetiva = obter_dados_posicao_m17(ticker, dt_abertura)
             
             stop = limpar_float(info.get("stopAtual")) or limpar_float(info.get("stopLoss")) or 0.0
             entrada = limpar_float(info.get("precoEntrada")) or preco_atual
             
-            # Cálculo de duração em dias úteis (Coluna A)
-            data_abertura = info.get("dataAbertura", "")
-            dias_uteis = calcular_dias_uteis(data_abertura)
-            tag_tempo = f" | {dias_uteis}d úteis" if dias_uteis is not None else ""
-            
+            if preco_atual == 0.0:
+                preco_atual = entrada
+                maxima_efetiva = entrada
+
             # Se o stop vier a zero do Sheets, calcula automaticamente com base no ATR (1.5 * ATR)
             if stop <= 0 and atr_calc > 0 and entrada > 0:
                 stop = round(entrada - (atr_calc * 1.5), 2)
+            
+            risco_inicial = entrada - stop if entrada > stop else 0.0
             
             tp_sheets = (
                 limpar_float(info.get("alvoTp")) or 
@@ -244,25 +265,29 @@ for chave_pos, info in posicoes_ativas_dict.items():
                 0.0
             )
             
-            alvo_efetivo = tp_sheets if tp_sheets > 0 else ema5_dinamica
-            label_alvo = f"${alvo_efetivo}" if tp_sheets > 0 else f"${alvo_efetivo} (EMA5)"
+            # Só usa EMA5 como alvo se estiver acima da entrada (com margem mínima de +0.5R); caso contrário usa 2R
+            if tp_sheets > 0:
+                alvo_efetivo = tp_sheets
+                label_alvo = f"${alvo_efetivo}"
+            elif ema5_dinamica > (entrada + (risco_inicial * 0.5)):
+                alvo_efetivo = ema5_dinamica
+                label_alvo = f"${alvo_efetivo} (EMA5)"
+            else:
+                alvo_efetivo = round(entrada + (risco_inicial * 2.0), 2) if risco_inicial > 0 else ema5_dinamica
+                label_alvo = f"${alvo_efetivo} (TP 2R)"
+                
             qtd = info.get("quantidade", "N/A")
-            maxima_efetiva = max(maxima_hoje, preco_atual)
-            
-            if preco_atual == 0.0:
-                preco_atual = entrada
 
             # CÁLCULO DE TRAILING STOP BREAK-EVEN SEGURO
-            risco_inicial = entrada - stop if entrada > stop else 0.0
             sugestao_stop = stop
             patamar_lucro_meio_r = entrada + (risco_inicial * 0.5)
 
             if risco_inicial > 0 and maxima_efetiva >= patamar_lucro_meio_r and preco_atual > entrada:
-                be_calculado = round(entrada * 1.0005, 2) # Break-even com folga de comissão (+0.05%)
+                be_calculado = round(entrada * 1.0005, 2)
                 if be_calculado > stop:
                     sugestao_stop = be_calculado
 
-            # COMPARAÇÃO E AVALIAÇÃO DA TÁTICA (COM GUILHOTINA TEMPORAL 72H)
+            # COMPARAÇÃO E AVALIAÇÃO DA TÁTICA
             if alvo_efetivo > 0 and maxima_efetiva >= alvo_efetivo:
                 acao = f"🎯 ALVO ALCANÇADO ({label_alvo})! Recomendado FECHAR POSIÇÃO com Lucro (WIN)."
             elif stop > 0 and preco_atual <= stop:
