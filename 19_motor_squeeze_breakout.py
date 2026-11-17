@@ -11,7 +11,7 @@ import pandas as pd
 import yfinance as yf
 import pandas_ta as ta
 import numpy as np
-from datetime import datetime
+from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 import sys
 import os
@@ -61,6 +61,27 @@ def limpar_float(val):
         return float(val_str)
     except (ValueError, TypeError):
         return None
+
+def calcular_dias_uteis(data_abertura_str):
+    """Calcula quantos dias úteis (seg-sex) passaram desde a data na Coluna A."""
+    if not data_abertura_str:
+        return None
+    formatos = ("%d/%m/%Y %H:%M:%S", "%d/%m/%Y %H:%M", "%d/%m/%Y", "%Y-%m-%d %H:%M:%S", "%Y-%m-%d")
+    for fmt in formatos:
+        try:
+            dt_inicio = datetime.strptime(str(data_abertura_str).strip(), fmt).replace(tzinfo=ZoneInfo("Europe/Lisbon"))
+            dt_agora = datetime.now(ZoneInfo("Europe/Lisbon"))
+            
+            dias_uteis = 0
+            cursor = dt_inicio
+            while cursor.date() < dt_agora.date():
+                cursor += timedelta(days=1)
+                if cursor.weekday() < 5:  # 0=Seg ... 4=Sex
+                    dias_uteis += 1
+            return dias_uteis
+        except ValueError:
+            continue
+    return None
 
 # ===================================================================
 # 2. FUNÇÕES DE REDE E CONFIGS
@@ -143,9 +164,11 @@ vol_diaria_usd = capital * pct_risco
 print(f"[CONFIG] Capital Total: ${capital:,.2f} | Risco/Trade: {pct_risco*100:.1f}% (${vol_diaria_usd:,.2f} USD)\n")
 
 # ===================================================================
-# 4. AUDITAR POSIÇÕES EM CARTEIRA (CORRIGIDO: PREÇO ATUAL VS STOP)
+# 4. AUDITAR POSIÇÕES EM CARTEIRA (COM TIME-STOP HIT & RUN 72H)
 # ===================================================================
 bloco_posicoes_ativas = ""
+alerta_timestop_ativo = False
+
 for chave_pos, info in posicoes_ativas_dict.items():
     if not isinstance(info, dict): continue
     status = str(info.get("status", "")).strip().upper()
@@ -162,6 +185,11 @@ for chave_pos, info in posicoes_ativas_dict.items():
                 stop = limpar_float(info.get("stopAtual")) or limpar_float(info.get("stopLoss")) or 0.0
                 alvo_tp = limpar_float(info.get("alvoTp")) or limpar_float(info.get("takeProfit")) or 0.0
                 
+                # Cálculo de duração em dias úteis (Coluna A)
+                data_abertura = info.get("dataAbertura", "")
+                dias_uteis = calcular_dias_uteis(data_abertura)
+                tag_tempo = f" | {dias_uteis}d úteis" if dias_uteis is not None else ""
+                
                 try:
                     df_intra = yf.download(ticker, period="2d", interval="1m", prepost=True, progress=False, session=session)
                     if isinstance(df_intra.columns, pd.MultiIndex):
@@ -176,28 +204,38 @@ for chave_pos, info in posicoes_ativas_dict.items():
                 qtd = info.get("quantidade", "N/A")
                 maxima_efetiva = max(maxima_hoje, preco_atual)
                 
-                # ATUALIZAÇÃO: Cálculo automático de TP 2R e Trailing Stop Break-Even
+                # Cálculo automático de TP 2R e Trailing Stop Break-Even
                 risco_inicial = entrada - stop if entrada > stop else 0.0
                 
-                # Se o alvo TP vier a zero do Sheets, calcula automaticamente 2R
                 if alvo_tp <= 0 and risco_inicial > 0:
                     alvo_tp = round(entrada + (risco_inicial * 2.0), 2)
                 
-                # Se o preço efetivo avançou mais de 0.5R, recomenda subir o stop para Break-Even (+0.05% para comissões)
                 sugestao_stop = stop
-                if risco_inicial > 0 and maxima_efetiva >= (entrada + (risco_inicial * 0.5)):
+                if risco_inicial > 0 and maxima_efetiva >= (entrada + (risco_inicial * 0.5)) and preco_atual > entrada:
                     be_calculado = round(entrada * 1.0005, 2)
                     if be_calculado > stop:
                         sugestao_stop = be_calculado
                 
+                # Avaliação com Guilhotina Temporal 72H
                 if alvo_tp > 0 and maxima_efetiva >= alvo_tp:
                     acao = f"🎯 ALVO ALCANÇADO (TP em ${alvo_tp})! Recomendado FECHAR POSIÇÃO com Lucro (WIN)."
                 elif stop > 0 and preco_atual <= stop:
                     acao = f"🚨 STOP LOSS ATINGIDO (${stop})! Recomendado LIQUIDAR POSIÇÃO (LOSS)."
-                elif sugestao_stop > stop:
-                    acao = f"🛡️ PROTEGER POSIÇÃO. +0.5R Atingido! Sobe o Stop para Break-Even: ${sugestao_stop} | Alvo TP: ${alvo_tp}."
+                elif dias_uteis is not None and dias_uteis >= 3:
+                    alerta_timestop_ativo = True
+                    acao = (
+                        f"⏰ TIME-STOP ATINGIDO ({dias_uteis}d úteis > 72h)! Setup Squeeze Breakout expirado — "
+                        f"Recomendado FECHAR A MERCADO (${preco_atual}) antes de varrer o Stop (${stop})."
+                    )
+                elif dias_uteis == 2:
+                    if sugestao_stop > stop and preco_atual > entrada:
+                        acao = f"⚠️ ÚLTIMO DIA (48h) + 🛡️ +0.5R! Sobe Stop p/ BE: ${sugestao_stop} | Fechar no fecho se não tocar TP ${alvo_tp}."
+                    else:
+                        acao = f"⚠️ ÚLTIMO DIA DA JANELA (48h). Se não arrancar hoje rumo ao TP ${alvo_tp}, preparar saída no fecho | Stop: ${stop}."
+                elif sugestao_stop > stop and preco_atual > entrada:
+                    acao = f"🛡️ PROTEGER POSIÇÃO{tag_tempo}. +0.5R Atingido! Sobe o Stop para Break-Even: ${sugestao_stop} | Alvo TP: ${alvo_tp}."
                 else:
-                    acao = f"⏳ MANTER POSIÇÃO (Squeeze Breakout). Alvo TP: ${alvo_tp} | Stop: ${stop}."
+                    acao = f"⏳ MANTER POSIÇÃO (Squeeze Breakout{tag_tempo}). Alvo TP: ${alvo_tp} | Stop: ${stop}."
                 
                 bloco_posicoes_ativas += (
                     f"📌 [{status}] {ticker} ({chave_pos}) | Qtd: {qtd} | Entrada: ${entrada} | "
@@ -385,17 +423,18 @@ def executar_motor():
         f.write(bloco_texto)
 
     # ===================================================================
-    # 7. NOTIFICAÇÃO TELEGRAM DEBUG
+    # 7. NOTIFICAÇÃO TELEGRAM (DEBUG OU ALERTA TIME-STOP)
     # ===================================================================
     debug_telegram_ativado = str(configs_dict.get("TELEGRAM_NOTIFICATIONS_DEBUG", "false")).strip().lower() in ["true", "1", "sim", "yes"]
 
-    if debug_telegram_ativado:
-        print("A enviar notificação de Debug para o Telegram via função modular...")
+    if debug_telegram_ativado or alerta_timestop_ativo:
+        print("A enviar notificação para o Telegram via função modular...")
         total_acionados = len(alertas_squeeze)
+        aviso_ts = "\n⏰ *ALERTA TIME-STOP:* Tens posição(ões) M19 expirada(s) (>72h) para fechar!" if alerta_timestop_ativo else ""
         mensagem_debug = (
             f"19 ⚡ *MOTOR 19 (SQUEEZE BREAKOUT)*\n\n"
-            f"🔍 [DEBUG] Execução concluída com sucesso.\n"
-            f"📊 Ativos analisados: *{total_analisados}* | Acionados: *{total_acionados}*\n"
+            f"🔍 [STATUS] Execução concluída com sucesso.\n"
+            f"📊 Ativos analisados: *{total_analisados}* | Acionados: *{total_acionados}*{aviso_ts}\n"
             f"✉️ Relatório de expansão de volatilidade gerado e enviado por e-mail."
         )
         enviar_alerta(mensagem_debug)
