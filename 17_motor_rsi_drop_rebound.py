@@ -1,5 +1,5 @@
 # ===================================================================================
-# SISTEMA DE TRADING INSTITUCIONAL - MOTOR 17: 2-DAY RSI DROP & REBOUND (HIT & RUN)
+# SISTEMA DE TRADING INSTITUCIONAL - MOTOR 17: 2-DAY RSI DROP & REBOUND (CONFIRMADO)
 # ===================================================================================
 
 import pandas as pd
@@ -28,7 +28,6 @@ session.headers.update({
     "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
 })
 
-# Importação da função modular de notificação do Telegram
 from F01_notificador_telegram import enviar_alerta
 
 # ===================================================================
@@ -58,26 +57,30 @@ def limpar_float(val):
     except (ValueError, TypeError):
         return None
 
-def calcular_dias_uteis(data_abertura_str):
-    """Calcula quantos dias úteis (seg-sex) passaram desde a data na Coluna A."""
+def parse_data_abertura(data_abertura_str):
     if not data_abertura_str:
         return None
     formatos = ("%d/%m/%Y %H:%M:%S", "%d/%m/%Y %H:%M", "%d/%m/%Y", "%Y-%m-%d %H:%M:%S", "%Y-%m-%d")
     for fmt in formatos:
         try:
-            dt_inicio = datetime.strptime(str(data_abertura_str).strip(), fmt).replace(tzinfo=ZoneInfo("Europe/Lisbon"))
-            dt_agora = datetime.now(ZoneInfo("Europe/Lisbon"))
-            
-            dias_uteis = 0
-            cursor = dt_inicio
-            while cursor.date() < dt_agora.date():
-                cursor += timedelta(days=1)
-                if cursor.weekday() < 5:  # 0=Seg ... 4=Sex
-                    dias_uteis += 1
-            return dias_uteis
+            return datetime.strptime(str(data_abertura_str).strip(), fmt).replace(tzinfo=ZoneInfo("Europe/Lisbon"))
         except ValueError:
             continue
     return None
+
+def calcular_dias_uteis(data_abertura_str):
+    """Calcula quantos dias úteis (seg-sex) passaram desde a data na Coluna A."""
+    dt_inicio = parse_data_abertura(data_abertura_str)
+    if dt_inicio is None:
+        return None
+    dt_agora = datetime.now(ZoneInfo("Europe/Lisbon"))
+    dias_uteis = 0
+    cursor = dt_inicio
+    while cursor.date() < dt_agora.date():
+        cursor += timedelta(days=1)
+        if cursor.weekday() < 5:
+            dias_uteis += 1
+    return dias_uteis
 
 # ===================================================================
 # 2. FUNÇÕES DE REDE E CONFIGS
@@ -95,7 +98,7 @@ def buscar_dados_completos():
             try:
                 dados = resp.json()
             except json.JSONDecodeError:
-                print(f"[ERRO] O Webhook não retornou um JSON válido.")
+                print("[ERRO] O Webhook não retornou um JSON válido.")
                 return [], {}, {}
 
             if isinstance(dados, dict):
@@ -110,10 +113,32 @@ def buscar_dados_completos():
         print(f"[ERRO CRÍTICO] Sheets: {e}")
         return [], {}, {}
 
+def verificar_regime_mercado():
+    """Bloqueia novas entradas em reversão se o SPY estiver abaixo da SMA200 ou em queda forte no dia."""
+    try:
+        df_spy = yf.download("SPY", period="1y", interval="1d", progress=False, session=session)
+        if df_spy.empty or len(df_spy) < 200:
+            return True, "Dados SPY insuficientes (autorizado por defeito)."
+        if isinstance(df_spy.columns, pd.MultiIndex):
+            df_spy.columns = df_spy.columns.droplevel(1)
+        
+        close_hoje = float(df_spy['Close'].iloc[-1])
+        close_ontem = float(df_spy['Close'].iloc[-2])
+        sma200 = float(df_spy['Close'].rolling(200).mean().iloc[-1])
+        var_dia = ((close_hoje - close_ontem) / close_ontem) * 100
+
+        if close_hoje < sma200:
+            return False, f"SPY (${close_hoje:.2f}) abaixo da SMA200 (${sma200:.2f}). Mercado em regime baixista."
+        if var_dia <= -1.0:
+            return False, f"SPY em queda forte hoje ({var_dia:.2f}% <= -1.00%)."
+        return True, f"SPY estável (${close_hoje:.2f} > SMA200 | Var: {var_dia:+.2f}%)."
+    except Exception as e:
+        return True, f"Aviso SPY: {e}"
+
 def enviar_email(assunto, conteudo):
     print(f"\nA enviar e-mail ('{assunto}')...")
     if not EMAIL_USER or not EMAIL_PASS:
-        print("[AVISO] EMAIL_USER ou EMAIL_PASS não configurados. E-mail não enviado.")
+        print("[AVISO] EMAIL_USER ou EMAIL_PASS não configurados.")
         return False
     try:
         msg = MIMEMultipart()
@@ -134,35 +159,26 @@ def enviar_email(assunto, conteudo):
         return False
 
 # ===================================================================
-# 3. CARGA DE DADOS E PARAMETRIZAÇÃO DE RISCO
+# 3. CARGA DE DADOS E PARAMETRIZAÇÃO DE RISCO (LIDA DO NOVO CONFIGS)
 # ===================================================================
 ativos_sheets, posicoes_ativas_dict, configs_dict = buscar_dados_completos()
 
-try:
-    capital = float(configs_dict.get("CAPITAL_TOTAL_CONTA", 10400.00))
-    pct_risco = limpar_float(configs_dict.get("RISCO_SWING_PCT")) or limpar_float(configs_dict.get("RISCO_POR_TRADE")) or 0.01
-except (ValueError, TypeError):
-    capital, pct_risco = 10400.00, 0.01
+capital = limpar_float(configs_dict.get("CAPITAL_TOTAL_CONTA")) or 10400.00
+pct_risco = (
+    limpar_float(configs_dict.get("RISCO_POR_TRADE")) or 
+    limpar_float(configs_dict.get("RISCO_SWING_PCT")) or 
+    0.0025
+)
+risco_fixo_usd = limpar_float(configs_dict.get("RISCO_MAXIMO_USD"))
 
-vol_diaria_usd = capital * pct_risco
-print(f"[CONFIG] Capital Total: ${capital:,.2f} | Risco/Trade: {pct_risco*100:.1f}% (${vol_diaria_usd:,.2f} USD)\n")
+vol_diaria_usd = risco_fixo_usd if (risco_fixo_usd and risco_fixo_usd > 0) else (capital * pct_risco)
+print(f"[CONFIG] Capital Total: ${capital:,.2f} | Orçamento Risco/Trade: ${vol_diaria_usd:,.2f} USD\n")
 
 # ===================================================================
-# 4. AUDITAR POSIÇÕES EM CARTEIRA (BLINDADO CONTRA SPIKES E FALSOS ALVOS)
+# 4. AUDITAR POSIÇÕES EM CARTEIRA (BLINDADO + TIME-STOP 72H)
 # ===================================================================
 bloco_posicoes_ativas = ""
 alerta_timestop_ativo = False
-
-def parse_data_abertura(data_abertura_str):
-    if not data_abertura_str:
-        return None
-    formatos = ("%d/%m/%Y %H:%M:%S", "%d/%m/%Y %H:%M", "%d/%m/%Y", "%Y-%m-%d %H:%M:%S", "%Y-%m-%d")
-    for fmt in formatos:
-        try:
-            return datetime.strptime(str(data_abertura_str).strip(), fmt).replace(tzinfo=ZoneInfo("Europe/Lisbon"))
-        except ValueError:
-            continue
-    return None
 
 def obter_dados_posicao_m17(ticker, dt_abertura=None):
     preco_atual = 0.0
@@ -170,42 +186,33 @@ def obter_dados_posicao_m17(ticker, dt_abertura=None):
     atr_atual = 0.0
     maxima_desde_abertura = 0.0
     
-    # 1. Indicadores diários (EMA5 e ATR14)
     try:
         df_pos = yf.download(ticker, period="1mo", interval="1d", progress=False, session=session)
         if not df_pos.empty:
             if isinstance(df_pos.columns, pd.MultiIndex):
                 df_pos.columns = df_pos.columns.droplevel(1)
-            
             df_pos = df_pos.dropna(subset=['Close', 'High', 'Low'])
             if len(df_pos) >= 14:
                 df_pos['EMA5'] = df_pos['Close'].ewm(span=5, adjust=False).mean()
                 df_pos.ta.atr(length=14, append=True)
-                
                 cols_atr = [c for c in df_pos.columns if str(c).startswith('ATRr_') or str(c).startswith('ATR_') or str(c).startswith('ATRe_')]
                 if cols_atr:
                     atr_atual = round(float(df_pos[cols_atr[0]].iloc[-1]), 2)
-
                 ema5_atual = round(float(df_pos['EMA5'].iloc[-1]), 2)
                 preco_atual = round(float(df_pos['Close'].iloc[-1]), 2)
     except Exception as e:
         print(f"[AVISO] Falha ao obter dados diários para {ticker}: {e}")
 
-    # 2. Preço em tempo real e máxima APENAS após a abertura da posição (Coluna A)
     try:
         df_rt = yf.download(ticker, period="5d", interval="1m", prepost=True, progress=False, session=session)
         if not df_rt.empty:
             if isinstance(df_rt.columns, pd.MultiIndex):
                 df_rt.columns = df_rt.columns.get_level_values(0)
-            
             df_rt = df_rt.dropna(subset=['Close', 'High'])
             if not df_rt.empty:
                 ultimo_rt = float(df_rt['Close'].iloc[-1])
                 if ultimo_rt > 0:
                     preco_atual = round(ultimo_rt, 2)
-                
-                # Filtra velas de 1m estritamente posteriores à hora de abertura na Coluna A
-                # Usa 'Close' em vez de 'High' para ignorar spikes/wicks fantasma de pré/pós-mercado
                 if dt_abertura is not None:
                     idx_lisbon = df_rt.index.tz_convert("Europe/Lisbon") if df_rt.index.tzinfo else df_rt.index.tz_localize("UTC").tz_convert("Europe/Lisbon")
                     df_pos_abertura = df_rt[idx_lisbon >= dt_abertura]
@@ -214,7 +221,6 @@ def obter_dados_posicao_m17(ticker, dt_abertura=None):
     except Exception as e:
         print(f"[AVISO] Falha ao extrair intraday para {ticker}: {e}")
 
-    # Fallback para fast_info se o intraday 1m falhar
     if preco_atual <= 0:
         try:
             t = yf.Ticker(ticker, session=session)
@@ -253,7 +259,6 @@ for chave_pos, info in posicoes_ativas_dict.items():
                 preco_atual = entrada
                 maxima_efetiva = entrada
 
-            # Se o stop vier a zero do Sheets, calcula automaticamente com base no ATR (1.5 * ATR)
             if stop <= 0 and atr_calc > 0 and entrada > 0:
                 stop = round(entrada - (atr_calc * 1.5), 2)
             
@@ -266,7 +271,6 @@ for chave_pos, info in posicoes_ativas_dict.items():
                 0.0
             )
             
-            # Só usa EMA5 como alvo se estiver acima da entrada (com margem mínima de +0.5R); caso contrário usa 2R
             if tp_sheets > 0:
                 alvo_efetivo = tp_sheets
                 label_alvo = f"${alvo_efetivo}"
@@ -279,16 +283,15 @@ for chave_pos, info in posicoes_ativas_dict.items():
                 
             qtd = info.get("quantidade", "N/A")
 
-            # CÁLCULO DE TRAILING STOP BREAK-EVEN SEGURO
+            # Proteção Break-Even apenas após +1.0R (evita ser stopado pelo ruído normal)
             sugestao_stop = stop
-            patamar_lucro_meio_r = entrada + (risco_inicial * 0.5)
+            patamar_lucro_1r = entrada + (risco_inicial * 1.0)
 
-            if risco_inicial > 0 and maxima_efetiva >= patamar_lucro_meio_r and preco_atual > entrada:
+            if risco_inicial > 0 and maxima_efetiva >= patamar_lucro_1r and preco_atual > entrada:
                 be_calculado = round(entrada * 1.0005, 2)
                 if be_calculado > stop:
                     sugestao_stop = be_calculado
 
-            # COMPARAÇÃO E AVALIAÇÃO DA TÁTICA (BLINDADA CONTRA SPIKES)
             if alvo_efetivo > 0 and preco_atual >= alvo_efetivo:
                 acao = f"🎯 ALVO ALCANÇADO ({label_alvo})! Recomendado FECHAR POSIÇÃO com Lucro (WIN)."
             elif stop > 0 and preco_atual <= stop:
@@ -301,11 +304,11 @@ for chave_pos, info in posicoes_ativas_dict.items():
                 )
             elif dias_uteis == 2:
                 if sugestao_stop > stop and preco_atual > entrada:
-                    acao = f"⚠️ ÚLTIMO DIA (48h) + 🛡️ +0.5R! Sobe Stop p/ BE: ${sugestao_stop} | Fechar no fecho se não tocar {label_alvo}."
+                    acao = f"⚠️ ÚLTIMO DIA (48h) + 🛡️ +1R! Sobe Stop p/ BE: ${sugestao_stop} | Fechar no fecho se não tocar {label_alvo}."
                 else:
                     acao = f"⚠️ ÚLTIMO DIA DA JANELA (48h). Se não arrancar hoje rumo a {label_alvo}, preparar saída no fecho | Stop: ${stop}."
             elif sugestao_stop > stop and preco_atual > entrada:
-                acao = f"🛡️ PROTEGER POSIÇÃO{tag_tempo}. +0.5R Atingido! Sobe o Stop para Break-Even: ${sugestao_stop} | Alvo: {label_alvo}."
+                acao = f"🛡️ PROTEGER POSIÇÃO{tag_tempo}. +1R Atingido! Sobe o Stop para Break-Even: ${sugestao_stop} | Alvo: {label_alvo}."
             else:
                 acao = f"⏳ MANTER POSIÇÃO (RSI Rebound{tag_tempo}). Alvo: {label_alvo} | Stop: ${stop}."
             
@@ -317,10 +320,15 @@ for chave_pos, info in posicoes_ativas_dict.items():
             print(f"[ERRO] Falha ao auditar posição ativa {chave_pos}: {e}")
 
 # ===================================================================
-# 5. MOTOR MATEMÁTICO: 2-DAY RSI DROP & REBOUND
+# 5. MOTOR MATEMÁTICO V2: 2-DAY RSI DROP COM GATILHO DE CONFIRMAÇÃO
 # ===================================================================
 def analisar_rsi_drop(ativo_info):
     try:
+        # FILTRO 1: FORÇA RELATIVA MÍNIMA (RS Score >= 70)
+        rs_score = limpar_float(ativo_info.get("rs_score")) or 0.0
+        if rs_score < 70.0:
+            return None
+
         ticker = str(ativo_info.get("ticker", "")).strip().upper()
         if not ticker or ticker == "#N/A" or ticker == "NONE": return None
         if ticker in posicoes_ativas_dict: return None
@@ -337,35 +345,42 @@ def analisar_rsi_drop(ativo_info):
 
         df.ta.rsi(length=2, append=True)
         df.ta.sma(length=200, append=True)
+        df.ta.sma(length=50, append=True)
         df.ta.atr(length=14, append=True)
 
         cols_rsi = [c for c in df.columns if str(c).startswith('RSI_2')]
-        cols_sma = [c for c in df.columns if str(c).startswith('SMA_200')]
+        cols_sma200 = [c for c in df.columns if str(c).startswith('SMA_200')]
+        cols_sma50 = [c for c in df.columns if str(c).startswith('SMA_50')]
         cols_atr = [c for c in df.columns if str(c).startswith('ATRr_') or str(c).startswith('ATR_') or str(c).startswith('ATRe_')]
 
-        if not cols_rsi or not cols_sma or not cols_atr:
+        if not cols_rsi or not cols_sma200 or not cols_sma50 or not cols_atr:
             return None
 
-        col_rsi = cols_rsi[0]
-        col_sma = cols_sma[0]
-        col_atr = cols_atr[0]
-
-        df = df.dropna(subset=[col_rsi, col_sma, col_atr])
+        df = df.dropna(subset=[cols_rsi[0], cols_sma200[0], cols_sma50[0], cols_atr[0]])
         if df.empty: return None
 
         ultimo = df.iloc[-1]
         preco = float(ultimo['Close'])
-        rsi2 = float(ultimo[col_rsi])
-        sma200 = float(ultimo[col_sma])
-        atr = float(ultimo[col_atr])
+        maxima_dia = float(ultimo['High'])
+        minima_dia = float(ultimo['Low'])
+        rsi2 = float(ultimo[cols_rsi[0]])
+        sma200 = float(ultimo[cols_sma200[0]])
+        sma50 = float(ultimo[cols_sma50[0]])
+        atr = float(ultimo[cols_atr[0]])
 
-        if preco > sma200 and rsi2 <= 10.0:
-            entrada_gatilho = round(preco, 2)
-            stop_loss = round(entrada_gatilho - (atr * 1.5), 2)
+        # FILTRO 2: Tendência primária intacta (Preço > SMA200 e SMA50 > SMA200) + RSI(2) <= 8.0
+        if preco > sma200 and sma50 > sma200 and rsi2 <= 8.0:
+            # GATILHO DE CONFIRMAÇÃO (BUY STOP acima da máxima do dia — não entra na queda cega)
+            entrada_gatilho = round(maxima_dia * 1.002, 2)
+            
+            # Stop técnico protegido abaixo da mínima do dia ou 1.5x ATR
+            stop_loss = round(min(minima_dia * 0.995, entrada_gatilho - (atr * 1.5)), 2)
             risco = entrada_gatilho - stop_loss
-            alvo_tp = round(entrada_gatilho + (risco * 2.0), 2)
+            if risco <= 0:
+                return None
 
-            qtd_calc = round(vol_diaria_usd / risco, 2) if risco > 0 else 0.0
+            alvo_tp = round(entrada_gatilho + (risco * 2.0), 2)
+            qtd_calc = round(vol_diaria_usd / risco, 2)
             val_calc = entrada_gatilho * qtd_calc
 
             nome_empresa = (
@@ -373,7 +388,6 @@ def analisar_rsi_drop(ativo_info):
                 ativo_info.get("nomeEmpresa") or 
                 ativo_info.get("name") or "N/A"
             )
-            
             setor = (
                 ativo_info.get("setor") or 
                 ativo_info.get("setorAtivo") or 
@@ -389,7 +403,7 @@ def analisar_rsi_drop(ativo_info):
                         nome_empresa = info_t.get("longName") or info_t.get("shortName") or "N/A"
                     if setor == "Desconhecido":
                         setor = info_t.get("sector") or "Desconhecido"
-                except:
+                except Exception:
                     pass
 
             return {
@@ -402,7 +416,8 @@ def analisar_rsi_drop(ativo_info):
                 "stop_loss": stop_loss,
                 "alvo_tp": alvo_tp,
                 "qtd_acoes": qtd_calc,
-                "valor_investir": round(val_calc, 2)
+                "valor_investir": round(val_calc, 2),
+                "rs_score": rs_score
             }
         return None
     except Exception as e:
@@ -416,7 +431,9 @@ def executar_motor():
     alertas_rsi = []
     total_analisados = 0
 
-    if ativos_sheets:
+    mercado_ok, msg_mercado = verificar_regime_mercado()
+
+    if mercado_ok and ativos_sheets:
         for ativo_info in ativos_sheets:
             ticker = ativo_info.get("ticker")
             if not ticker or ticker == "#N/A": continue
@@ -427,8 +444,10 @@ def executar_motor():
     data_hoje = datetime.now(ZoneInfo("Europe/Lisbon")).strftime("%d/%m/%Y %H:%M")
     
     bloco_texto = (
-        f"⚡ RELATÓRIO DETALHADO - MOTOR 17: 2-DAY RSI DROP & REBOUND ({data_hoje})\n"
-        f"==================================================================\n\n"
+        f"⚡ RELATÓRIO DETALHADO - MOTOR 17: 2-DAY RSI DROP CONFIRMADO ({data_hoje})\n"
+        f"==================================================================\n"
+        f"🌐 Filtro Macro: {msg_mercado}\n"
+        f"💰 Risco Configurado por Trade: ${vol_diaria_usd:,.2f} USD\n\n"
     )
 
     if bloco_posicoes_ativas:
@@ -436,24 +455,23 @@ def executar_motor():
     else:
         bloco_texto += "📌 GESTÃO DE POSIÇÕES ATIVAS: Nenhuma posição ativa detetada para este motor.\n--------------------------------------------------\n\n"
 
-    if alertas_rsi:
-        bloco_texto += f"🎯 SINAIS DE REVERSÃO À MÉDIA DETETADOS ({len(alertas_rsi)}):\n\n"
+    if not mercado_ok:
+        bloco_texto += f"🛡️ [MODO DEFENSIVO] Novas entradas bloqueadas hoje ({msg_mercado}).\n"
+    elif alertas_rsi:
+        bloco_texto += f"🎯 SINAIS DE REVERSÃO CONFIRMADA DETETADOS ({len(alertas_rsi)}):\n\n"
         for a in alertas_rsi:
-            info_ativo = next((item for item in ativos_sheets if str(item.get("ticker","")).strip().upper() == a['ticker']), {})
-            rs_score = info_ativo.get("rs_score", "N/A")
-
             bloco_texto += (
                 f"🔹 [{a['ticker']}] - {a['nome_empresa']} ({a['setor']})\n"
-                f"    - 📊 Contexto Técnico: RSI(2) em {a['rsi2']} (Sobrevendido Extremo sobre SMA200)\n"
-                f"    - ⚙️ Tática: Reversão à Média Expressa (Hit & Run 48h-72h)\n"
-                f"    - 📋 Tipo de Ordem: MARKET / LIMIT no fecho/abertura\n"
-                f"    - 🔢 Dados Exatos: Entrada: ${a['gatilho']} | Stop Loss: ${a['stop_loss']} | Alvo TP: ${a['alvo_tp']}\n"
+                f"    - 📊 Contexto Técnico: RSI(2) em {a['rsi2']} (Sobrevendido Extremo | SMA50 > SMA200)\n"
+                f"    - ⚙️ Tática: Reversão à Média com Confirmação de Força (Hit & Run 48h-72h)\n"
+                f"    - 📋 Tipo de Ordem: BUY STOP (Só ativa se romper máxima de hoje: ${a['gatilho']})\n"
+                f"    - 🔢 Dados Exatos: Gatilho Compra: ${a['gatilho']} | Stop Loss: ${a['stop_loss']} | Alvo TP: ${a['alvo_tp']}\n"
                 f"    - 💰 Dimensionamento: Qtd: {a['qtd_acoes']} | Valor a Investir: ~${a['valor_investir']} USD\n"
-                f"    - 📈 RS Score Institucional: {rs_score}\n"
+                f"    - 📈 RS Score Institucional: {a['rs_score']}\n"
                 f"--------------------------------------------------\n"
             )
     else:
-        bloco_texto += "✅ Nenhum novo sinal de RSI Drop detetado hoje.\n"
+        bloco_texto += "✅ Nenhum novo sinal de RSI Drop confirmado detetado hoje.\n"
 
     with open("comboio_rsi_rebound_temp.txt", "w", encoding="utf-8") as f:
         f.write(bloco_texto)
@@ -468,10 +486,11 @@ def executar_motor():
         total_acionados = len(alertas_rsi)
         aviso_ts = "\n⏰ *ALERTA TIME-STOP:* Tens posição(ões) M17 expirada(s) (>72h) para fechar!" if alerta_timestop_ativo else ""
         mensagem_telegram = (
-            f"17 ⚡ *MOTOR 17 (RSI DROP & REBOUND)*\n\n"
-            f"🔍 [STATUS] Execução concluída com sucesso.\n"
-            f"📊 Ativos analisados: *{total_analisados}* | Acionados: *{total_acionados}*{aviso_ts}\n"
-            f"✉️ Relatório de reversão à média gerado e enviado por e-mail."
+            f"17 ⚡ *MOTOR 17 (RSI DROP CONFIRMADO)*\n\n"
+            f"🔍 [STATUS] Execução concluída.\n"
+            f"📊 Analisados: *{total_analisados}* | Gatilhos Buy Stop: *{total_acionados}*{aviso_ts}\n"
+            f"💰 Risco/Trade: *${vol_diaria_usd:.2f}*\n"
+            f"✉️ Relatório enviado por e-mail."
         )
         enviar_alerta(mensagem_telegram)
 
