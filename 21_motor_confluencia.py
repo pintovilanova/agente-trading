@@ -15,7 +15,7 @@ import pandas as pd
 import yfinance as yf
 import pandas_ta as ta
 import numpy as np
-from datetime import datetime
+from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 import sys
 import os
@@ -65,6 +65,27 @@ def limpar_float(val):
         return float(val_str)
     except (ValueError, TypeError):
         return None
+
+def calcular_dias_uteis(data_abertura_str):
+    """Calcula quantos dias úteis (seg-sex) passaram desde a data na Coluna A."""
+    if not data_abertura_str:
+        return None
+    formatos = ("%d/%m/%Y %H:%M:%S", "%d/%m/%Y %H:%M", "%d/%m/%Y", "%Y-%m-%d %H:%M:%S", "%Y-%m-%d")
+    for fmt in formatos:
+        try:
+            dt_inicio = datetime.strptime(str(data_abertura_str).strip(), fmt).replace(tzinfo=ZoneInfo("Europe/Lisbon"))
+            dt_agora = datetime.now(ZoneInfo("Europe/Lisbon"))
+            
+            dias_uteis = 0
+            cursor = dt_inicio
+            while cursor.date() < dt_agora.date():
+                cursor += timedelta(days=1)
+                if cursor.weekday() < 5:  # 0=Seg ... 4=Sex
+                    dias_uteis += 1
+            return dias_uteis
+        except ValueError:
+            continue
+    return None
 
 # ===================================================================
 # 2. FILTRO GERAL DE MERCADO (S&P 500)
@@ -134,9 +155,11 @@ except (ValueError, TypeError):
 vol_diaria_usd = capital * pct_risco
 
 # ===================================================================
-# 3B. AUDITAR POSIÇÕES EM CARTEIRA (CORRIGIDO: PREÇO ATUAL VS STOP)
+# 3B. AUDITAR POSIÇÕES EM CARTEIRA (COM TIME-STOP SNIPER 96H)
 # ===================================================================
 bloco_posicoes_ativas = ""
+alerta_timestop_ativo = False
+
 for chave_pos, info in posicoes_ativas_dict.items():
     if not isinstance(info, dict): continue
     status = str(info.get("status", "")).strip().upper()
@@ -153,6 +176,11 @@ for chave_pos, info in posicoes_ativas_dict.items():
                 stop = limpar_float(info.get("stopAtual")) or limpar_float(info.get("stopLoss")) or 0.0
                 alvo_tp = limpar_float(info.get("alvoTp")) or limpar_float(info.get("takeProfit")) or 0.0
                 
+                # Cálculo de duração em dias úteis (Coluna A)
+                data_abertura = info.get("dataAbertura", "")
+                dias_uteis = calcular_dias_uteis(data_abertura)
+                tag_tempo = f" | {dias_uteis}d úteis" if dias_uteis is not None else ""
+                
                 try:
                     df_intra = yf.download(ticker, period="2d", interval="1m", prepost=True, progress=False, session=session)
                     if isinstance(df_intra.columns, pd.MultiIndex):
@@ -167,29 +195,38 @@ for chave_pos, info in posicoes_ativas_dict.items():
                 qtd = info.get("quantidade", "N/A")
                 maxima_efetiva = max(maxima_hoje, preco_atual)
                 
-                # ATUALIZAÇÃO: Cálculo automático de TP 3R e Trailing Stop Break-Even
+                # Cálculo automático de TP 3R e Trailing Stop Break-Even aos +1R
                 risco_inicial = entrada - stop if entrada > stop else 0.0
                 
-                # Motor 21 é Sniper, alvo padrão é 3R
                 if alvo_tp <= 0 and risco_inicial > 0:
                     alvo_tp = round(entrada + (risco_inicial * 3.0), 2)
                 
-                # Se o preço efetivo avançou mais de 1R (no motor 21 exige-se mais margem para não ser stopado à toa no ruído), 
-                # recomenda subir o stop para Break-Even (+0.05% para comissões)
                 sugestao_stop = stop
-                if risco_inicial > 0 and maxima_efetiva >= (entrada + (risco_inicial * 1.0)):
+                if risco_inicial > 0 and maxima_efetiva >= (entrada + (risco_inicial * 1.0)) and preco_atual > entrada:
                     be_calculado = round(entrada * 1.0005, 2)
                     if be_calculado > stop:
                         sugestao_stop = be_calculado
                 
+                # Avaliação com Guilhotina Temporal Sniper (4 dias úteis / 96h)
                 if alvo_tp > 0 and maxima_efetiva >= alvo_tp:
                     acao = f"🎯 ALVO ALCANÇADO (TP em ${alvo_tp})! Recomendado FECHAR POSIÇÃO com Lucro (WIN)."
                 elif stop > 0 and preco_atual <= stop:
                     acao = f"🚨 STOP LOSS ATINGIDO (${stop})! Recomendado LIQUIDAR POSIÇÃO (LOSS)."
-                elif sugestao_stop > stop:
-                    acao = f"🛡️ PROTEGER POSIÇÃO. +1R Atingido! Sobe o Stop para Break-Even: ${sugestao_stop} | Alvo TP: ${alvo_tp}."
+                elif dias_uteis is not None and dias_uteis >= 4:
+                    alerta_timestop_ativo = True
+                    acao = (
+                        f"⏰ TIME-STOP ATINGIDO ({dias_uteis}d úteis > 96h)! Setup Sniper expirado — "
+                        f"Recomendado FECHAR A MERCADO (${preco_atual}) antes de varrer o Stop (${stop})."
+                    )
+                elif dias_uteis == 3:
+                    if sugestao_stop > stop and preco_atual > entrada:
+                        acao = f"⚠️ ÚLTIMO DIA SNIPER (72h) + 🛡️ +1R! Sobe Stop p/ BE: ${sugestao_stop} | Fechar amanhã se não tocar TP ${alvo_tp}."
+                    else:
+                        acao = f"⚠️ ÚLTIMO DIA DA JANELA SNIPER (72h). Se não arrancar rumo ao TP ${alvo_tp}, preparar saída | Stop: ${stop}."
+                elif sugestao_stop > stop and preco_atual > entrada:
+                    acao = f"🛡️ PROTEGER POSIÇÃO{tag_tempo}. +1R Atingido! Sobe o Stop para Break-Even: ${sugestao_stop} | Alvo TP: ${alvo_tp}."
                 else:
-                    acao = f"⏳ MANTER POSIÇÃO (Confluência Suprema). Alvo TP: ${alvo_tp} | Stop: ${stop}."
+                    acao = f"⏳ MANTER POSIÇÃO (Confluência Suprema{tag_tempo}). Alvo TP: ${alvo_tp} | Stop: ${stop}."
                 
                 bloco_posicoes_ativas += (
                     f"📌 [{status}] {ticker} ({chave_pos}) | Qtd: {qtd} | Entrada: ${entrada} | "
@@ -306,21 +343,27 @@ def analisar_confluencia_suprema(ativo_info):
 def executar_motor():
     if not ativos_sheets: sys.exit(0)
     
-    # 1. Verifica Filtro Macro (Se o mercado estiver fraco, notifica e regista, mas envia sempre os alertas)
+    data_hoje = datetime.now(ZoneInfo("Europe/Lisbon")).strftime("%d/%m/%Y %H:%M")
+    bloco_texto = f"⚡ RELATÓRIO DETALHADO - MOTOR 21: CONFLUÊNCIA SUPREMA ({data_hoje})\n==================================================================\n\n"
+
+    if bloco_posicoes_ativas:
+        bloco_texto += f"📌 GESTÃO DE POSIÇÕES ATIVAS:\n{bloco_posicoes_ativas}\n--------------------------------------------------\n\n"
+    else:
+        bloco_texto += "📌 GESTÃO DE POSIÇÕES ATIVAS: Nenhuma posição ativa detetada para este motor.\n--------------------------------------------------\n\n"
+
+    # 1. Verifica Filtro Macro (Mesmo em modo defensivo, envia antes a auditoria das posições ativas!)
     if not mercado_em_alta():
-        aviso_defensivo = "✅ [MERCADO FRACO] O SPY encontra-se abaixo da EMA 20. O Motor 21 bloqueou novos sinais para proteger capital (Modo Defensivo).\n"
+        aviso_defensivo = "🛡️ [MERCADO FRACO] O SPY encontra-se abaixo da EMA 20. O Motor 21 bloqueou novos sinais para proteger capital (Modo Defensivo).\n"
         print(aviso_defensivo)
+        bloco_texto += aviso_defensivo
         
-        # Gravação do ficheiro para o Orquestrador
         with open("comboio_confluencia_temp.txt", "w", encoding="utf-8") as f:
-            f.write(aviso_defensivo)
+            f.write(bloco_texto)
             
-        # Envio forçado de E-mail
-        enviar_email(aviso_defensivo)
+        enviar_email(bloco_texto)
         
-        # Envio forçado para o Telegram
-        enviar_alerta("21 ⚡ *MOTOR 21 (CONFLUÊNCIA SUPREMA)*\n\n🛡️ *MODO DEFENSIVO ATIVO*\nO SPY está abaixo da EMA 20. Novas entradas bloqueadas.")
-        
+        aviso_ts = "\n⏰ *ALERTA TIME-STOP:* Tens posição(ões) M21 expirada(s) (>96h) para fechar!" if alerta_timestop_ativo else ""
+        enviar_alerta(f"21 ⚡ *MOTOR 21 (CONFLUÊNCIA SUPREMA)*\n\n🛡️ *MODO DEFENSIVO ATIVO*\nO SPY está abaixo da EMA 20. Novas entradas bloqueadas.{aviso_ts}")
         sys.exit(0)
 
     alertas_confluencia = []
@@ -329,14 +372,6 @@ def executar_motor():
         if not ativo_info.get("ticker") or ativo_info.get("ticker") == "#N/A": continue
         res = analisar_confluencia_suprema(ativo_info)
         if res: alertas_confluencia.append(res)
-
-    data_hoje = datetime.now(ZoneInfo("Europe/Lisbon")).strftime("%d/%m/%Y %H:%M")
-    bloco_texto = f"⚡ RELATÓRIO DETALHADO - MOTOR 21: CONFLUÊNCIA SUPREMA ({data_hoje})\n==================================================================\n\n"
-
-    if bloco_posicoes_ativas:
-        bloco_texto += f"📌 GESTÃO DE POSIÇÕES ATIVAS:\n{bloco_posicoes_ativas}\n--------------------------------------------------\n\n"
-    else:
-        bloco_texto += "📌 GESTÃO DE POSIÇÕES ATIVAS: Nenhuma posição ativa detetada para este motor.\n--------------------------------------------------\n\n"
 
     if alertas_confluencia:
         bloco_texto += f"🎯 SINAIS DE ALTA PROBABILIDADE (SNIPER) ({len(alertas_confluencia)}):\n\n"
@@ -361,7 +396,8 @@ def executar_motor():
         f.write(bloco_texto)
 
     # Notificação no Telegram
-    enviar_alerta(f"21 ⚡ *MOTOR 21 (CONFLUÊNCIA)*\n\n🔍 Execução Concluída.\n🎯 Acionados: *{len(alertas_confluencia)}*")
+    aviso_ts = "\n⏰ *ALERTA TIME-STOP:* Tens posição(ões) M21 expirada(s) (>96h) para fechar!" if alerta_timestop_ativo else ""
+    enviar_alerta(f"21 ⚡ *MOTOR 21 (CONFLUÊNCIA)*\n\n🔍 Execução Concluída.\n🎯 Acionados: *{len(alertas_confluencia)}*{aviso_ts}")
 
 if __name__ == "__main__":
     executar_motor()
