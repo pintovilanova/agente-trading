@@ -8,7 +8,7 @@
 # 3. Pullback à EMA 20 em Tendência Primária (EMA 20 > SMA 50 > SMA 200)
 # 4. Squeeze de Volatilidade (BB dentro de KC)
 # 5. Entrada Institucional Silenciosa (RVOL >= 1.5)
-# Assimetria Sniper (2.5R) | Break-Even +1.0R | Time-Stop 96h (4 dias úteis).
+# Assimetria Sniper (2.5R) | Break-Even +1.0R | Time-Stop Adaptativo 96h (4 dias úteis).
 # ===================================================================================
 
 import pandas as pd
@@ -171,7 +171,7 @@ vol_diaria_usd = risco_fixo_usd if (risco_fixo_usd and risco_fixo_usd > 0) else 
 print(f"[CONFIG] Capital Total: ${capital:,.2f} | Orçamento Risco/Trade: ${vol_diaria_usd:,.2f} USD\n")
 
 # ===================================================================
-# 3B. AUDITAR POSIÇÕES EM CARTEIRA (ALVO 2.5R + BE +1.0R + TIME-STOP 96H)
+# 3B. AUDITAR POSIÇÕES EM CARTEIRA (ALVO 2.5R + BE +1.0R + TIME-STOP ADAPTATIVO 96H)
 # ===================================================================
 bloco_posicoes_ativas = ""
 alerta_timestop_ativo = False
@@ -180,6 +180,7 @@ def obter_dados_posicao_m21(ticker, dt_abertura=None):
     preco_atual = 0.0
     atr_atual = 0.0
     maxima_desde_abertura = 0.0
+    minima_vela_anterior = 0.0
 
     try:
         df_pos = yf.download(ticker, period="1mo", interval="1d", progress=False, session=session)
@@ -193,6 +194,7 @@ def obter_dados_posicao_m21(ticker, dt_abertura=None):
                 if cols_atr:
                     atr_atual = round(float(df_pos[cols_atr[0]].iloc[-1]), 2)
                 preco_atual = round(float(df_pos['Close'].iloc[-1]), 2)
+                minima_vela_anterior = round(float(df_pos['Low'].iloc[-2]), 2) if len(df_pos) >= 2 else round(float(df_pos['Low'].iloc[-1]), 2)
     except Exception as e:
         print(f"[AVISO] Falha ao obter dados diários para {ticker}: {e}")
 
@@ -228,7 +230,7 @@ def obter_dados_posicao_m21(ticker, dt_abertura=None):
             pass
 
     maxima_efetiva = max(maxima_desde_abertura, preco_atual)
-    return preco_atual, atr_atual, maxima_efetiva
+    return preco_atual, atr_atual, maxima_efetiva, minima_vela_anterior
 
 for chave_pos, info in posicoes_ativas_dict.items():
     if not isinstance(info, dict): continue
@@ -243,7 +245,7 @@ for chave_pos, info in posicoes_ativas_dict.items():
             dias_uteis = calcular_dias_uteis(data_abertura)
             tag_tempo = f" | {dias_uteis}d úteis" if dias_uteis is not None else ""
             
-            preco_atual, atr_calc, maxima_efetiva = obter_dados_posicao_m21(ticker, dt_abertura)
+            preco_atual, atr_calc, maxima_efetiva, min_anterior = obter_dados_posicao_m21(ticker, dt_abertura)
             
             stop = limpar_float(info.get("stopAtual")) or limpar_float(info.get("stopLoss")) or 0.0
             entrada = limpar_float(info.get("precoEntrada")) or preco_atual
@@ -278,25 +280,41 @@ for chave_pos, info in posicoes_ativas_dict.items():
             qtd = info.get("quantidade", "N/A")
             
             # Proteção Break-Even aos +1.0R
+            be_calculado = round(entrada * 1.0005, 2)
+            patamar_lucro_1r = entrada + (risco_inicial * 1.0)
+            em_lucro_protegido = (
+                (stop >= entrada) or 
+                (risco_inicial > 0 and maxima_efetiva >= patamar_lucro_1r and preco_atual > entrada)
+            )
+
             sugestao_stop = stop
-            if risco_inicial > 0 and maxima_efetiva >= (entrada + (risco_inicial * 1.0)) and preco_atual > entrada:
-                be_calculado = round(entrada * 1.0005, 2)
-                if be_calculado > stop:
-                    sugestao_stop = be_calculado
+            if em_lucro_protegido and be_calculado > stop:
+                sugestao_stop = be_calculado
+
+            # Trailing Stop dinâmico para extensão de vencedores
+            trailing_extensao = max(sugestao_stop, round(min_anterior * 0.998, 2)) if (min_anterior > 0 and min_anterior < preco_atual) else sugestao_stop
             
             if alvo_tp > 0 and preco_atual >= alvo_tp:
                 acao = f"🎯 ALVO ALCANÇADO ({label_alvo})! Recomendado FECHAR POSIÇÃO com Lucro (WIN)."
             elif stop > 0 and preco_atual <= stop:
                 acao = f"🚨 STOP LOSS ATINGIDO (${stop})! Recomendado LIQUIDAR POSIÇÃO (LOSS)."
             elif dias_uteis is not None and dias_uteis >= 4:
-                alerta_timestop_ativo = True
-                acao = (
-                    f"⏰ TIME-STOP ATINGIDO ({dias_uteis}d úteis > 96h)! Setup Sniper expirado — "
-                    f"Recomendado FECHAR A MERCADO (${preco_atual}) antes de varrer o Stop (${stop})."
-                )
+                if em_lucro_protegido and preco_atual >= patamar_lucro_1r:
+                    acao = (
+                        f"🚀 EXTENSÃO DE VENCEDOR ({dias_uteis}d úteis > 96h, mas em lucro >= +1.0R)! "
+                        f"MANTER rumo a {label_alvo} com Trailing Stop elevado para ${trailing_extensao}."
+                    )
+                else:
+                    alerta_timestop_ativo = True
+                    acao = (
+                        f"⏰ TIME-STOP ATINGIDO ({dias_uteis}d úteis > 96h, sem impulso >= +1.0R)! "
+                        f"Recomendado FECHAR A MERCADO (${preco_atual}) antes de varrer o Stop (${stop})."
+                    )
             elif dias_uteis == 3:
-                if sugestao_stop > stop and preco_atual > entrada:
-                    acao = f"⚠️ ÚLTIMO DIA SNIPER (72h->96h) + 🛡️ +1R! Sobe Stop p/ BE: ${sugestao_stop} | Fechar amanhã se não tocar {label_alvo}."
+                if em_lucro_protegido:
+                    acao = f"🛡️ JANELA SNIPER 72h->96h + LUCRO PROTEGIDO (+1.0R)! Sobe Stop p/ BE: ${sugestao_stop} | Pode estender além de 96h rumo a {label_alvo}."
+                elif preco_atual < entrada:
+                    acao = f"⚠️ ÚLTIMO DIA SNIPER (4.º dia) EM NEGATIVO (${preco_atual} < ${entrada}). Se não recuperar no fecho, encerrar antecipadamente para poupar risco | Stop: ${stop}."
                 else:
                     acao = f"⚠️ ÚLTIMO DIA DA JANELA SNIPER (4.º dia). Se não arrancar rumo a {label_alvo}, preparar saída no fecho | Stop: ${stop}."
             elif sugestao_stop > stop and preco_atual > entrada:
@@ -453,7 +471,7 @@ def executar_motor():
         
         debug_telegram_ativado = str(configs_dict.get("TELEGRAM_NOTIFICATIONS_DEBUG", "false")).strip().lower() in ["true", "1", "sim", "yes"]
         if debug_telegram_ativado or alerta_timestop_ativo:
-            aviso_ts = "\n⏰ *ALERTA TIME-STOP:* Tens posição(ões) M21 expirada(s) (>96h) para fechar!" if alerta_timestop_ativo else ""
+            aviso_ts = "\n⏰ *ALERTA TIME-STOP:* Tens posição(ões) M21 expirada(s) (>96h sem impulso) para fechar!" if alerta_timestop_ativo else ""
             enviar_alerta(f"21 ⚡ *MOTOR 21 (CONFLUÊNCIA SUPREMA)*\n\n🛡️ *MODO DEFENSIVO ATIVO*\n{msg_mercado}{aviso_ts}")
         return
 
@@ -474,7 +492,7 @@ def executar_motor():
             bloco_texto += (
                 f"💎 [{a['ticker']}] - {info_ativo.get('nome', 'N/A')} ({info_ativo.get('setor', 'Desconhecido')})\n"
                 f"    - 📊 Contexto Técnico: {a['estado_confluencia']}\n"
-                f"    - ⚙️ Tática: Breakout Sniper Assimétrico (Alvo 2.5R | BE +1.0R | Time-Stop 96h)\n"
+                f"    - ⚙️ Tática: Breakout Sniper Assimétrico (Alvo 2.5R | BE +1.0R | Time-Stop Adaptativo 96h)\n"
                 f"    - 📋 Tipo de Ordem: BUY STOP (Gatilho: ${a['gatilho']})\n"
                 f"    - 🔢 Risco/Retorno (2.5:1): Stop Loss: ${a['stop_loss']} | Alvo (2.5R): ${a['alvo_tp']}\n"
                 f"    - 💰 Dimensionamento: Qtd: {a['qtd_acoes']} | Investimento: ~${a['valor_investir']} USD\n"
@@ -492,7 +510,7 @@ def executar_motor():
     # Notificação no Telegram
     debug_telegram_ativado = str(configs_dict.get("TELEGRAM_NOTIFICATIONS_DEBUG", "false")).strip().lower() in ["true", "1", "sim", "yes"]
     if debug_telegram_ativado or len(alertas_confluencia) > 0 or alerta_timestop_ativo:
-        aviso_ts = "\n⏰ *ALERTA TIME-STOP:* Tens posição(ões) M21 expirada(s) (>96h) para fechar!" if alerta_timestop_ativo else ""
+        aviso_ts = "\n⏰ *ALERTA TIME-STOP:* Tens posição(ões) M21 expirada(s) (>96h sem impulso) para fechar!" if alerta_timestop_ativo else ""
         enviar_alerta(
             f"21 ⚡ *MOTOR 21 (CONFLUÊNCIA)*\n\n"
             f"🔍 Execução Concluída.\n"
