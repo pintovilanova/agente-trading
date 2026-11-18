@@ -17,6 +17,7 @@ import random
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 import json
+import traceback
 import warnings
 warnings.filterwarnings("ignore")
 
@@ -92,7 +93,7 @@ def buscar_dados_completos():
         return [], {}, {}
     try:
         url_alvo = WEBHOOK_URL if "?" in WEBHOOK_URL else f"{WEBHOOK_URL}?aba=Analise Compra"
-        resp = requests.get(url_alvo, timeout=15)
+        resp = requests.get(url_alvo, timeout=20)
         
         if resp.status_code == 200:
             try:
@@ -105,6 +106,10 @@ def buscar_dados_completos():
                 ativos = dados.get("ativos", [])
                 posicoes = dados.get("posicoesAtivas", {}) or dados.get("posicoes", {})
                 configs = dados.get("configs", {})
+                print(f"[DIAGNÓSTICO SHEETS] Ativos: {len(ativos)} | Posições recebidas: {len(posicoes)}")
+                for k, v in posicoes.items():
+                    if isinstance(v, dict):
+                        print(f"   -> Posição '{k}': status='{v.get('status')}' | dataAbertura='{v.get('dataAbertura')}'")
                 return ativos, posicoes, configs
             elif isinstance(dados, list):
                 return dados, {}, {}
@@ -159,7 +164,7 @@ def enviar_email(assunto, conteudo):
         return False
 
 # ===================================================================
-# 3. CARGA DE DADOS E PARAMETRIZAÇÃO DE RISCO (LIDA DO NOVO CONFIGS)
+# 3. CARGA DE DADOS E PARAMETRIZAÇÃO DE RISCO
 # ===================================================================
 ativos_sheets, posicoes_ativas_dict, configs_dict = buscar_dados_completos()
 
@@ -271,7 +276,6 @@ for chave_pos, info in posicoes_ativas_dict.items():
                 0.0
             )
             
-            # Alvo primário Hit & Run M17: 1.5R ou EMA5 (o menor que garanta lucro >= +0.8R)
             alvo_15r = round(entrada + (risco_inicial * 1.5), 2) if risco_inicial > 0 else ema5_dinamica
             
             if tp_sheets > (entrada * 1.005):
@@ -286,7 +290,6 @@ for chave_pos, info in posicoes_ativas_dict.items():
                 
             qtd = info.get("quantidade", "N/A")
 
-            # Proteção Break-Even aos +0.8R
             sugestao_stop = stop
             patamar_lucro_be = entrada + (risco_inicial * 0.8)
 
@@ -327,7 +330,6 @@ for chave_pos, info in posicoes_ativas_dict.items():
 # ===================================================================
 def analisar_rsi_drop(ativo_info):
     try:
-        # FILTRO 1: FORÇA RELATIVA MÍNIMA (RS Score >= 70)
         rs_score = limpar_float(ativo_info.get("rs_score")) or 0.0
         if rs_score < 70.0:
             return None
@@ -371,18 +373,13 @@ def analisar_rsi_drop(ativo_info):
         sma50 = float(ultimo[cols_sma50[0]])
         atr = float(ultimo[cols_atr[0]])
 
-        # FILTRO 2: Tendência primária intacta (Preço > SMA200 e SMA50 > SMA200) + RSI(2) <= 8.0
         if preco > sma200 and sma50 > sma200 and rsi2 <= 8.0:
-            # GATILHO DE CONFIRMAÇÃO (BUY STOP acima da máxima do dia)
             entrada_gatilho = round(maxima_dia * 1.002, 2)
-            
-            # Stop técnico protegido abaixo da mínima do dia ou 1.5x ATR
             stop_loss = round(min(minima_dia * 0.995, entrada_gatilho - (atr * 1.5)), 2)
             risco = entrada_gatilho - stop_loss
             if risco <= 0:
                 return None
 
-            # Alvo realista Hit & Run M17: 1.5R
             alvo_tp = round(entrada_gatilho + (risco * 1.5), 2)
             qtd_calc = round(vol_diaria_usd / risco, 2)
             val_calc = entrada_gatilho * qtd_calc
@@ -432,71 +429,77 @@ def analisar_rsi_drop(ativo_info):
 # 6. EXECUÇÃO PRINCIPAL E RELATÓRIO
 # ===================================================================
 def executar_motor():
-    alertas_rsi = []
-    total_analisados = 0
+    try:
+        alertas_rsi = []
+        total_analisados = 0
 
-    mercado_ok, msg_mercado = verificar_regime_mercado()
+        mercado_ok, msg_mercado = verificar_regime_mercado()
 
-    if mercado_ok and ativos_sheets:
-        for ativo_info in ativos_sheets:
-            ticker = ativo_info.get("ticker")
-            if not ticker or ticker == "#N/A": continue
-            total_analisados += 1
-            res = analisar_rsi_drop(ativo_info)
-            if res: alertas_rsi.append(res)
+        if mercado_ok and ativos_sheets:
+            for ativo_info in ativos_sheets:
+                ticker = ativo_info.get("ticker")
+                if not ticker or ticker == "#N/A": continue
+                total_analisados += 1
+                res = analisar_rsi_drop(ativo_info)
+                if res: alertas_rsi.append(res)
 
-    data_hoje = datetime.now(ZoneInfo("Europe/Lisbon")).strftime("%d/%m/%Y %H:%M")
-    
-    bloco_texto = (
-        f"⚡ RELATÓRIO DETALHADO - MOTOR 17: 2-DAY RSI DROP CONFIRMADO ({data_hoje})\n"
-        f"==================================================================\n"
-        f"🌐 Filtro Macro: {msg_mercado}\n"
-        f"💰 Risco Configurado por Trade: ${vol_diaria_usd:,.2f} USD\n\n"
-    )
-
-    if bloco_posicoes_ativas:
-        bloco_texto += f"📌 GESTÃO DE POSIÇÕES ATIVAS:\n{bloco_posicoes_ativas}\n--------------------------------------------------\n\n"
-    else:
-        bloco_texto += "📌 GESTÃO DE POSIÇÕES ATIVAS: Nenhuma posição ativa detetada para este motor.\n--------------------------------------------------\n\n"
-
-    if not mercado_ok:
-        bloco_texto += f"🛡️ [MODO DEFENSIVO] Novas entradas bloqueadas hoje ({msg_mercado}).\n"
-    elif alertas_rsi:
-        bloco_texto += f"🎯 SINAIS DE REVERSÃO CONFIRMADA DETETADOS ({len(alertas_rsi)}):\n\n"
-        for a in alertas_rsi:
-            bloco_texto += (
-                f"🔹 [{a['ticker']}] - {a['nome_empresa']} ({a['setor']})\n"
-                f"    - 📊 Contexto Técnico: RSI(2) em {a['rsi2']} (Sobrevendido Extremo | SMA50 > SMA200)\n"
-                f"    - ⚙️ Tática: Reversão à Média com Confirmação de Força (Alvo 1.5R | Time-Stop 72h)\n"
-                f"    - 📋 Tipo de Ordem: BUY STOP (Só ativa se romper máxima de hoje: ${a['gatilho']})\n"
-                f"    - 🔢 Dados Exatos: Gatilho Compra: ${a['gatilho']} | Stop Loss: ${a['stop_loss']} | Alvo TP (1.5R): ${a['alvo_tp']}\n"
-                f"    - 💰 Dimensionamento: Qtd: {a['qtd_acoes']} | Valor a Investir: ~${a['valor_investir']} USD\n"
-                f"    - 📈 RS Score Institucional: {a['rs_score']}\n"
-                f"--------------------------------------------------\n"
-            )
-    else:
-        bloco_texto += "✅ Nenhum novo sinal de RSI Drop confirmado detetado hoje.\n"
-
-    with open("comboio_rsi_rebound_temp.txt", "w", encoding="utf-8") as f:
-        f.write(bloco_texto)
-
-    assunto_email = f"⚡🎯 tradingRelatorioIA US - MOTOR 17 RSI DROP ({datetime.now(ZoneInfo('Europe/Lisbon')).strftime('%d/%m/%Y')})"
-    enviar_email(assunto_email, bloco_texto)
-
-    debug_telegram_ativado = str(configs_dict.get("TELEGRAM_NOTIFICATIONS_DEBUG", "false")).strip().lower() in ["true", "1", "sim", "yes"]
-
-    if debug_telegram_ativado or len(alertas_rsi) > 0 or alerta_timestop_ativo:
-        print("A enviar notificação para o Telegram via função modular...")
-        total_acionados = len(alertas_rsi)
-        aviso_ts = "\n⏰ *ALERTA TIME-STOP:* Tens posição(ões) M17 expirada(s) (>72h) para fechar!" if alerta_timestop_ativo else ""
-        mensagem_telegram = (
-            f"17 ⚡ *MOTOR 17 (RSI DROP CONFIRMADO)*\n\n"
-            f"🔍 [STATUS] Execução concluída.\n"
-            f"📊 Analisados: *{total_analisados}* | Gatilhos Buy Stop: *{total_acionados}*{aviso_ts}\n"
-            f"💰 Risco/Trade: *${vol_diaria_usd:.2f}*\n"
-            f"✉️ Relatório enviado por e-mail."
+        data_hoje = datetime.now(ZoneInfo("Europe/Lisbon")).strftime("%d/%m/%Y %H:%M")
+        
+        bloco_texto = (
+            f"⚡ RELATÓRIO DETALHADO - MOTOR 17: 2-DAY RSI DROP CONFIRMADO ({data_hoje})\n"
+            f"==================================================================\n"
+            f"🌐 Filtro Macro: {msg_mercado}\n"
+            f"💰 Risco Configurado por Trade: ${vol_diaria_usd:,.2f} USD\n\n"
         )
-        enviar_alerta(mensagem_telegram)
+
+        if bloco_posicoes_ativas:
+            bloco_texto += f"📌 GESTÃO DE POSIÇÕES ATIVAS:\n{bloco_posicoes_ativas}\n--------------------------------------------------\n\n"
+        else:
+            bloco_texto += "📌 GESTÃO DE POSIÇÕES ATIVAS: Nenhuma posição ativa detetada para este motor.\n--------------------------------------------------\n\n"
+
+        if not mercado_ok:
+            bloco_texto += f"🛡️ [MODO DEFENSIVO] Novas entradas bloqueadas hoje ({msg_mercado}).\n"
+        elif alertas_rsi:
+            bloco_texto += f"🎯 SINAIS DE REVERSÃO CONFIRMADA DETETADOS ({len(alertas_rsi)}):\n\n"
+            for a in alertas_rsi:
+                bloco_texto += (
+                    f"🔹 [{a['ticker']}] - {a['nome_empresa']} ({a['setor']})\n"
+                    f"    - 📊 Contexto Técnico: RSI(2) em {a['rsi2']} (Sobrevendido Extremo | SMA50 > SMA200)\n"
+                    f"    - ⚙️ Tática: Reversão à Média com Confirmação de Força (Alvo 1.5R | Time-Stop 72h)\n"
+                    f"    - 📋 Tipo de Ordem: BUY STOP (Só ativa se romper máxima de hoje: ${a['gatilho']})\n"
+                    f"    - 🔢 Dados Exatos: Gatilho Compra: ${a['gatilho']} | Stop Loss: ${a['stop_loss']} | Alvo TP (1.5R): ${a['alvo_tp']}\n"
+                    f"    - 💰 Dimensionamento: Qtd: {a['qtd_acoes']} | Valor a Investir: ~${a['valor_investir']} USD\n"
+                    f"    - 📈 RS Score Institucional: {a['rs_score']}\n"
+                    f"--------------------------------------------------\n"
+                )
+        else:
+            bloco_texto += "✅ Nenhum novo sinal de RSI Drop confirmado detetado hoje.\n"
+
+        with open("comboio_rsi_rebound_temp.txt", "w", encoding="utf-8") as f:
+            f.write(bloco_texto)
+
+        assunto_email = f"⚡🎯 tradingRelatorioIA US - MOTOR 17 RSI DROP ({datetime.now(ZoneInfo('Europe/Lisbon')).strftime('%d/%m/%Y')})"
+        enviar_email(assunto_email, bloco_texto)
+
+        debug_telegram_ativado = str(configs_dict.get("TELEGRAM_NOTIFICATIONS_DEBUG", "false")).strip().lower() in ["true", "1", "sim", "yes"]
+
+        if debug_telegram_ativado or len(alertas_rsi) > 0 or alerta_timestop_ativo:
+            print("A enviar notificação para o Telegram via função modular...")
+            total_acionados = len(alertas_rsi)
+            aviso_ts = "\n⏰ *ALERTA TIME-STOP:* Tens posição(ões) M17 expirada(s) (>72h) para fechar!" if alerta_timestop_ativo else ""
+            mensagem_telegram = (
+                f"17 ⚡ *MOTOR 17 (RSI DROP CONFIRMADO)*\n\n"
+                f"🔍 [STATUS] Execução concluída.\n"
+                f"📊 Analisados: *{total_analisados}* | Gatilhos Buy Stop: *{total_acionados}*{aviso_ts}\n"
+                f"💰 Risco/Trade: *${vol_diaria_usd:.2f}*\n"
+                f"✉️ Relatório enviado por e-mail."
+            )
+            enviar_alerta(mensagem_telegram)
+    except Exception as e:
+        erro_str = f"[ERRO CRÍTICO M17] {e}\n{traceback.format_exc()}"
+        print(erro_str)
+        with open("comboio_rsi_rebound_temp.txt", "w", encoding="utf-8") as f:
+            f.write(erro_str)
 
 if __name__ == "__main__":
     executar_motor()
