@@ -3,12 +3,12 @@
 # ===================================================================================
 # Descrição Geral:
 # O modelo "Sniper". Exige confluência absoluta:
-# 1. Filtro de Mercado (SPY > EMA 20 diária)
+# 1. Filtro de Mercado (SPY > EMA 20 e SMA 200 diária)
 # 2. Força Relativa de Elite (RS Score >= 75)
-# 3. Pullback à EMA 20 (Motor 20)
-# 4. Squeeze de Volatilidade (Motor 19)
-# 5. Entrada Institucional Silenciosa (RVOL >= 1.5) (Motor 18)
-# Risco/Retorno fixado agressivamente em 3:1.
+# 3. Pullback à EMA 20 em Tendência Primária (EMA 20 > SMA 50 > SMA 200)
+# 4. Squeeze de Volatilidade (BB dentro de KC)
+# 5. Entrada Institucional Silenciosa (RVOL >= 1.5)
+# Assimetria Sniper (2.5R) | Break-Even +1.0R | Time-Stop 96h (4 dias úteis).
 # ===================================================================================
 
 import pandas as pd
@@ -66,44 +66,57 @@ def limpar_float(val):
     except (ValueError, TypeError):
         return None
 
-def calcular_dias_uteis(data_abertura_str):
-    """Calcula quantos dias úteis (seg-sex) passaram desde a data na Coluna A."""
+def parse_data_abertura(data_abertura_str):
     if not data_abertura_str:
         return None
     formatos = ("%d/%m/%Y %H:%M:%S", "%d/%m/%Y %H:%M", "%d/%m/%Y", "%Y-%m-%d %H:%M:%S", "%Y-%m-%d")
     for fmt in formatos:
         try:
-            dt_inicio = datetime.strptime(str(data_abertura_str).strip(), fmt).replace(tzinfo=ZoneInfo("Europe/Lisbon"))
-            dt_agora = datetime.now(ZoneInfo("Europe/Lisbon"))
-            
-            dias_uteis = 0
-            cursor = dt_inicio
-            while cursor.date() < dt_agora.date():
-                cursor += timedelta(days=1)
-                if cursor.weekday() < 5:  # 0=Seg ... 4=Sex
-                    dias_uteis += 1
-            return dias_uteis
+            return datetime.strptime(str(data_abertura_str).strip(), fmt).replace(tzinfo=ZoneInfo("Europe/Lisbon"))
         except ValueError:
             continue
     return None
 
+def calcular_dias_uteis(data_abertura_str):
+    """Calcula quantos dias úteis (seg-sex) passaram desde a data na Coluna A."""
+    dt_inicio = parse_data_abertura(data_abertura_str)
+    if dt_inicio is None:
+        return None
+    dt_agora = datetime.now(ZoneInfo("Europe/Lisbon"))
+    dias_uteis = 0
+    cursor = dt_inicio
+    while cursor.date() < dt_agora.date():
+        cursor += timedelta(days=1)
+        if cursor.weekday() < 5:
+            dias_uteis += 1
+    return dias_uteis
+
 # ===================================================================
 # 2. FILTRO GERAL DE MERCADO (S&P 500)
 # ===================================================================
-def mercado_em_alta():
+def verificar_regime_mercado():
+    """Exige SPY acima da EMA 20 e da SMA 200 para autorizar entradas Sniper."""
     try:
-        df_spy = yf.download("SPY", period="3mo", interval="1d", progress=False, session=session)
-        if df_spy.empty: return True # Em caso de falha, permite avançar assumindo risco
-        if isinstance(df_spy.columns, pd.MultiIndex): df_spy.columns = df_spy.columns.droplevel(1)
+        df_spy = yf.download("SPY", period="1y", interval="1d", progress=False, session=session)
+        if df_spy.empty or len(df_spy) < 200:
+            return True, "Dados SPY insuficientes (autorizado por defeito)."
+        if isinstance(df_spy.columns, pd.MultiIndex):
+            df_spy.columns = df_spy.columns.droplevel(1)
         
-        df_spy['EMA_20'] = df_spy['Close'].ewm(span=20, adjust=False).mean()
-        preco_spy = float(df_spy['Close'].iloc[-1])
-        ema_spy = float(df_spy['EMA_20'].iloc[-1])
-        
-        return preco_spy > ema_spy
+        close_hoje = float(df_spy['Close'].iloc[-1])
+        close_ontem = float(df_spy['Close'].iloc[-2])
+        ema20 = float(df_spy['Close'].ewm(span=20, adjust=False).mean().iloc[-1])
+        sma200 = float(df_spy['Close'].rolling(200).mean().iloc[-1])
+        var_dia = ((close_hoje - close_ontem) / close_ontem) * 100
+
+        if close_hoje < sma200:
+            return False, f"SPY (${close_hoje:.2f}) abaixo da SMA200 (${sma200:.2f}). Regime baixista."
+        if close_hoje < ema20:
+            return False, f"SPY (${close_hoje:.2f}) abaixo da EMA20 (${ema20:.2f}). Sem momentum de curto prazo."
+        return True, f"SPY em tendência (${close_hoje:.2f} > EMA20 ${ema20:.2f} > SMA200 ${sma200:.2f} | Var: {var_dia:+.2f}%)."
     except Exception as e:
         print(f"[AVISO] Falha ao verificar filtro SPY: {e}")
-        return True
+        return True, f"Aviso SPY: {e}"
 
 # ===================================================================
 # 3. FUNÇÕES DE REDE E CARGA DE DADOS
@@ -146,19 +159,76 @@ def enviar_email(conteudo):
 
 ativos_sheets, posicoes_ativas_dict, configs_dict = buscar_dados_completos()
 
-try:
-    capital = float(configs_dict.get("CAPITAL_TOTAL_CONTA", 10400.00))
-    pct_risco = limpar_float(configs_dict.get("RISCO_SWING_PCT")) or 0.01
-except (ValueError, TypeError):
-    capital, pct_risco = 10400.00, 0.01
+capital = limpar_float(configs_dict.get("CAPITAL_TOTAL_CONTA")) or 10400.00
+pct_risco = (
+    limpar_float(configs_dict.get("RISCO_POR_TRADE")) or 
+    limpar_float(configs_dict.get("RISCO_SWING_PCT")) or 
+    0.0025
+)
+risco_fixo_usd = limpar_float(configs_dict.get("RISCO_MAXIMO_USD"))
 
-vol_diaria_usd = capital * pct_risco
+vol_diaria_usd = risco_fixo_usd if (risco_fixo_usd and risco_fixo_usd > 0) else (capital * pct_risco)
+print(f"[CONFIG] Capital Total: ${capital:,.2f} | Orçamento Risco/Trade: ${vol_diaria_usd:,.2f} USD\n")
 
 # ===================================================================
-# 3B. AUDITAR POSIÇÕES EM CARTEIRA (COM TIME-STOP SNIPER 96H)
+# 3B. AUDITAR POSIÇÕES EM CARTEIRA (ALVO 2.5R + BE +1.0R + TIME-STOP 96H)
 # ===================================================================
 bloco_posicoes_ativas = ""
 alerta_timestop_ativo = False
+
+def obter_dados_posicao_m21(ticker, dt_abertura=None):
+    preco_atual = 0.0
+    atr_atual = 0.0
+    maxima_desde_abertura = 0.0
+
+    try:
+        df_pos = yf.download(ticker, period="1mo", interval="1d", progress=False, session=session)
+        if not df_pos.empty:
+            if isinstance(df_pos.columns, pd.MultiIndex):
+                df_pos.columns = df_pos.columns.droplevel(1)
+            df_pos = df_pos.dropna(subset=['Close', 'High', 'Low'])
+            if len(df_pos) >= 14:
+                df_pos.ta.atr(length=14, append=True)
+                cols_atr = [c for c in df_pos.columns if str(c).startswith('ATRr_') or str(c).startswith('ATR_') or str(c).startswith('ATRe_')]
+                if cols_atr:
+                    atr_atual = round(float(df_pos[cols_atr[0]].iloc[-1]), 2)
+                preco_atual = round(float(df_pos['Close'].iloc[-1]), 2)
+    except Exception as e:
+        print(f"[AVISO] Falha ao obter dados diários para {ticker}: {e}")
+
+    try:
+        df_intra = yf.download(ticker, period="5d", interval="1m", prepost=True, progress=False, session=session)
+        if not df_intra.empty:
+            if isinstance(df_intra.columns, pd.MultiIndex):
+                df_intra.columns = df_intra.columns.get_level_values(0)
+            df_intra = df_intra.dropna(subset=['Close', 'High'])
+            if not df_intra.empty:
+                ultimo_rt = float(df_intra['Close'].iloc[-1])
+                if ultimo_rt > 0:
+                    preco_atual = round(ultimo_rt, 2)
+                if dt_abertura is not None:
+                    idx_lisbon = df_intra.index.tz_convert("Europe/Lisbon") if df_intra.index.tzinfo else df_intra.index.tz_localize("UTC").tz_convert("Europe/Lisbon")
+                    df_pos_abertura = df_intra[idx_lisbon >= dt_abertura]
+                    if not df_pos_abertura.empty:
+                        maxima_desde_abertura = round(float(df_pos_abertura['Close'].max()), 2)
+    except Exception as e:
+        print(f"[AVISO] Falha ao extrair intraday para {ticker}: {e}")
+
+    if preco_atual <= 0:
+        try:
+            t = yf.Ticker(ticker, session=session)
+            fast = t.fast_info
+            p_pre = getattr(fast, 'pre_market_price', None)
+            p_last = getattr(fast, 'last_price', None)
+            if p_pre and not np.isnan(p_pre) and p_pre > 0:
+                preco_atual = round(float(p_pre), 2)
+            elif p_last and not np.isnan(p_last) and p_last > 0:
+                preco_atual = round(float(p_last), 2)
+        except Exception:
+            pass
+
+    maxima_efetiva = max(maxima_desde_abertura, preco_atual)
+    return preco_atual, atr_atual, maxima_efetiva
 
 for chave_pos, info in posicoes_ativas_dict.items():
     if not isinstance(info, dict): continue
@@ -168,70 +238,76 @@ for chave_pos, info in posicoes_ativas_dict.items():
         try:
             ticker = "AI" if chave_pos.lower() in ["c3.ai", "c3"] else chave_pos.strip().upper()
             
-            df_pos = yf.download(ticker, period="1mo", interval="1d", progress=False, session=session)
-            if not df_pos.empty:
-                if isinstance(df_pos.columns, pd.MultiIndex):
-                    df_pos.columns = df_pos.columns.droplevel(1)
+            data_abertura = info.get("dataAbertura", "")
+            dt_abertura = parse_data_abertura(data_abertura)
+            dias_uteis = calcular_dias_uteis(data_abertura)
+            tag_tempo = f" | {dias_uteis}d úteis" if dias_uteis is not None else ""
+            
+            preco_atual, atr_calc, maxima_efetiva = obter_dados_posicao_m21(ticker, dt_abertura)
+            
+            stop = limpar_float(info.get("stopAtual")) or limpar_float(info.get("stopLoss")) or 0.0
+            entrada = limpar_float(info.get("precoEntrada")) or preco_atual
+            
+            if preco_atual == 0.0:
+                preco_atual = entrada
+                maxima_efetiva = entrada
+
+            if stop <= 0 and atr_calc > 0 and entrada > 0:
+                stop = round(entrada - (atr_calc * 1.5), 2)
+            
+            risco_inicial = entrada - stop if entrada > stop else (atr_calc * 1.5 if atr_calc > 0 else 0.0)
+            
+            tp_sheets = (
+                limpar_float(info.get("alvoTp")) or 
+                limpar_float(info.get("takeProfit")) or 
+                limpar_float(info.get("alvo_tp")) or 
+                0.0
+            )
+            
+            # Alvo Sniper M21: 2.5R (realista dentro da janela de 4 dias úteis)
+            if tp_sheets > (entrada * 1.005):
+                alvo_tp = tp_sheets
+                label_alvo = f"${alvo_tp}"
+            elif risco_inicial > 0:
+                alvo_tp = round(entrada + (risco_inicial * 2.5), 2)
+                label_alvo = f"${alvo_tp} (TP 2.5R)"
+            else:
+                alvo_tp = 0.0
+                label_alvo = "N/A"
                 
-                stop = limpar_float(info.get("stopAtual")) or limpar_float(info.get("stopLoss")) or 0.0
-                alvo_tp = limpar_float(info.get("alvoTp")) or limpar_float(info.get("takeProfit")) or 0.0
-                
-                # Cálculo de duração em dias úteis (Coluna A)
-                data_abertura = info.get("dataAbertura", "")
-                dias_uteis = calcular_dias_uteis(data_abertura)
-                tag_tempo = f" | {dias_uteis}d úteis" if dias_uteis is not None else ""
-                
-                try:
-                    df_intra = yf.download(ticker, period="2d", interval="1m", prepost=True, progress=False, session=session)
-                    if isinstance(df_intra.columns, pd.MultiIndex):
-                        df_intra.columns = df_intra.columns.droplevel(1)
-                    preco_atual = round(float(df_intra['Close'].iloc[-1]), 2)
-                    maxima_hoje = round(float(df_intra['High'].max()), 2)
-                except Exception:
-                    preco_atual = round(float(df_pos['Close'].iloc[-1]), 2)
-                    maxima_hoje = round(float(df_pos['High'].iloc[-1]), 2)
-                
-                entrada = limpar_float(info.get("precoEntrada")) or preco_atual
-                qtd = info.get("quantidade", "N/A")
-                maxima_efetiva = max(maxima_hoje, preco_atual)
-                
-                # Cálculo automático de TP 3R e Trailing Stop Break-Even aos +1R
-                risco_inicial = entrada - stop if entrada > stop else 0.0
-                
-                if alvo_tp <= 0 and risco_inicial > 0:
-                    alvo_tp = round(entrada + (risco_inicial * 3.0), 2)
-                
-                sugestao_stop = stop
-                if risco_inicial > 0 and maxima_efetiva >= (entrada + (risco_inicial * 1.0)) and preco_atual > entrada:
-                    be_calculado = round(entrada * 1.0005, 2)
-                    if be_calculado > stop:
-                        sugestao_stop = be_calculado
-                
-                # Avaliação com Guilhotina Temporal Sniper (4 dias úteis / 96h)
-                if alvo_tp > 0 and maxima_efetiva >= alvo_tp:
-                    acao = f"🎯 ALVO ALCANÇADO (TP em ${alvo_tp})! Recomendado FECHAR POSIÇÃO com Lucro (WIN)."
-                elif stop > 0 and preco_atual <= stop:
-                    acao = f"🚨 STOP LOSS ATINGIDO (${stop})! Recomendado LIQUIDAR POSIÇÃO (LOSS)."
-                elif dias_uteis is not None and dias_uteis >= 4:
-                    alerta_timestop_ativo = True
-                    acao = (
-                        f"⏰ TIME-STOP ATINGIDO ({dias_uteis}d úteis > 96h)! Setup Sniper expirado — "
-                        f"Recomendado FECHAR A MERCADO (${preco_atual}) antes de varrer o Stop (${stop})."
-                    )
-                elif dias_uteis == 3:
-                    if sugestao_stop > stop and preco_atual > entrada:
-                        acao = f"⚠️ ÚLTIMO DIA SNIPER (72h) + 🛡️ +1R! Sobe Stop p/ BE: ${sugestao_stop} | Fechar amanhã se não tocar TP ${alvo_tp}."
-                    else:
-                        acao = f"⚠️ ÚLTIMO DIA DA JANELA SNIPER (72h). Se não arrancar rumo ao TP ${alvo_tp}, preparar saída | Stop: ${stop}."
-                elif sugestao_stop > stop and preco_atual > entrada:
-                    acao = f"🛡️ PROTEGER POSIÇÃO{tag_tempo}. +1R Atingido! Sobe o Stop para Break-Even: ${sugestao_stop} | Alvo TP: ${alvo_tp}."
-                else:
-                    acao = f"⏳ MANTER POSIÇÃO (Confluência Suprema{tag_tempo}). Alvo TP: ${alvo_tp} | Stop: ${stop}."
-                
-                bloco_posicoes_ativas += (
-                    f"📌 [{status}] {ticker} ({chave_pos}) | Qtd: {qtd} | Entrada: ${entrada} | "
-                    f"Atual: ${preco_atual} | {acao}\n"
+            qtd = info.get("quantidade", "N/A")
+            
+            # Proteção Break-Even aos +1.0R
+            sugestao_stop = stop
+            if risco_inicial > 0 and maxima_efetiva >= (entrada + (risco_inicial * 1.0)) and preco_atual > entrada:
+                be_calculado = round(entrada * 1.0005, 2)
+                if be_calculado > stop:
+                    sugestao_stop = be_calculado
+            
+            if alvo_tp > 0 and preco_atual >= alvo_tp:
+                acao = f"🎯 ALVO ALCANÇADO ({label_alvo})! Recomendado FECHAR POSIÇÃO com Lucro (WIN)."
+            elif stop > 0 and preco_atual <= stop:
+                acao = f"🚨 STOP LOSS ATINGIDO (${stop})! Recomendado LIQUIDAR POSIÇÃO (LOSS)."
+            elif dias_uteis is not None and dias_uteis >= 4:
+                alerta_timestop_ativo = True
+                acao = (
+                    f"⏰ TIME-STOP ATINGIDO ({dias_uteis}d úteis > 96h)! Setup Sniper expirado — "
+                    f"Recomendado FECHAR A MERCADO (${preco_atual}) antes de varrer o Stop (${stop})."
                 )
+            elif dias_uteis == 3:
+                if sugestao_stop > stop and preco_atual > entrada:
+                    acao = f"⚠️ ÚLTIMO DIA SNIPER (72h->96h) + 🛡️ +1R! Sobe Stop p/ BE: ${sugestao_stop} | Fechar amanhã se não tocar {label_alvo}."
+                else:
+                    acao = f"⚠️ ÚLTIMO DIA DA JANELA SNIPER (4.º dia). Se não arrancar rumo a {label_alvo}, preparar saída no fecho | Stop: ${stop}."
+            elif sugestao_stop > stop and preco_atual > entrada:
+                acao = f"🛡️ PROTEGER POSIÇÃO{tag_tempo}. +1.0R Atingido! Sobe o Stop para Break-Even: ${sugestao_stop} | Alvo: {label_alvo}."
+            else:
+                acao = f"⏳ MANTER POSIÇÃO (Confluência Suprema{tag_tempo}). Alvo: {label_alvo} | Stop: ${stop}."
+            
+            bloco_posicoes_ativas += (
+                f"📌 [{status}] {ticker} ({chave_pos}) | Qtd: {qtd} | Entrada: ${entrada} | "
+                f"Atual: ${preco_atual} | {acao}\n"
+            )
         except Exception as e:
             print(f"[ERRO] Falha ao auditar posição ativa {chave_pos}: {e}")
 
@@ -241,40 +317,43 @@ for chave_pos, info in posicoes_ativas_dict.items():
 def analisar_confluencia_suprema(ativo_info):
     try:
         # FILTRO 1: FORÇA RELATIVA DE ELITE (RS SCORE >= 75)
-        rs_score_raw = ativo_info.get("rs_score", 0)
-        try: rs_score = float(str(rs_score_raw).replace(",", ".").strip())
-        except: rs_score = 0.0
-
-        if rs_score < 75.0: return None
+        rs_score = limpar_float(ativo_info.get("rs_score")) or 0.0
+        if rs_score < 75.0:
+            return None
 
         ticker = str(ativo_info.get("ticker", "")).strip().upper()
-        if not ticker or ticker == "#N/A": return None
+        if not ticker or ticker == "#N/A" or ticker == "NONE": return None
         if ticker in posicoes_ativas_dict: return None
         if ticker == "BRK-A": ticker = "BRK-B"
+
+        time.sleep(random.uniform(0.5, 1.2))
 
         df = pd.DataFrame()
         for _ in range(3):
             try:
-                df = yf.download(ticker, period="6mo", interval="1d", progress=False, timeout=15, session=session)
-                if not df.empty and len(df) >= 50: break
-            except: time.sleep(2)
+                df = yf.download(ticker, period="1y", interval="1d", progress=False, timeout=15, session=session)
+                if not df.empty and len(df) >= 200: break
+            except Exception:
+                time.sleep(2)
 
-        if df.empty or len(df) < 50: return None
+        if df.empty or len(df) < 200: return None
         if isinstance(df.columns, pd.MultiIndex): df.columns = df.columns.droplevel(1)
         df = df.dropna(subset=['Close', 'High', 'Low', 'Volume'])
 
         preco = float(df['Close'].iloc[-1])
-        if preco < 5.00: return None
+        if preco < 10.00: return None
 
         # INDICADORES TÉCNICOS
         df['EMA_20'] = df['Close'].ewm(span=20, adjust=False).mean()
         df['SMA_50'] = df['Close'].rolling(window=50).mean()
+        df['SMA_200'] = df['Close'].rolling(window=200).mean()
         df['Vol_SMA_20'] = df['Volume'].rolling(window=20).mean()
         
-        # Bollinger Bands
+        # Bollinger Bands (SMA 20)
+        df['SMA_20'] = df['Close'].rolling(window=20).mean()
         df['STD_20'] = df['Close'].rolling(window=20).std()
-        df['BB_Upper'] = df['EMA_20'] + (df['STD_20'] * 2.0)
-        df['BB_Lower'] = df['EMA_20'] - (df['STD_20'] * 2.0)
+        df['BB_Upper'] = df['SMA_20'] + (df['STD_20'] * 2.0)
+        df['BB_Lower'] = df['SMA_20'] - (df['STD_20'] * 2.0)
         
         # Keltner Channels e ATR
         df.ta.atr(length=20, mamode="rma", append=True)
@@ -282,12 +361,13 @@ def analisar_confluencia_suprema(ativo_info):
         df['KC_Upper'] = df['EMA_20'] + (df[col_atr] * 1.5)
         df['KC_Lower'] = df['EMA_20'] - (df[col_atr] * 1.5)
 
-        df = df.dropna(subset=['EMA_20', 'SMA_50', 'BB_Upper', 'KC_Upper', col_atr])
+        df = df.dropna(subset=['EMA_20', 'SMA_50', 'SMA_200', 'BB_Upper', 'KC_Upper', col_atr])
         if df.empty: return None
 
         ultimo = df.iloc[-1]
         ema20 = float(ultimo['EMA_20'])
         sma50 = float(ultimo['SMA_50'])
+        sma200 = float(ultimo['SMA_200'])
         bb_upper, bb_lower = float(ultimo['BB_Upper']), float(ultimo['BB_Lower'])
         kc_upper, kc_lower = float(ultimo['KC_Upper']), float(ultimo['KC_Lower'])
         atr = float(ultimo[col_atr])
@@ -299,26 +379,29 @@ def analisar_confluencia_suprema(ativo_info):
         maximo_hoje = float(ultimo['High'])
 
         # LÓGICA DE CONFLUÊNCIA ABSOLUTA:
-        # A. Tendência (Motor 20)
-        tendencia_alta = ema20 > sma50
+        # A. Tendência Alinhada (Motor 20)
+        tendencia_alta = (ema20 > sma50) and (sma50 > sma200)
         toque_ema20 = (minimo_hoje <= ema20) and (fecho_hoje >= ema20)
         
         # B. Compressão (Motor 19)
         em_squeeze = (bb_upper <= kc_upper) and (bb_lower >= kc_lower)
         
-        # C. Acumulação Institucional (Motor 18 - RVOL >= 1.5 para apanhar o momento)
+        # C. Acumulação Institucional (Motor 18 - RVOL >= 1.5)
         rvol = vol_atual / vol_sma20 if vol_sma20 > 0 else 0.0
         volume_anomalo = rvol >= 1.5
 
         if tendencia_alta and toque_ema20 and em_squeeze and volume_anomalo:
             entrada_gatilho = round(maximo_hoje * 1.002, 2)
-            stop_loss = round(entrada_gatilho - (atr * 1.5), 2)
+            stop_loss = round(min(minimo_hoje * 0.995, entrada_gatilho - (atr * 1.5)), 2)
             
             risco = entrada_gatilho - stop_loss
-            # ASSIMETRIA 3:1 (A Grande Diferença do Motor 21)
-            alvo_tp = round(entrada_gatilho + (risco * 3.0), 2)
+            if risco <= 0:
+                return None
 
-            qtd_calc = round(vol_diaria_usd / risco, 2) if risco > 0 else 0.0
+            # Assimetria Sniper M21: 2.5R
+            alvo_tp = round(entrada_gatilho + (risco * 2.5), 2)
+
+            qtd_calc = round(vol_diaria_usd / risco, 2)
             val_calc = entrada_gatilho * qtd_calc
 
             return {
@@ -330,7 +413,8 @@ def analisar_confluencia_suprema(ativo_info):
                 "qtd_acoes": qtd_calc,
                 "valor_investir": round(val_calc, 2),
                 "rvol": round(rvol, 2),
-                "estado_confluencia": "💎 CONFLUÊNCIA SUPREMA (Pullback + Squeeze + Volume Institucional)"
+                "rs_score": rs_score,
+                "estado_confluencia": "💎 CONFLUÊNCIA SUPREMA (Pullback EMA20 + Squeeze + Volume Institucional)"
             }
         return None
     except Exception as e:
@@ -341,10 +425,15 @@ def analisar_confluencia_suprema(ativo_info):
 # 5. EXECUÇÃO PRINCIPAL E RELATÓRIO
 # ===================================================================
 def executar_motor():
-    if not ativos_sheets: sys.exit(0)
-    
     data_hoje = datetime.now(ZoneInfo("Europe/Lisbon")).strftime("%d/%m/%Y %H:%M")
-    bloco_texto = f"⚡ RELATÓRIO DETALHADO - MOTOR 21: CONFLUÊNCIA SUPREMA ({data_hoje})\n==================================================================\n\n"
+    mercado_ok, msg_mercado = verificar_regime_mercado()
+
+    bloco_texto = (
+        f"⚡ RELATÓRIO DETALHADO - MOTOR 21: CONFLUÊNCIA SUPREMA ({data_hoje})\n"
+        f"==================================================================\n"
+        f"🌐 Filtro Macro: {msg_mercado}\n"
+        f"💰 Risco Configurado por Trade: ${vol_diaria_usd:,.2f} USD\n\n"
+    )
 
     if bloco_posicoes_ativas:
         bloco_texto += f"📌 GESTÃO DE POSIÇÕES ATIVAS:\n{bloco_posicoes_ativas}\n--------------------------------------------------\n\n"
@@ -352,8 +441,8 @@ def executar_motor():
         bloco_texto += "📌 GESTÃO DE POSIÇÕES ATIVAS: Nenhuma posição ativa detetada para este motor.\n--------------------------------------------------\n\n"
 
     # 1. Verifica Filtro Macro (Mesmo em modo defensivo, envia antes a auditoria das posições ativas!)
-    if not mercado_em_alta():
-        aviso_defensivo = "🛡️ [MERCADO FRACO] O SPY encontra-se abaixo da EMA 20. O Motor 21 bloqueou novos sinais para proteger capital (Modo Defensivo).\n"
+    if not mercado_ok:
+        aviso_defensivo = f"🛡️ [MODO DEFENSIVO] Novas entradas bloqueadas hoje ({msg_mercado}).\n"
         print(aviso_defensivo)
         bloco_texto += aviso_defensivo
         
@@ -362,16 +451,21 @@ def executar_motor():
             
         enviar_email(bloco_texto)
         
-        aviso_ts = "\n⏰ *ALERTA TIME-STOP:* Tens posição(ões) M21 expirada(s) (>96h) para fechar!" if alerta_timestop_ativo else ""
-        enviar_alerta(f"21 ⚡ *MOTOR 21 (CONFLUÊNCIA SUPREMA)*\n\n🛡️ *MODO DEFENSIVO ATIVO*\nO SPY está abaixo da EMA 20. Novas entradas bloqueadas.{aviso_ts}")
-        sys.exit(0)
+        debug_telegram_ativado = str(configs_dict.get("TELEGRAM_NOTIFICATIONS_DEBUG", "false")).strip().lower() in ["true", "1", "sim", "yes"]
+        if debug_telegram_ativado or alerta_timestop_ativo:
+            aviso_ts = "\n⏰ *ALERTA TIME-STOP:* Tens posição(ões) M21 expirada(s) (>96h) para fechar!" if alerta_timestop_ativo else ""
+            enviar_alerta(f"21 ⚡ *MOTOR 21 (CONFLUÊNCIA SUPREMA)*\n\n🛡️ *MODO DEFENSIVO ATIVO*\n{msg_mercado}{aviso_ts}")
+        return
 
     alertas_confluencia = []
+    total_analisados = 0
     
-    for ativo_info in ativos_sheets:
-        if not ativo_info.get("ticker") or ativo_info.get("ticker") == "#N/A": continue
-        res = analisar_confluencia_suprema(ativo_info)
-        if res: alertas_confluencia.append(res)
+    if ativos_sheets:
+        for ativo_info in ativos_sheets:
+            if not ativo_info.get("ticker") or ativo_info.get("ticker") == "#N/A": continue
+            total_analisados += 1
+            res = analisar_confluencia_suprema(ativo_info)
+            if res: alertas_confluencia.append(res)
 
     if alertas_confluencia:
         bloco_texto += f"🎯 SINAIS DE ALTA PROBABILIDADE (SNIPER) ({len(alertas_confluencia)}):\n\n"
@@ -380,11 +474,11 @@ def executar_motor():
             bloco_texto += (
                 f"💎 [{a['ticker']}] - {info_ativo.get('nome', 'N/A')} ({info_ativo.get('setor', 'Desconhecido')})\n"
                 f"    - 📊 Contexto Técnico: {a['estado_confluencia']}\n"
-                f"    - ⚙️ Tática: Breakout Sniper Assímetrico\n"
+                f"    - ⚙️ Tática: Breakout Sniper Assimétrico (Alvo 2.5R | BE +1.0R | Time-Stop 96h)\n"
                 f"    - 📋 Tipo de Ordem: BUY STOP (Gatilho: ${a['gatilho']})\n"
-                f"    - 🔢 Risco/Retorno (3:1): Stop Loss: ${a['stop_loss']} | Alvo: ${a['alvo_tp']}\n"
+                f"    - 🔢 Risco/Retorno (2.5:1): Stop Loss: ${a['stop_loss']} | Alvo (2.5R): ${a['alvo_tp']}\n"
                 f"    - 💰 Dimensionamento: Qtd: {a['qtd_acoes']} | Investimento: ~${a['valor_investir']} USD\n"
-                f"    - 📈 Métricas de Força: RS Score >= 75 | RVOL: {a['rvol']}x\n"
+                f"    - 📈 Métricas de Força: RS Score: {a['rs_score']} | RVOL: {a['rvol']}x\n"
                 f"--------------------------------------------------\n"
             )
     else:
@@ -396,8 +490,15 @@ def executar_motor():
         f.write(bloco_texto)
 
     # Notificação no Telegram
-    aviso_ts = "\n⏰ *ALERTA TIME-STOP:* Tens posição(ões) M21 expirada(s) (>96h) para fechar!" if alerta_timestop_ativo else ""
-    enviar_alerta(f"21 ⚡ *MOTOR 21 (CONFLUÊNCIA)*\n\n🔍 Execução Concluída.\n🎯 Acionados: *{len(alertas_confluencia)}*{aviso_ts}")
+    debug_telegram_ativado = str(configs_dict.get("TELEGRAM_NOTIFICATIONS_DEBUG", "false")).strip().lower() in ["true", "1", "sim", "yes"]
+    if debug_telegram_ativado or len(alertas_confluencia) > 0 or alerta_timestop_ativo:
+        aviso_ts = "\n⏰ *ALERTA TIME-STOP:* Tens posição(ões) M21 expirada(s) (>96h) para fechar!" if alerta_timestop_ativo else ""
+        enviar_alerta(
+            f"21 ⚡ *MOTOR 21 (CONFLUÊNCIA)*\n\n"
+            f"🔍 Execução Concluída.\n"
+            f"📊 Analisados: *{total_analisados}* | Acionados: *{len(alertas_confluencia)}*{aviso_ts}\n"
+            f"💰 Risco/Trade: *${vol_diaria_usd:.2f}*"
+        )
 
 if __name__ == "__main__":
     executar_motor()
