@@ -119,7 +119,12 @@ def buscar_dados_completos():
         return [], {}, {}
 
 def verificar_regime_mercado():
-    """Bloqueia novas entradas em pullback se o SPY estiver abaixo da SMA200 ou em queda forte."""
+    """
+    Alinhado com o Motor 17 e com o Disjuntor Macro Intermarket:
+    Autoriza pullbacks à EMA 20 em Bull Market (SPY > SMA200), tolerando correções
+    diárias até -2.50% (onde nascem os melhores toques de suporte na EMA 20),
+    bloqueando apenas regime baixista, crash diário (> -2.50%) ou pânico (VIX > 30).
+    """
     try:
         df_spy = yf.download("SPY", period="1y", interval="1d", progress=False, session=session)
         if df_spy.empty or len(df_spy) < 200:
@@ -133,11 +138,27 @@ def verificar_regime_mercado():
         ema20 = float(df_spy['Close'].ewm(span=20, adjust=False).mean().iloc[-1])
         var_dia = ((close_hoje - close_ontem) / close_ontem) * 100
 
+        vix_atual = None
+        try:
+            df_vix = yf.download("^VIX", period="5d", interval="1d", progress=False, session=session)
+            if not df_vix.empty:
+                if isinstance(df_vix.columns, pd.MultiIndex):
+                    df_vix.columns = df_vix.columns.droplevel(1)
+                vix_atual = float(df_vix['Close'].iloc[-1])
+        except Exception:
+            pass
+
         if close_hoje < sma200:
             return False, f"SPY (${close_hoje:.2f}) abaixo da SMA200 (${sma200:.2f}). Mercado em regime baixista."
+        if var_dia <= -2.5:
+            return False, f"SPY em queda extrema/crash hoje ({var_dia:.2f}% <= -2.50%)."
+        if vix_atual is not None and vix_atual > 30.0:
+            return False, f"VIX em pânico sistémico ({vix_atual:.2f} > 30.00)."
+
+        tag_vix = f" | VIX: {vix_atual:.2f}" if vix_atual is not None else ""
         if var_dia <= -1.0:
-            return False, f"SPY em queda forte hoje ({var_dia:.2f}% <= -1.00%)."
-        return True, f"SPY favorável (${close_hoje:.2f} > SMA200 | EMA20: ${ema20:.2f} | Var: {var_dia:+.2f}%)."
+            return True, f"SPY em pullback tático dentro de Bull Market (${close_hoje:.2f} > SMA200 ${sma200:.2f} | EMA20: ${ema20:.2f} | Var: {var_dia:+.2f}%{tag_vix}) — Pullbacks autorizados com Buy Stop."
+        return True, f"SPY favorável (${close_hoje:.2f} > SMA200 ${sma200:.2f} | EMA20: ${ema20:.2f} | Var: {var_dia:+.2f}%{tag_vix})."
     except Exception as e:
         return True, f"Aviso SPY: {e}"
 
