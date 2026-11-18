@@ -147,25 +147,25 @@ def obter_conteudo_ultimo_email_backup():
 # 2. DEFINIR FICHEIROS ALVO DOS MOTORES
 # ===================================================================
 ficheiros_alvo = [
-    "comboio_temp.txt",             # Extrator US
-    "comboio_europa.txt",           # Extrator Europa
-    "comboio_vcp_temp.txt",         # Motor 07 (VCP Breakout)
-    "comboio_reversao_temp.txt",    # Motor 03 (Pânico)
-    "comboio_earnings_temp.txt",    # Motor 04 (PEAD)
-    "comboio_connors_temp.txt",     # Motor 05 (REVERSAO)
-    "comboio_carver_temp.txt",      # Motor 06 (Fast Trend Carver)
-    "comboio_holygrail_temp.txt",   # Motor 10 (Holy Grail Pullbacks)
-    "comboio_rotacao_temp.txt",     # Motor 11 (Rotação Setorial)    
-    "comboio_correlacao_temp.txt",  # Motor 12 (Correlação de Risco)
-    "comboio_exaustao_temp.txt",    # Motor 13 (Exaustão Climática)
-    "comboio_sazonalidade_temp.txt",# Motor 14 (Sazonalidade)
-    "comboio_harvest_temp.txt",     # Motor 15 (Profit Harvest & Rebalancing)
-    "comboio_vix_temp.txt",         # Motor 16 (Volatility Regime & VIX)
-    "comboio_rsi_rebound_temp.txt", # Motor 17 (2-Day RSI Drop & Rebound)
-    "comboio_momentumburst_temp.txt", # Motor 18 (Momentum Burst & Volume Surge)
-    "comboio_squeeze_temp.txt",     # Motor 19 (Volatility Squeeze Breakout)
-    "comboio_pullback_temp.txt",    # Motor 20 (Pullback à EMA 20)
-    "comboio_confluencia_temp.txt"  # Motor 21 (Confluência Suprema)
+    "comboio_temp.txt",              # Extrator US
+    "comboio_europa.txt",            # Extrator Europa
+    "comboio_vcp_temp.txt",          # Motor 07 (VCP Breakout)
+    "comboio_reversao_temp.txt",     # Motor 03 (Pânico)
+    "comboio_earnings_temp.txt",     # Motor 04 (PEAD)
+    "comboio_connors_temp.txt",      # Motor 05 (REVERSAO)
+    "comboio_carver_temp.txt",       # Motor 06 (Fast Trend Carver)
+    "comboio_holygrail_temp.txt",    # Motor 10 (Holy Grail Pullbacks)
+    "comboio_rotacao_temp.txt",      # Motor 11 (Rotação Setorial)    
+    "comboio_correlacao_temp.txt",   # Motor 12 (Correlação de Risco)
+    "comboio_exaustao_temp.txt",     # Motor 13 (Exaustão Climática)
+    "comboio_sazonalidade_temp.txt", # Motor 14 (Sazonalidade)
+    "comboio_harvest_temp.txt",      # Motor 15 (Profit Harvest & Rebalancing)
+    "comboio_vix_temp.txt",          # Motor 16 (Volatility Regime & VIX)
+    "comboio_rsi_rebound_temp.txt",  # Motor 17 (2-Day RSI Drop & Rebound)
+    "comboio_momentumburst_temp.txt",# Motor 18 (Momentum Burst & Volume Surge)
+    "comboio_squeeze_temp.txt",      # Motor 19 (Volatility Squeeze Breakout)
+    "comboio_pullback_temp.txt",     # Motor 20 (Pullback à EMA 20)
+    "comboio_confluencia_temp.txt"   # Motor 21 (Confluência Suprema)
 ]
 
 conteudo_bruto_total = ""
@@ -197,21 +197,22 @@ else:
             with open(ficheiro, "r", encoding="utf-8") as f:
                 dados = f.read().strip()
             
-            # CORREÇÃO CRUCIAL: Tratamento especial e robusto para o Motor 17 e restantes motores
-            if ficheiro == "comboio_rsi_rebound_temp.txt":
-                if dados and ("SINAIS DE REVERSÃO" in dados or "DETETADOS" in dados):
-                    conteudo_bruto_total += f"{dados}\n"
-                    print(f"[ENCONTRADO] Sinais ativos detetados e validados no {ficheiro}.")
-                else:
-                    conteudo_bruto_total += "✅ Nenhum ativo em retração extrema de 2 dias com RSI(2) < 10 hoje. (Modo Silêncio ativo).\n"
-                    print(f"[VAZIO] {ficheiro} lido, sem sinais ativos.")
+            # Preserva sempre o conteúdo integral se tiver posições ativas, sinais ou relatórios detalhados
+            if dados and (
+                "GESTÃO DE POSIÇÕES ATIVAS" in dados or
+                "POSIÇÃO ATIVA" in dados or
+                "ATIVA_M" in dados or
+                "SINAIS DE REVERSÃO" in dados or
+                "NOVOS SINAIS" in dados or
+                "NOVOS ALVOS" in dados or
+                "MODO DEFENSIVO" in dados or
+                ("Nenhum ativo" not in dados and "[SEM OPORTUNIDADES]" not in dados and "[MERCADO FRACO]" not in dados)
+            ):
+                conteudo_bruto_total += f"{dados}\n"
+                print(f"[ENCONTRADO] Dados completos carregados de {ficheiro}.")
             else:
-                if dados and "Nenhum ativo" not in dados and "[SEM OPORTUNIDADES]" not in dados and "[MERCADO FRACO]" not in dados:
-                    conteudo_bruto_total += f"{dados}\n"
-                    print(f"[ENCONTRADO] Dados detetados no {ficheiro}.")
-                else:
-                    conteudo_bruto_total += "[SEM SINAIS OU OPORTUNIDADES PARA ESTA ESTRATÉGIA HOJE]\n"
-                    print(f"[VAZIO] {ficheiro} lido, adicionado como sem sinais ao relatório.")
+                conteudo_bruto_total += "[SEM SINAIS OU OPORTUNIDADES PARA ESTA ESTRATÉGIA HOJE]\n"
+                print(f"[VAZIO] {ficheiro} lido, adicionado como sem sinais ao relatório.")
         else:
             if ficheiro == "comboio_exaustao_temp.txt":
                 conteudo_bruto_total += "✅ Nenhuma anomalia parabólica detetada. As posições ativas estão saudáveis e dentro dos parâmetros normais. (Modo Silêncio ativo).\n"
@@ -256,11 +257,11 @@ A tua missão é ler integralmente este conteúdo, processar **TODOS** os ativos
 
 1. REGIME DE VOLATILIDADE VIX (MOTOR 16): Lê a diretriz do Motor 16 e indica explicitamente no topo do relatório o Regime do VIX. Aplica a percentagem de lote indicada pelo Motor 16 (100%, 75%, 50% ou 0%) ao calcular o tamanho e alocação de TODAS as novas sugestões de entrada.
 2. PRIORIDADE ABSOLUTA - MOTOR 21 (CONFLUÊNCIA SUPREMA):
-   - Se o Motor 21 reportar "SINAIS DE ALTA PROBABILIDADE (SNIPER)", DEVES OBRIGATORIAMENTE criar um destaque gigante logo no topo (após o VIX) intitulado "🚨🚨 ALERTA SNIPER: CONFLUÊNCIA SUPREMA DETETADA 🚨🚨".
-   - O Motor 21 é o modelo quantitativo absoluto com Risco/Retorno 3:1. Dá-lhe a máxima importância.
-3. ⚠️ DIRETIVA ANTI-OMISSÃO ESTRITA (MOTOR 17 & REVERSÃO):
-   - Os dados fornecidos no Motor 17 (comboio_rsi_rebound_temp.txt) contêm múltiplos sinais detetados (ex: AMD, CSCO, DBX, DDOG, DELL, HPE, MDB, MSFT, NET, PANW, PLTR, TEAM, UNH, TSM, SNOW, FTNT, OKTA, CRWD, ZS, etc.).
-   - É ESTRITAMENTE PROIBIDO resumir, omitir, truncar ou ignorar qualquer ativo presente nos relatórios dos motores. **DEVES LISTAR INTEGRALMENTE TODOS OS ATIVOS ACIONADOS NO MOTOR 17 NA SECÇÃO CORRESPONDENTE E INCLUÍ-LOS NA TABELA FINAL.**
+  - Se o Motor 21 reportar "SINAIS DE ALTA PROBABILIDADE (SNIPER)", DEVES OBRIGATORIAMENTE criar um destaque gigante logo no topo (após o VIX) intitulado "🚨🚨 ALERTA SNIPER: CONFLUÊNCIA SUPREMA DETETADA 🚨🚨".
+  - O Motor 21 é o modelo quantitativo absoluto com Risco/Retorno 2.5:1 / 3:1. Dá-lhe a máxima importância.
+3. ⚠️ DIRETIVA ANTI-OMISSÃO ESTRITA (POSIÇÕES ATIVAS & SINAIS):
+  - É ESTRITAMENTE PROIBIDO resumir, omitir, truncar ou ignorar qualquer posição ativa em carteira (`GESTÃO DE POSIÇÕES ATIVAS`, `ATIVA_M17`, `ATIVA_M18`, `ATIVA_M19`, `ATIVA_M20`, `ATIVA_M21`) ou qualquer novo sinal presente nos relatórios dos motores.
+  - **DEVES LISTAR INTEGRALMENTE TODAS AS POSIÇÕES ATIVAS AUDITADAS (ex.: M17, M18, M19, M20, M21) NA SECÇÃO DO RESPETIVO MOTOR E INCLUÍ-LAS NA TABELA FINAL.**
 4. ZERO CRIATIVIDADE DE DADOS: Não inventes preços, tickers, stops ou tamanhos de posição. Utiliza unicamente e na íntegra os dados fornecidos.
 5. VETO DE SOBREPOSIÇÃO: Posições ativas na carteira (com 'PosicaoAtiva: SIM' ou detidas) NÃO PODEM ter novas ordens de compra sugeridas.
 6. TABELA FINAL OBRIGATÓRIA (SÍNTESE DE ORDENS):
@@ -269,12 +270,12 @@ A tua missão é ler integralmente este conteúdo, processar **TODOS** os ativos
    | Ticker | Estratégia | Tipo de Ordem | Preço Entrada | Stop Loss | Take Profit | Qtd | Alocação Est. | Notas Táticas |
    | :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- |
 
-   - Inclui TODAS as ordens de colheita parcial de lucro a 2R (Profit Harvest) geradas pelo Motor 15 no topo da tabela.
-   - Inclui TODAS as ações ativas em carteira que exijam fecho ou ajuste de stop (Auditorias de posições ativas dos Motores).
-   - Inclui TODAS as novas ordens aprovadas ajustadas pelo Lote Máximo do VIX (Motor 16).
-   - **Inclui TODOS os sinais gerados pelo Motor 17 (RSI Drop & Rebound), Motor 18, Motor 19 e Motor 20 com os respetivos alvos TP e dados de entrada exatos.**
-   - Inclui os sinais do Motor 21 com nota explícita de "SNIPER 3:1" nas Notas Táticas.
-   - Respeita rigorosamente a moeda de cada ativo (USD ou EUR).
+- Inclui TODAS as ordens de colheita parcial de lucro a 2R (Profit Harvest) geradas pelo Motor 15 no topo da tabela.
+- Inclui TODAS as ações ativas em carteira auditadas pelos Motores (M17, M18, M19, M20, M21) com a respetiva recomendação (MANTER, SUBIR STOP P/ BE, FECHAR POR ALVO, FECHAR POR TIME-STOP ou STOP LOSS).
+- Inclui TODAS as novas ordens aprovadas ajustadas pelo Lote Máximo do VIX (Motor 16).
+- **Inclui TODOS os sinais gerados pelo Motor 17 (RSI Drop & Rebound), Motor 18, Motor 19 e Motor 20 com os respetivos alvos TP e dados de entrada exatos.**
+- Inclui os sinais do Motor 21 com nota explícita de "SNIPER" nas Notas Táticas.
+- Respeita rigorosamente a moeda de cada ativo (USD ou EUR).
 
 DADOS RECOLHIDOS HOJE NOS FICHEIROS:
 {conteudo_bruto_total}
