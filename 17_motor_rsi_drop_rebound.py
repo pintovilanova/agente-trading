@@ -175,7 +175,7 @@ vol_diaria_usd = risco_fixo_usd if (risco_fixo_usd and risco_fixo_usd > 0) else 
 print(f"[CONFIG] Capital Total: ${capital:,.2f} | Orçamento Risco/Trade: ${vol_diaria_usd:,.2f} USD\n")
 
 # ===================================================================
-# 4. AUDITAR POSIÇÕES EM CARTEIRA (BLINDADO + TIME-STOP 72H)
+# 4. AUDITAR POSIÇÕES EM CARTEIRA (ALVO 1.5R + BE +0.8R + TIME-STOP 72H)
 # ===================================================================
 bloco_posicoes_ativas = ""
 alerta_timestop_ativo = False
@@ -262,7 +262,7 @@ for chave_pos, info in posicoes_ativas_dict.items():
             if stop <= 0 and atr_calc > 0 and entrada > 0:
                 stop = round(entrada - (atr_calc * 1.5), 2)
             
-            risco_inicial = entrada - stop if entrada > stop else 0.0
+            risco_inicial = entrada - stop if entrada > stop else (atr_calc * 1.5 if atr_calc > 0 else 0.0)
             
             tp_sheets = (
                 limpar_float(info.get("alvoTp")) or 
@@ -271,23 +271,26 @@ for chave_pos, info in posicoes_ativas_dict.items():
                 0.0
             )
             
-            if tp_sheets > 0:
+            # Alvo primário Hit & Run M17: 1.5R ou EMA5 (o menor que garanta lucro >= +0.8R)
+            alvo_15r = round(entrada + (risco_inicial * 1.5), 2) if risco_inicial > 0 else ema5_dinamica
+            
+            if tp_sheets > (entrada * 1.005):
                 alvo_efetivo = tp_sheets
                 label_alvo = f"${alvo_efetivo}"
-            elif ema5_dinamica > (entrada + (risco_inicial * 0.5)):
+            elif ema5_dinamica > (entrada + (risco_inicial * 0.8)) and (alvo_15r <= 0 or ema5_dinamica <= alvo_15r):
                 alvo_efetivo = ema5_dinamica
                 label_alvo = f"${alvo_efetivo} (EMA5)"
             else:
-                alvo_efetivo = round(entrada + (risco_inicial * 2.0), 2) if risco_inicial > 0 else ema5_dinamica
-                label_alvo = f"${alvo_efetivo} (TP 2R)"
+                alvo_efetivo = alvo_15r
+                label_alvo = f"${alvo_efetivo} (TP 1.5R)"
                 
             qtd = info.get("quantidade", "N/A")
 
-            # Proteção Break-Even apenas após +1.0R (evita ser stopado pelo ruído normal)
+            # Proteção Break-Even aos +0.8R
             sugestao_stop = stop
-            patamar_lucro_1r = entrada + (risco_inicial * 1.0)
+            patamar_lucro_be = entrada + (risco_inicial * 0.8)
 
-            if risco_inicial > 0 and maxima_efetiva >= patamar_lucro_1r and preco_atual > entrada:
+            if risco_inicial > 0 and maxima_efetiva >= patamar_lucro_be and preco_atual > entrada:
                 be_calculado = round(entrada * 1.0005, 2)
                 if be_calculado > stop:
                     sugestao_stop = be_calculado
@@ -304,11 +307,11 @@ for chave_pos, info in posicoes_ativas_dict.items():
                 )
             elif dias_uteis == 2:
                 if sugestao_stop > stop and preco_atual > entrada:
-                    acao = f"⚠️ ÚLTIMO DIA (48h) + 🛡️ +1R! Sobe Stop p/ BE: ${sugestao_stop} | Fechar no fecho se não tocar {label_alvo}."
+                    acao = f"⚠️ ÚLTIMO DIA (48h) + 🛡️ +0.8R! Sobe Stop p/ BE: ${sugestao_stop} | Fechar no fecho se não tocar {label_alvo}."
                 else:
                     acao = f"⚠️ ÚLTIMO DIA DA JANELA (48h). Se não arrancar hoje rumo a {label_alvo}, preparar saída no fecho | Stop: ${stop}."
             elif sugestao_stop > stop and preco_atual > entrada:
-                acao = f"🛡️ PROTEGER POSIÇÃO{tag_tempo}. +1R Atingido! Sobe o Stop para Break-Even: ${sugestao_stop} | Alvo: {label_alvo}."
+                acao = f"🛡️ PROTEGER POSIÇÃO{tag_tempo}. +0.8R Atingido! Sobe o Stop para Break-Even: ${sugestao_stop} | Alvo: {label_alvo}."
             else:
                 acao = f"⏳ MANTER POSIÇÃO (RSI Rebound{tag_tempo}). Alvo: {label_alvo} | Stop: ${stop}."
             
@@ -320,7 +323,7 @@ for chave_pos, info in posicoes_ativas_dict.items():
             print(f"[ERRO] Falha ao auditar posição ativa {chave_pos}: {e}")
 
 # ===================================================================
-# 5. MOTOR MATEMÁTICO V2: 2-DAY RSI DROP COM GATILHO DE CONFIRMAÇÃO
+# 5. MOTOR MATEMÁTICO V2: 2-DAY RSI DROP COM GATILHO DE CONFIRMAÇÃO (1.5R)
 # ===================================================================
 def analisar_rsi_drop(ativo_info):
     try:
@@ -370,7 +373,7 @@ def analisar_rsi_drop(ativo_info):
 
         # FILTRO 2: Tendência primária intacta (Preço > SMA200 e SMA50 > SMA200) + RSI(2) <= 8.0
         if preco > sma200 and sma50 > sma200 and rsi2 <= 8.0:
-            # GATILHO DE CONFIRMAÇÃO (BUY STOP acima da máxima do dia — não entra na queda cega)
+            # GATILHO DE CONFIRMAÇÃO (BUY STOP acima da máxima do dia)
             entrada_gatilho = round(maxima_dia * 1.002, 2)
             
             # Stop técnico protegido abaixo da mínima do dia ou 1.5x ATR
@@ -379,7 +382,8 @@ def analisar_rsi_drop(ativo_info):
             if risco <= 0:
                 return None
 
-            alvo_tp = round(entrada_gatilho + (risco * 2.0), 2)
+            # Alvo realista Hit & Run M17: 1.5R
+            alvo_tp = round(entrada_gatilho + (risco * 1.5), 2)
             qtd_calc = round(vol_diaria_usd / risco, 2)
             val_calc = entrada_gatilho * qtd_calc
 
@@ -463,9 +467,9 @@ def executar_motor():
             bloco_texto += (
                 f"🔹 [{a['ticker']}] - {a['nome_empresa']} ({a['setor']})\n"
                 f"    - 📊 Contexto Técnico: RSI(2) em {a['rsi2']} (Sobrevendido Extremo | SMA50 > SMA200)\n"
-                f"    - ⚙️ Tática: Reversão à Média com Confirmação de Força (Hit & Run 48h-72h)\n"
+                f"    - ⚙️ Tática: Reversão à Média com Confirmação de Força (Alvo 1.5R | Time-Stop 72h)\n"
                 f"    - 📋 Tipo de Ordem: BUY STOP (Só ativa se romper máxima de hoje: ${a['gatilho']})\n"
-                f"    - 🔢 Dados Exatos: Gatilho Compra: ${a['gatilho']} | Stop Loss: ${a['stop_loss']} | Alvo TP: ${a['alvo_tp']}\n"
+                f"    - 🔢 Dados Exatos: Gatilho Compra: ${a['gatilho']} | Stop Loss: ${a['stop_loss']} | Alvo TP (1.5R): ${a['alvo_tp']}\n"
                 f"    - 💰 Dimensionamento: Qtd: {a['qtd_acoes']} | Valor a Investir: ~${a['valor_investir']} USD\n"
                 f"    - 📈 RS Score Institucional: {a['rs_score']}\n"
                 f"--------------------------------------------------\n"
