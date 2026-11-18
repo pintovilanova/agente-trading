@@ -190,7 +190,7 @@ vol_diaria_usd = risco_fixo_usd if (risco_fixo_usd and risco_fixo_usd > 0) else 
 print(f"[CONFIG] Capital Total: ${capital:,.2f} | Orçamento Risco/Trade: ${vol_diaria_usd:,.2f} USD\n")
 
 # ===================================================================
-# 4. AUDITAR POSIÇÕES EM CARTEIRA (ALVO 1.5R + BE +0.8R + TIME-STOP 72H)
+# 4. AUDITAR POSIÇÕES EM CARTEIRA (ALVO 1.5R + BE +0.8R + TIME-STOP ADAPTATIVO 72H)
 # ===================================================================
 bloco_posicoes_ativas = ""
 alerta_timestop_ativo = False
@@ -199,6 +199,7 @@ def obter_dados_posicao_m18(ticker, dt_abertura=None):
     preco_atual = 0.0
     atr_atual = 0.0
     maxima_desde_abertura = 0.0
+    minima_vela_anterior = 0.0
 
     try:
         df_pos = yf.download(ticker, period="1mo", interval="1d", progress=False, session=session)
@@ -212,6 +213,7 @@ def obter_dados_posicao_m18(ticker, dt_abertura=None):
                 if cols_atr:
                     atr_atual = round(float(df_pos[cols_atr[0]].iloc[-1]), 2)
                 preco_atual = round(float(df_pos['Close'].iloc[-1]), 2)
+                minima_vela_anterior = round(float(df_pos['Low'].iloc[-2]), 2) if len(df_pos) >= 2 else round(float(df_pos['Low'].iloc[-1]), 2)
     except Exception as e:
         print(f"[AVISO] Falha ao obter dados diários para {ticker}: {e}")
 
@@ -247,7 +249,7 @@ def obter_dados_posicao_m18(ticker, dt_abertura=None):
             pass
 
     maxima_efetiva = max(maxima_desde_abertura, preco_atual)
-    return preco_atual, atr_atual, maxima_efetiva
+    return preco_atual, atr_atual, maxima_efetiva, minima_vela_anterior
 
 for chave_pos, info in posicoes_ativas_dict.items():
     if not isinstance(info, dict): continue
@@ -261,7 +263,7 @@ for chave_pos, info in posicoes_ativas_dict.items():
             dias_uteis = calcular_dias_uteis(data_abertura)
             tag_tempo = f" | {dias_uteis}d úteis" if dias_uteis is not None else ""
             
-            preco_atual, atr_calc, maxima_efetiva = obter_dados_posicao_m18(ticker, dt_abertura)
+            preco_atual, atr_calc, maxima_efetiva, min_anterior = obter_dados_posicao_m18(ticker, dt_abertura)
             
             stop = limpar_float(info.get("stopAtual")) or limpar_float(info.get("stopLoss")) or 0.0
             entrada = limpar_float(info.get("precoEntrada")) or preco_atual
@@ -295,25 +297,41 @@ for chave_pos, info in posicoes_ativas_dict.items():
             qtd = info.get("quantidade", "N/A")
             
             # Proteção Break-Even aos +0.8R
+            be_calculado = round(entrada * 1.0005, 2)
+            patamar_lucro_be = entrada + (risco_inicial * 0.8)
+            em_lucro_protegido = (
+                (stop >= entrada) or 
+                (risco_inicial > 0 and maxima_efetiva >= patamar_lucro_be and preco_atual > entrada)
+            )
+
             sugestao_stop = stop
-            if risco_inicial > 0 and maxima_efetiva >= (entrada + (risco_inicial * 0.8)) and preco_atual > entrada:
-                be_calculado = round(entrada * 1.0005, 2)
-                if be_calculado > stop:
-                    sugestao_stop = be_calculado
+            if em_lucro_protegido and be_calculado > stop:
+                sugestao_stop = be_calculado
+
+            # Trailing Stop dinâmico para extensão de vencedores
+            trailing_extensao = max(sugestao_stop, round(min_anterior * 0.998, 2)) if (min_anterior > 0 and min_anterior < preco_atual) else sugestao_stop
 
             if alvo_tp > 0 and preco_atual >= alvo_tp:
                 acao = f"🎯 ALVO ALCANÇADO ({label_alvo})! Recomendado FECHAR POSIÇÃO com Lucro (WIN)."
             elif stop > 0 and preco_atual <= stop:
                 acao = f"🚨 STOP LOSS ATINGIDO (${stop})! Recomendado LIQUIDAR POSIÇÃO (LOSS)."
             elif dias_uteis is not None and dias_uteis >= 3:
-                alerta_timestop_ativo = True
-                acao = (
-                    f"⏰ TIME-STOP ATINGIDO ({dias_uteis}d úteis > 72h)! Setup Momentum Burst expirado — "
-                    f"Recomendado FECHAR A MERCADO (${preco_atual}) antes de varrer o Stop (${stop})."
-                )
+                if em_lucro_protegido and preco_atual >= patamar_lucro_be:
+                    acao = (
+                        f"🚀 EXTENSÃO DE VENCEDOR ({dias_uteis}d úteis > 72h, mas em lucro >= +0.8R)! "
+                        f"MANTER rumo a {label_alvo} com Trailing Stop elevado para ${trailing_extensao}."
+                    )
+                else:
+                    alerta_timestop_ativo = True
+                    acao = (
+                        f"⏰ TIME-STOP ATINGIDO ({dias_uteis}d úteis > 72h, sem impulso >= +0.8R)! "
+                        f"Recomendado FECHAR A MERCADO (${preco_atual}) antes de varrer o Stop (${stop})."
+                    )
             elif dias_uteis == 2:
-                if sugestao_stop > stop and preco_atual > entrada:
-                    acao = f"⚠️ ÚLTIMO DIA (48h) + 🛡️ +0.8R! Sobe Stop p/ BE: ${sugestao_stop} | Fechar no fecho se não tocar {label_alvo}."
+                if em_lucro_protegido:
+                    acao = f"🛡️ JANELA 48h + LUCRO PROTEGIDO (+0.8R)! Sobe Stop p/ BE: ${sugestao_stop} | Pode estender além de 72h rumo a {label_alvo}."
+                elif preco_atual < entrada:
+                    acao = f"⚠️ ÚLTIMO DIA (48h) EM NEGATIVO (${preco_atual} < ${entrada}). Se não recuperar no fecho, encerrar antecipadamente para poupar risco | Stop: ${stop}."
                 else:
                     acao = f"⚠️ ÚLTIMO DIA DA JANELA (48h). Se não arrancar hoje rumo a {label_alvo}, preparar saída no fecho | Stop: ${stop}."
             elif sugestao_stop > stop and preco_atual > entrada:
@@ -400,7 +418,7 @@ def analisar_momentum_burst(ativo_info):
         df = df.dropna(subset=['Close', 'High', 'Low', 'Volume'])
 
         preco = float(df['Close'].iloc[-1])
-        if preco < 10.00: return None  # Evita penny stocks / baixa liquidez como ALTG
+        if preco < 10.00: return None
 
         df['EMA_20'] = df['Close'].ewm(span=20, adjust=False).mean()
         df['SMA_200'] = df['Close'].rolling(window=200).mean()
@@ -424,7 +442,6 @@ def analisar_momentum_burst(ativo_info):
         maximo_hoje = float(ultimo['High'])
         abertura_hoje = float(ultimo['Open'])
 
-        # Exige fecho positivo (vela verde de força) acima da EMA20 e SMA200
         cond_rvol = rvol >= 2.0
         cond_rompimento = maximo_hoje >= max_5d and preco > abertura_hoje
         cond_tendencia = preco > ema20 and ema20 > sma200
@@ -491,7 +508,7 @@ def executar_motor():
             if res: ativos_acionados.append(res)
 
     prompt_ia = """MODO ESTRATÉGICO: MOTOR 18 - MOMENTUM BURST & VOLUME SURGE
-O teu mandato é auditar oportunidades de curto prazo (Hit and Run | Alvo 1.5R | Time-Stop 72h) focadas em explosões institucionais de volume em ações líderes."""
+O teu mandato é auditar oportunidades de curto prazo (Hit and Run | Alvo 1.5R | Time-Stop Adaptativo 72h) focadas em explosões institucionais de volume em ações líderes."""
 
     bloco = (
         f"⚡ RELATÓRIO MOTOR 18 - MOMENTUM BURST 🚀\n"
@@ -527,7 +544,7 @@ O teu mandato é auditar oportunidades de curto prazo (Hit and Run | Alvo 1.5R |
     if debug_telegram_ativado or len(ativos_acionados) > 0 or alerta_timestop_ativo:
         print("A enviar notificação para o Telegram via função modular...")
         total_acionados = len(ativos_acionados)
-        aviso_ts = "\n⏰ *ALERTA TIME-STOP:* Tens posição(ões) M18 expirada(s) (>72h) para fechar!" if alerta_timestop_ativo else ""
+        aviso_ts = "\n⏰ *ALERTA TIME-STOP:* Tens posição(ões) M18 expirada(s) (>72h sem impulso) para fechar!" if alerta_timestop_ativo else ""
         mensagem_debug = (
             f"18 ⚡ *MOTOR 18 (MOMENTUM BURST)*\n\n"
             f"🔍 [STATUS] Execução concluída com sucesso.\n"
