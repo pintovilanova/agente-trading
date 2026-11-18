@@ -2,9 +2,9 @@
 # SISTEMA DE TRADING INSTITUCIONAL - MOTOR 20: PULLBACK À EMA 20
 # ===================================================================================
 # Descrição Geral:
-# Identifica ativos com forte Força Relativa (RS Score > 60) e tendência de alta
-# (EMA 20 > SMA 50) que realizam um pullback cirúrgico de defesa junto à EMA 20,
-# auditando em simultâneo as posições ativas em carteira (estritamente ATIVA_M20).
+# Identifica ativos líderes (RS Score >= 70) com tendência primária alinhada
+# (EMA 20 > SMA 50 > SMA 200) que realizam um pullback cirúrgico de defesa junto
+# à EMA 20 (Alvo 1.75R | BE +1.0R | Time-Stop 96h / 4d úteis), auditando ATIVA_M20.
 # ===================================================================================
 
 import pandas as pd
@@ -62,26 +62,30 @@ def limpar_float(val):
     except (ValueError, TypeError):
         return None
 
-def calcular_dias_uteis(data_abertura_str):
-    """Calcula quantos dias úteis (seg-sex) passaram desde a data na Coluna A."""
+def parse_data_abertura(data_abertura_str):
     if not data_abertura_str:
         return None
     formatos = ("%d/%m/%Y %H:%M:%S", "%d/%m/%Y %H:%M", "%d/%m/%Y", "%Y-%m-%d %H:%M:%S", "%Y-%m-%d")
     for fmt in formatos:
         try:
-            dt_inicio = datetime.strptime(str(data_abertura_str).strip(), fmt).replace(tzinfo=ZoneInfo("Europe/Lisbon"))
-            dt_agora = datetime.now(ZoneInfo("Europe/Lisbon"))
-            
-            dias_uteis = 0
-            cursor = dt_inicio
-            while cursor.date() < dt_agora.date():
-                cursor += timedelta(days=1)
-                if cursor.weekday() < 5:  # 0=Seg ... 4=Sex
-                    dias_uteis += 1
-            return dias_uteis
+            return datetime.strptime(str(data_abertura_str).strip(), fmt).replace(tzinfo=ZoneInfo("Europe/Lisbon"))
         except ValueError:
             continue
     return None
+
+def calcular_dias_uteis(data_abertura_str):
+    """Calcula quantos dias úteis (seg-sex) passaram desde a data na Coluna A."""
+    dt_inicio = parse_data_abertura(data_abertura_str)
+    if dt_inicio is None:
+        return None
+    dt_agora = datetime.now(ZoneInfo("Europe/Lisbon"))
+    dias_uteis = 0
+    cursor = dt_inicio
+    while cursor.date() < dt_agora.date():
+        cursor += timedelta(days=1)
+        if cursor.weekday() < 5:
+            dias_uteis += 1
+    return dias_uteis
 
 # ===================================================================
 # 2. FUNÇÕES DE REDE E CONFIGS
@@ -99,7 +103,7 @@ def buscar_dados_completos():
             try:
                 dados = resp.json()
             except json.JSONDecodeError:
-                print(f"[ERRO] O Webhook não retornou um JSON válido.")
+                print("[ERRO] O Webhook não retornou um JSON válido.")
                 return [], {}, {}
 
             if isinstance(dados, dict):
@@ -113,6 +117,29 @@ def buscar_dados_completos():
     except Exception as e:
         print(f"[ERRO CRÍTICO] Sheets: {e}")
         return [], {}, {}
+
+def verificar_regime_mercado():
+    """Bloqueia novas entradas em pullback se o SPY estiver abaixo da SMA200 ou em queda forte."""
+    try:
+        df_spy = yf.download("SPY", period="1y", interval="1d", progress=False, session=session)
+        if df_spy.empty or len(df_spy) < 200:
+            return True, "Dados SPY insuficientes (autorizado por defeito)."
+        if isinstance(df_spy.columns, pd.MultiIndex):
+            df_spy.columns = df_spy.columns.droplevel(1)
+        
+        close_hoje = float(df_spy['Close'].iloc[-1])
+        close_ontem = float(df_spy['Close'].iloc[-2])
+        sma200 = float(df_spy['Close'].rolling(200).mean().iloc[-1])
+        ema20 = float(df_spy['Close'].ewm(span=20, adjust=False).mean().iloc[-1])
+        var_dia = ((close_hoje - close_ontem) / close_ontem) * 100
+
+        if close_hoje < sma200:
+            return False, f"SPY (${close_hoje:.2f}) abaixo da SMA200 (${sma200:.2f}). Mercado em regime baixista."
+        if var_dia <= -1.0:
+            return False, f"SPY em queda forte hoje ({var_dia:.2f}% <= -1.00%)."
+        return True, f"SPY favorável (${close_hoje:.2f} > SMA200 | EMA20: ${ema20:.2f} | Var: {var_dia:+.2f}%)."
+    except Exception as e:
+        return True, f"Aviso SPY: {e}"
 
 def enviar_email(conteudo):
     print("\nA enviar relatório detalhado do Motor 20 por e-mail...")
@@ -150,24 +177,80 @@ def obter_setor_yf(ticker):
         return "Desconhecido"
 
 # ===================================================================
-# 3. CARGA DE DADOS E PARAMETRIZAÇÃO DE RISCO
+# 3. CARGA DE DADOS E PARAMETRIZAÇÃO DE RISCO (LIDA DO NOVO CONFIGS)
 # ===================================================================
 ativos_sheets, posicoes_ativas_dict, configs_dict = buscar_dados_completos()
 
-try:
-    capital = float(configs_dict.get("CAPITAL_TOTAL_CONTA", 10400.00))
-    pct_risco = limpar_float(configs_dict.get("RISCO_SWING_PCT")) or limpar_float(configs_dict.get("RISCO_POR_TRADE")) or 0.01
-except (ValueError, TypeError):
-    capital, pct_risco = 10400.00, 0.01
+capital = limpar_float(configs_dict.get("CAPITAL_TOTAL_CONTA")) or 10400.00
+pct_risco = (
+    limpar_float(configs_dict.get("RISCO_POR_TRADE")) or 
+    limpar_float(configs_dict.get("RISCO_SWING_PCT")) or 
+    0.0025
+)
+risco_fixo_usd = limpar_float(configs_dict.get("RISCO_MAXIMO_USD"))
 
-vol_diaria_usd = capital * pct_risco
-print(f"[CONFIG] Capital Total: ${capital:,.2f} | Risco/Trade: {pct_risco*100:.1f}% (${vol_diaria_usd:,.2f} USD)\n")
+vol_diaria_usd = risco_fixo_usd if (risco_fixo_usd and risco_fixo_usd > 0) else (capital * pct_risco)
+print(f"[CONFIG] Capital Total: ${capital:,.2f} | Orçamento Risco/Trade: ${vol_diaria_usd:,.2f} USD\n")
 
 # ===================================================================
-# 4. AUDITAR POSIÇÕES EM CARTEIRA (COM TIME-STOP HIT & RUN 72H)
+# 4. AUDITAR POSIÇÕES EM CARTEIRA (ALVO 1.75R + BE +1.0R + TIME-STOP 96H)
 # ===================================================================
 bloco_posicoes_ativas = ""
 alerta_timestop_ativo = False
+
+def obter_dados_posicao_m20(ticker, dt_abertura=None):
+    preco_atual = 0.0
+    atr_atual = 0.0
+    maxima_desde_abertura = 0.0
+
+    try:
+        df_pos = yf.download(ticker, period="1mo", interval="1d", progress=False, session=session)
+        if not df_pos.empty:
+            if isinstance(df_pos.columns, pd.MultiIndex):
+                df_pos.columns = df_pos.columns.droplevel(1)
+            df_pos = df_pos.dropna(subset=['Close', 'High', 'Low'])
+            if len(df_pos) >= 14:
+                df_pos.ta.atr(length=14, append=True)
+                cols_atr = [c for c in df_pos.columns if str(c).startswith('ATRr_') or str(c).startswith('ATR_') or str(c).startswith('ATRe_')]
+                if cols_atr:
+                    atr_atual = round(float(df_pos[cols_atr[0]].iloc[-1]), 2)
+                preco_atual = round(float(df_pos['Close'].iloc[-1]), 2)
+    except Exception as e:
+        print(f"[AVISO] Falha ao obter dados diários para {ticker}: {e}")
+
+    try:
+        df_intra = yf.download(ticker, period="5d", interval="1m", prepost=True, progress=False, session=session)
+        if not df_intra.empty:
+            if isinstance(df_intra.columns, pd.MultiIndex):
+                df_intra.columns = df_intra.columns.get_level_values(0)
+            df_intra = df_intra.dropna(subset=['Close', 'High'])
+            if not df_intra.empty:
+                ultimo_rt = float(df_intra['Close'].iloc[-1])
+                if ultimo_rt > 0:
+                    preco_atual = round(ultimo_rt, 2)
+                if dt_abertura is not None:
+                    idx_lisbon = df_intra.index.tz_convert("Europe/Lisbon") if df_intra.index.tzinfo else df_intra.index.tz_localize("UTC").tz_convert("Europe/Lisbon")
+                    df_pos_abertura = df_intra[idx_lisbon >= dt_abertura]
+                    if not df_pos_abertura.empty:
+                        maxima_desde_abertura = round(float(df_pos_abertura['Close'].max()), 2)
+    except Exception as e:
+        print(f"[AVISO] Falha ao extrair intraday para {ticker}: {e}")
+
+    if preco_atual <= 0:
+        try:
+            t = yf.Ticker(ticker, session=session)
+            fast = t.fast_info
+            p_pre = getattr(fast, 'pre_market_price', None)
+            p_last = getattr(fast, 'last_price', None)
+            if p_pre and not np.isnan(p_pre) and p_pre > 0:
+                preco_atual = round(float(p_pre), 2)
+            elif p_last and not np.isnan(p_last) and p_last > 0:
+                preco_atual = round(float(p_last), 2)
+        except Exception:
+            pass
+
+    maxima_efetiva = max(maxima_desde_abertura, preco_atual)
+    return preco_atual, atr_atual, maxima_efetiva
 
 for chave_pos, info in posicoes_ativas_dict.items():
     if not isinstance(info, dict): continue
@@ -177,88 +260,90 @@ for chave_pos, info in posicoes_ativas_dict.items():
         try:
             ticker = "AI" if chave_pos.lower() in ["c3.ai", "c3"] else chave_pos.strip().upper()
             
-            df_pos = yf.download(ticker, period="1mo", interval="1d", progress=False, session=session)
-            if not df_pos.empty:
-                if isinstance(df_pos.columns, pd.MultiIndex):
-                    df_pos.columns = df_pos.columns.droplevel(1)
-                
-                stop = limpar_float(info.get("stopAtual")) or limpar_float(info.get("stopLoss")) or 0.0
-                alvo_tp = limpar_float(info.get("alvoTp")) or limpar_float(info.get("takeProfit")) or 0.0
-                
-                # Cálculo de duração em dias úteis (Coluna A)
-                data_abertura = info.get("dataAbertura", "")
-                dias_uteis = calcular_dias_uteis(data_abertura)
-                tag_tempo = f" | {dias_uteis}d úteis" if dias_uteis is not None else ""
-                
-                try:
-                    df_intra = yf.download(ticker, period="2d", interval="1m", prepost=True, progress=False, session=session)
-                    if isinstance(df_intra.columns, pd.MultiIndex):
-                        df_intra.columns = df_intra.columns.droplevel(1)
-                    preco_atual = round(float(df_intra['Close'].iloc[-1]), 2)
-                    maxima_hoje = round(float(df_intra['High'].max()), 2)
-                except Exception:
-                    preco_atual = round(float(df_pos['Close'].iloc[-1]), 2)
-                    maxima_hoje = round(float(df_pos['High'].iloc[-1]), 2)
-                
-                entrada = limpar_float(info.get("precoEntrada")) or preco_atual
-                qtd = info.get("quantidade", "N/A")
-                maxima_efetiva = max(maxima_hoje, preco_atual)
-                
-                # Cálculo automático de TP 2R e Trailing Stop Break-Even
-                risco_inicial = entrada - stop if entrada > stop else 0.0
-                
-                if alvo_tp <= 0 and risco_inicial > 0:
-                    alvo_tp = round(entrada + (risco_inicial * 2.0), 2)
-                
-                sugestao_stop = stop
-                patamar_lucro_meio_r = entrada + (risco_inicial * 0.5)
+            data_abertura = info.get("dataAbertura", "")
+            dt_abertura = parse_data_abertura(data_abertura)
+            dias_uteis = calcular_dias_uteis(data_abertura)
+            tag_tempo = f" | {dias_uteis}d úteis" if dias_uteis is not None else ""
+            
+            preco_atual, atr_calc, maxima_efetiva = obter_dados_posicao_m20(ticker, dt_abertura)
+            
+            stop = limpar_float(info.get("stopAtual")) or limpar_float(info.get("stopLoss")) or 0.0
+            entrada = limpar_float(info.get("precoEntrada")) or preco_atual
+            
+            if preco_atual == 0.0:
+                preco_atual = entrada
+                maxima_efetiva = entrada
 
-                if risco_inicial > 0 and maxima_efetiva >= patamar_lucro_meio_r and preco_atual > entrada:
-                    be_calculado = round(entrada * 1.0005, 2)
-                    if be_calculado > stop:
-                        sugestao_stop = be_calculado
+            if stop <= 0 and atr_calc > 0 and entrada > 0:
+                stop = round(entrada - (atr_calc * 1.5), 2)
+            
+            risco_inicial = entrada - stop if entrada > stop else (atr_calc * 1.5 if atr_calc > 0 else 0.0)
+            
+            tp_sheets = (
+                limpar_float(info.get("alvoTp")) or 
+                limpar_float(info.get("takeProfit")) or 
+                limpar_float(info.get("alvo_tp")) or 
+                0.0
+            )
+            
+            # Alvo Pullback EMA20: 1.75R (equilíbrio entre 1.5R e 2.0R para continuação de tendência)
+            if tp_sheets > (entrada * 1.005):
+                alvo_tp = tp_sheets
+                label_alvo = f"${alvo_tp}"
+            elif risco_inicial > 0:
+                alvo_tp = round(entrada + (risco_inicial * 1.75), 2)
+                label_alvo = f"${alvo_tp} (TP 1.75R)"
+            else:
+                alvo_tp = 0.0
+                label_alvo = "N/A"
                 
-                # Avaliação com Guilhotina Temporal 72H
-                if alvo_tp > 0 and maxima_efetiva >= alvo_tp:
-                    acao = f"🎯 ALVO ALCANÇADO (TP em ${alvo_tp})! Recomendado FECHAR POSIÇÃO com Lucro (WIN)."
-                elif stop > 0 and preco_atual <= stop:
-                    acao = f"🚨 STOP LOSS ATINGIDO (${stop})! Recomendado LIQUIDAR POSIÇÃO (LOSS)."
-                elif dias_uteis is not None and dias_uteis >= 3:
-                    alerta_timestop_ativo = True
-                    acao = (
-                        f"⏰ TIME-STOP ATINGIDO ({dias_uteis}d úteis > 72h)! Setup Pullback EMA 20 expirado — "
-                        f"Recomendado FECHAR A MERCADO (${preco_atual}) antes de varrer o Stop (${stop})."
-                    )
-                elif dias_uteis == 2:
-                    if sugestao_stop > stop and preco_atual > entrada:
-                        acao = f"⚠️ ÚLTIMO DIA (48h) + 🛡️ +0.5R! Sobe Stop p/ BE: ${sugestao_stop} | Fechar no fecho se não tocar TP ${alvo_tp}."
-                    else:
-                        acao = f"⚠️ ÚLTIMO DIA DA JANELA (48h). Se não arrancar hoje rumo ao TP ${alvo_tp}, preparar saída no fecho | Stop: ${stop}."
-                elif sugestao_stop > stop and preco_atual > entrada:
-                    acao = f"🛡️ PROTEGER POSIÇÃO{tag_tempo}. +0.5R Atingido! Sobe o Stop para Break-Even: ${sugestao_stop} | Alvo TP: ${alvo_tp}."
-                else:
-                    acao = f"⏳ MANTER POSIÇÃO (Pullback EMA 20{tag_tempo}). Alvo TP: ${alvo_tp} | Stop: ${stop}."
-                
-                bloco_posicoes_ativas += (
-                    f"📌 [{status}] {ticker} ({chave_pos}) | Qtd: {qtd} | Entrada: ${entrada} | "
-                    f"Atual: ${preco_atual} | {acao}\n"
+            qtd = info.get("quantidade", "N/A")
+            
+            # Proteção Break-Even apenas aos +1.0R (dá espaço para o pullback retomar a tendência)
+            sugestao_stop = stop
+            patamar_lucro_1r = entrada + (risco_inicial * 1.0)
+
+            if risco_inicial > 0 and maxima_efetiva >= patamar_lucro_1r and preco_atual > entrada:
+                be_calculado = round(entrada * 1.0005, 2)
+                if be_calculado > stop:
+                    sugestao_stop = be_calculado
+            
+            # Janela de 4 dias úteis (96h) para Pullback EMA 20
+            if alvo_tp > 0 and preco_atual >= alvo_tp:
+                acao = f"🎯 ALVO ALCANÇADO ({label_alvo})! Recomendado FECHAR POSIÇÃO com Lucro (WIN)."
+            elif stop > 0 and preco_atual <= stop:
+                acao = f"🚨 STOP LOSS ATINGIDO (${stop})! Recomendado LIQUIDAR POSIÇÃO (LOSS)."
+            elif dias_uteis is not None and dias_uteis >= 4:
+                alerta_timestop_ativo = True
+                acao = (
+                    f"⏰ TIME-STOP ATINGIDO ({dias_uteis}d úteis > 96h)! Setup Pullback EMA 20 expirado — "
+                    f"Recomendado FECHAR A MERCADO (${preco_atual}) antes de varrer o Stop (${stop})."
                 )
+            elif dias_uteis == 3:
+                if sugestao_stop > stop and preco_atual > entrada:
+                    acao = f"⚠️ ÚLTIMO DIA (72h->96h) + 🛡️ +1R! Sobe Stop p/ BE: ${sugestao_stop} | Fechar no fecho se não tocar {label_alvo}."
+                else:
+                    acao = f"⚠️ ÚLTIMO DIA DA JANELA (4.º dia). Se não arrancar hoje rumo a {label_alvo}, preparar saída no fecho | Stop: ${stop}."
+            elif sugestao_stop > stop and preco_atual > entrada:
+                acao = f"🛡️ PROTEGER POSIÇÃO{tag_tempo}. +1.0R Atingido! Sobe o Stop para Break-Even: ${sugestao_stop} | Alvo: {label_alvo}."
+            else:
+                acao = f"⏳ MANTER POSIÇÃO (Pullback EMA 20{tag_tempo}). Alvo: {label_alvo} | Stop: ${stop}."
+            
+            bloco_posicoes_ativas += (
+                f"📌 [{status}] {ticker} ({chave_pos}) | Qtd: {qtd} | Entrada: ${entrada} | "
+                f"Atual: ${preco_atual} | {acao}\n"
+            )
         except Exception as e:
             print(f"[ERRO] Falha ao auditar posição ativa {chave_pos}: {e}")
 
 # ===================================================================
-# 5. MOTOR MATEMÁTICO: PULLBACK À EMA 20
+# 5. MOTOR MATEMÁTICO: PULLBACK À EMA 20 (RS >= 70 | ALVO 1.75R)
 # ===================================================================
 def analisar_pullback_ema20(ativo_info):
     try:
-        # FILTRO DE FORÇA RELATIVA (RS SCORE MÍNIMO)
-        rs_score_raw = ativo_info.get("rs_score", 0)
-        try:
-            rs_score = float(str(rs_score_raw).replace(",", ".").strip())
-        except (ValueError, TypeError):
-            rs_score = 0.0
-
-        if rs_score < 60.0:
+        # FILTRO DE FORÇA RELATIVA (RS SCORE MÍNIMO >= 70)
+        rs_score = limpar_float(ativo_info.get("rs_score")) or 0.0
+        if rs_score < 70.0:
             return None
 
         ticker = str(ativo_info.get("ticker", "")).strip().upper()
@@ -266,57 +351,60 @@ def analisar_pullback_ema20(ativo_info):
         if ticker in posicoes_ativas_dict: return None
         if ticker == "BRK-A": ticker = "BRK-B"
 
-        time.sleep(random.uniform(0.8, 1.8))
+        time.sleep(random.uniform(0.5, 1.2))
 
         df = pd.DataFrame()
         for _ in range(3):
             try:
-                df = yf.download(ticker, period="6mo", interval="1d", progress=False, timeout=15, session=session)
-                if not df.empty and len(df) >= 50:
+                df = yf.download(ticker, period="1y", interval="1d", progress=False, timeout=15, session=session)
+                if not df.empty and len(df) >= 200:
                     break
             except Exception:
                 time.sleep(2)
 
-        if df.empty or len(df) < 50: return None
+        if df.empty or len(df) < 200: return None
         if isinstance(df.columns, pd.MultiIndex): df.columns = df.columns.droplevel(1)
         df = df.dropna(subset=['Close', 'High', 'Low', 'Volume'])
 
         preco = float(df['Close'].iloc[-1])
-        if preco < 5.00: return None
+        if preco < 10.00: return None
 
-        # Indicadores de Tendência
+        # Indicadores de Tendência Completa
         df['EMA_20'] = df['Close'].ewm(span=20, adjust=False).mean()
         df['SMA_50'] = df['Close'].rolling(window=50).mean()
+        df['SMA_200'] = df['Close'].rolling(window=200).mean()
         df.ta.atr(length=14, append=True)
 
         col_atr = [c for c in df.columns if str(c).startswith('ATRr_') or str(c).startswith('ATR_')][0]
-        df = df.dropna(subset=['EMA_20', 'SMA_50', col_atr])
+        df = df.dropna(subset=['EMA_20', 'SMA_50', 'SMA_200', col_atr])
         if df.empty: return None
 
         ultimo = df.iloc[-1]
         ema20 = float(ultimo['EMA_20'])
         sma50 = float(ultimo['SMA_50'])
+        sma200 = float(ultimo['SMA_200'])
         atr = float(ultimo[col_atr])
         
         minimo_hoje = float(ultimo['Low'])
         fecho_hoje = float(ultimo['Close'])
         maximo_hoje = float(ultimo['High'])
 
-        # Condições do Setup: Tendência de alta (EMA 20 > SMA 50) + Toque na EMA 20 + Fecho acima
-        tendencia_alta = ema20 > sma50
+        # Alinhamento institucional completo + toque de defesa na EMA 20
+        tendencia_alta = (ema20 > sma50) and (sma50 > sma200)
         toque_ema20 = (minimo_hoje <= ema20) and (fecho_hoje >= ema20)
 
         if tendencia_alta and toque_ema20:
             entrada_gatilho = round(maximo_hoje * 1.002, 2)
-            stop_loss = round(entrada_gatilho - (atr * 1.5), 2)
+            stop_loss = round(min(minimo_hoje * 0.995, entrada_gatilho - (atr * 1.5)), 2)
             
             risco = entrada_gatilho - stop_loss
-            alvo_tp = round(entrada_gatilho + (risco * 2.0), 2)
+            if risco <= 0:
+                return None
 
-            if alvo_tp <= entrada_gatilho:
-                alvo_tp = round(entrada_gatilho + (risco * 1.5), 2)
+            # Alvo Pullback EMA20: 1.75R
+            alvo_tp = round(entrada_gatilho + (risco * 1.75), 2)
 
-            qtd_calc = round(vol_diaria_usd / risco, 2) if risco > 0 else 0.0
+            qtd_calc = round(vol_diaria_usd / risco, 2)
             val_calc = entrada_gatilho * qtd_calc
 
             return {
@@ -327,7 +415,8 @@ def analisar_pullback_ema20(ativo_info):
                 "alvo_tp": alvo_tp,
                 "qtd_acoes": qtd_calc,
                 "valor_investir": round(val_calc, 2),
-                "estado_pullback": "A ATIVAR (Pullback Detetado: Preço defendeu a EMA 20)"
+                "estado_pullback": "A ATIVAR (Pullback Detetado: Preço defendeu a EMA 20 sobre SMA50/200)",
+                "rs_score": rs_score
             }
         return None
     except Exception as e:
@@ -338,24 +427,27 @@ def analisar_pullback_ema20(ativo_info):
 # 6. EXECUÇÃO PRINCIPAL E RELATÓRIO DETALHADO
 # ===================================================================
 def executar_motor():
-    if not ativos_sheets: sys.exit(0)
-
     alertas_pullback = []
     total_analisados = 0
     
-    for ativo_info in ativos_sheets:
-        ticker = ativo_info.get("ticker")
-        if not ticker or ticker == "#N/A": continue
-        
-        total_analisados += 1
-        res = analisar_pullback_ema20(ativo_info)
-        if res: alertas_pullback.append(res)
+    mercado_ok, msg_mercado = verificar_regime_mercado()
+
+    if mercado_ok and ativos_sheets:
+        for ativo_info in ativos_sheets:
+            ticker = ativo_info.get("ticker")
+            if not ticker or ticker == "#N/A": continue
+            
+            total_analisados += 1
+            res = analisar_pullback_ema20(ativo_info)
+            if res: alertas_pullback.append(res)
 
     data_hoje = datetime.now(ZoneInfo("Europe/Lisbon")).strftime("%d/%m/%Y %H:%M")
     
     bloco_texto = (
         f"⚡ RELATÓRIO DETALHADO - MOTOR 20: PULLBACK À EMA 20 ({data_hoje})\n"
-        f"==================================================================\n\n"
+        f"==================================================================\n"
+        f"🌐 Filtro Macro: {msg_mercado}\n"
+        f"💰 Risco Configurado por Trade: ${vol_diaria_usd:,.2f} USD\n\n"
     )
 
     if bloco_posicoes_ativas:
@@ -363,7 +455,9 @@ def executar_motor():
     else:
         bloco_texto += "📌 GESTÃO DE POSIÇÕES ATIVAS: Nenhuma posição ativa detetada para este motor.\n--------------------------------------------------\n\n"
 
-    if alertas_pullback:
+    if not mercado_ok:
+        bloco_texto += f"🛡️ [MODO DEFENSIVO] Novas entradas bloqueadas hoje ({msg_mercado}).\n"
+    elif alertas_pullback:
         bloco_texto += f"🎯 NOVOS SINAIS DE PULLBACK À EMA 20 ({len(alertas_pullback)}):\n\n"
         for a in alertas_pullback:
             info_ativo = next((item for item in ativos_sheets if str(item.get("ticker","")).strip().upper() == a['ticker']), {})
@@ -379,17 +473,15 @@ def executar_motor():
             
             if not setor or str(setor).strip().lower() in ["desconhecido", "n/a", "none", "#n/a", ""]:
                 setor = obter_setor_yf(a['ticker'])
-
-            rs_score = info_ativo.get("rs_score", "N/A")
             
             bloco_texto += (
                 f"🔹 [{a['ticker']}] - {nome_empresa} ({setor})\n"
                 f"   - 📊 Contexto Técnico: {a['estado_pullback']}\n"
-                f"   - ⚙️ Tática: Continuação de Tendência (Hit & Run 48h-72h)\n"
+                f"   - ⚙️ Tática: Continuação de Tendência (Alvo 1.75R | BE +1.0R | Time-Stop 96h)\n"
                 f"   - 📋 Tipo de Ordem: BUY STOP (Gatilho na quebra da máxima diária da vela de defesa)\n"
-                f"   - 🔢 Dados Exatos: Gatilho Compra: ${a['gatilho']} | Stop Loss: ${a['stop_loss']} | Alvo: ${a['alvo_tp']}\n"
+                f"   - 🔢 Dados Exatos: Gatilho Compra: ${a['gatilho']} | Stop Loss: ${a['stop_loss']} | Alvo (1.75R): ${a['alvo_tp']}\n"
                 f"   - 💰 Dimensionamento: Qtd: {a['qtd_acoes']} | Valor a Investir: ~${a['valor_investir']} USD\n"
-                f"   - 📈 RS Score Institucional: {rs_score}\n"
+                f"   - 📈 RS Score Institucional: {a['rs_score']}\n"
                 f"--------------------------------------------------\n"
             )
     else:
@@ -405,14 +497,15 @@ def executar_motor():
     # ===================================================================
     debug_telegram_ativado = str(configs_dict.get("TELEGRAM_NOTIFICATIONS_DEBUG", "false")).strip().lower() in ["true", "1", "sim", "yes"]
 
-    if debug_telegram_ativado or alerta_timestop_ativo:
+    if debug_telegram_ativado or len(alertas_pullback) > 0 or alerta_timestop_ativo:
         print("A enviar notificação para o Telegram via função modular...")
         total_acionados = len(alertas_pullback)
-        aviso_ts = "\n⏰ *ALERTA TIME-STOP:* Tens posição(ões) M20 expirada(s) (>72h) para fechar!" if alerta_timestop_ativo else ""
+        aviso_ts = "\n⏰ *ALERTA TIME-STOP:* Tens posição(ões) M20 expirada(s) (>96h) para fechar!" if alerta_timestop_ativo else ""
         mensagem_debug = (
             f"20 ⚡ *MOTOR 20 (PULLBACK EMA 20)*\n\n"
             f"🔍 [STATUS] Execução concluída com sucesso.\n"
-            f"📊 Ativos analisados: *{total_analisados}* | Acionados: *{total_acionados}*{aviso_ts}\n"
+            f"📊 Analisados: *{total_analisados}* | Acionados: *{total_acionados}*{aviso_ts}\n"
+            f"💰 Risco/Trade: *${vol_diaria_usd:.2f}*\n"
             f"✉️ Relatório de pullback gerado e enviado por e-mail."
         )
         enviar_alerta(mensagem_debug)
