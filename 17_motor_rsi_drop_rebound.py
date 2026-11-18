@@ -119,7 +119,12 @@ def buscar_dados_completos():
         return [], {}, {}
 
 def verificar_regime_mercado():
-    """Bloqueia novas entradas em reversão se o SPY estiver abaixo da SMA200 ou em queda forte no dia."""
+    """
+    Alinhado com o Disjuntor Macro Intermarket:
+    Autoriza reversão à média em Bull Market (SPY > SMA200), tolerando pullbacks diários
+    até -2.50% (onde nascem os melhores sinais RSI(2)), bloqueando apenas regime baixista,
+    crash diário (> -2.50%) ou pânico sistémico (VIX > 30).
+    """
     try:
         df_spy = yf.download("SPY", period="1y", interval="1d", progress=False, session=session)
         if df_spy.empty or len(df_spy) < 200:
@@ -132,11 +137,27 @@ def verificar_regime_mercado():
         sma200 = float(df_spy['Close'].rolling(200).mean().iloc[-1])
         var_dia = ((close_hoje - close_ontem) / close_ontem) * 100
 
+        vix_atual = None
+        try:
+            df_vix = yf.download("^VIX", period="5d", interval="1d", progress=False, session=session)
+            if not df_vix.empty:
+                if isinstance(df_vix.columns, pd.MultiIndex):
+                    df_vix.columns = df_vix.columns.droplevel(1)
+                vix_atual = float(df_vix['Close'].iloc[-1])
+        except Exception:
+            pass
+
         if close_hoje < sma200:
-            return False, f"SPY (${close_hoje:.2f}) abaixo da SMA200 (${sma200:.2f}). Mercado em regime baixista."
+            return False, f"SPY (${close_hoje:.2f}) abaixo da SMA200 (${sma200:.2f}). Regime baixista."
+        if var_dia <= -2.5:
+            return False, f"SPY em queda extrema/crash hoje ({var_dia:.2f}% <= -2.50%)."
+        if vix_atual is not None and vix_atual > 30.0:
+            return False, f"VIX em pânico sistémico ({vix_atual:.2f} > 30.00)."
+
+        tag_vix = f" | VIX: {vix_atual:.2f}" if vix_atual is not None else ""
         if var_dia <= -1.0:
-            return False, f"SPY em queda forte hoje ({var_dia:.2f}% <= -1.00%)."
-        return True, f"SPY estável (${close_hoje:.2f} > SMA200 | Var: {var_dia:+.2f}%)."
+            return True, f"SPY em pullback tático dentro de Bull Market (${close_hoje:.2f} > SMA200 ${sma200:.2f} | Var: {var_dia:+.2f}%{tag_vix}) — Reversão autorizada com Buy Stop."
+        return True, f"SPY estável (${close_hoje:.2f} > SMA200 ${sma200:.2f} | Var: {var_dia:+.2f}%{tag_vix})."
     except Exception as e:
         return True, f"Aviso SPY: {e}"
 
@@ -292,7 +313,6 @@ for chave_pos, info in posicoes_ativas_dict.items():
                 
             qtd = info.get("quantidade", "N/A")
 
-            # Proteção Break-Even aos +0.8R
             be_calculado = round(entrada * 1.0005, 2)
             patamar_lucro_be = entrada + (risco_inicial * 0.8)
             em_lucro_protegido = (
@@ -304,7 +324,6 @@ for chave_pos, info in posicoes_ativas_dict.items():
             if em_lucro_protegido and be_calculado > stop:
                 sugestao_stop = be_calculado
 
-            # Trailing Stop dinâmico para extensão de vencedores
             trailing_extensao = max(sugestao_stop, round(min_anterior * 0.998, 2)) if (min_anterior > 0 and min_anterior < preco_atual) else sugestao_stop
 
             if alvo_efetivo > 0 and preco_atual >= alvo_efetivo:
