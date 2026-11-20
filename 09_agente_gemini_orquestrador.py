@@ -34,6 +34,11 @@ EMAIL_PASS = os.environ.get("EMAIL_PASS")
 GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY")
 WEBHOOK_URL = os.environ.get("WEBHOOK_URL")
 
+if EMAIL_USER:
+    EMAIL_USER = EMAIL_USER.strip()
+if EMAIL_PASS:
+    EMAIL_PASS = EMAIL_PASS.strip()
+
 SMTP_SERVER = "smtp.gmail.com"
 SMTP_PORT = 587
 IMAP_SERVER = "imap.gmail.com"
@@ -144,11 +149,13 @@ def obter_conteudo_ultimo_email_backup():
     return None
 
 # ===================================================================
-# 2. DEFINIR FICHEIROS ALVO DOS MOTORES
+# 2. DEFINIR FICHEIROS ALVO DOS MOTORES (NOMES ALINHADOS)
 # ===================================================================
 ficheiros_alvo = [
+    "comboio_macro_temp.txt",        # Disjuntor Macro Global (Intermarket SPY/VIX/HYG)
+    "comboio_vix_temp.txt",          # Motor 16 (Volatility Regime & VIX)
     "comboio_temp.txt",              # Extrator US
-    "comboio_europa.txt",            # Extrator Europa
+    "comboio_europa_temp.txt",       # Extrator Europa (corrigido)
     "comboio_vcp_temp.txt",          # Motor 07 (VCP Breakout)
     "comboio_reversao_temp.txt",     # Motor 03 (Pânico)
     "comboio_earnings_temp.txt",     # Motor 04 (PEAD)
@@ -160,7 +167,6 @@ ficheiros_alvo = [
     "comboio_exaustao_temp.txt",     # Motor 13 (Exaustão Climática)
     "comboio_sazonalidade_temp.txt", # Motor 14 (Sazonalidade)
     "comboio_harvest_temp.txt",      # Motor 15 (Profit Harvest & Rebalancing)
-    "comboio_vix_temp.txt",          # Motor 16 (Volatility Regime & VIX)
     "comboio_rsi_rebound_temp.txt",  # Motor 17 (2-Day RSI Drop & Rebound)
     "comboio_momentumburst_temp.txt",# Motor 18 (Momentum Burst & Volume Surge)
     "comboio_squeeze_temp.txt",      # Motor 19 (Volatility Squeeze Breakout)
@@ -197,12 +203,15 @@ else:
             with open(ficheiro, "r", encoding="utf-8") as f:
                 dados = f.read().strip()
             
-            # Preserva sempre o conteúdo integral se tiver posições ativas, sinais ou relatórios detalhados
+            # Preserva sempre o conteúdo integral se tiver macro, posições ativas, sinais ou relatórios detalhados
             if dados and (
+                "DISJUNTOR MACRO" in dados or
+                "ALERTAS AMARELOS" in dados or
                 "GESTÃO DE POSIÇÕES ATIVAS" in dados or
                 "POSIÇÃO ATIVA" in dados or
                 "ATIVA_M" in dados or
                 "SINAIS DE REVERSÃO" in dados or
+                "SINAIS DE ENTRADA" in dados or
                 "NOVOS SINAIS" in dados or
                 "NOVOS ALVOS" in dados or
                 "MODO DEFENSIVO" in dados or
@@ -214,7 +223,9 @@ else:
                 conteudo_bruto_total += "[SEM SINAIS OU OPORTUNIDADES PARA ESTA ESTRATÉGIA HOJE]\n"
                 print(f"[VAZIO] {ficheiro} lido, adicionado como sem sinais ao relatório.")
         else:
-            if ficheiro == "comboio_exaustao_temp.txt":
+            if ficheiro == "comboio_macro_temp.txt":
+                conteudo_bruto_total += "⚠️ Relatório do Disjuntor Macro não encontrado no disco. Verificar estado do SPY/VIX.\n"
+            elif ficheiro == "comboio_exaustao_temp.txt":
                 conteudo_bruto_total += "✅ Nenhuma anomalia parabólica detetada. As posições ativas estão saudáveis e dentro dos parâmetros normais. (Modo Silêncio ativo).\n"
             elif ficheiro == "comboio_harvest_temp.txt":
                 conteudo_bruto_total += "✅ Nenhuma posição atingiu o patamar de 2R para colheita de lucro hoje. Gestão normal. (Modo Silêncio ativo).\n"
@@ -249,21 +260,24 @@ if not veio_do_email:
 # ===================================================================
 prompt_orquestrador = f"""
 És o Analista Quantitativo Principal (Agente Orquestrador).
-Abaixo estão os relatórios em bruto e os dados gerados dinamicamente pelos Extratores de Mercado (US e Europa) e pelos vários Motores de Estratégia no fecho do mercado de hoje.
+Abaixo estão os relatórios em bruto e os dados gerados dinamicamente pelo Disjuntor Macro Global, pelos Extratores de Mercado (US e Europa) e pelos vários Motores de Estratégia no fecho do mercado de hoje.
 
 A tua missão é ler integralmente este conteúdo, processar **TODOS** os ativos de **TODOS** os motores e compilar um ÚNICO relatório consolidado, limpo, detalhado e altamente profissional para o Gestor de Conta aprovar na corretora.
 
 🚨 REGRAS ESTRITAS DE ESTRUTURA, INTEGRIDADE E FECHO 🚨
 
-1. REGIME DE VOLATILIDADE VIX (MOTOR 16): Lê a diretriz do Motor 16 e indica explicitamente no topo do relatório o Regime do VIX. Aplica a percentagem de lote indicada pelo Motor 16 (100%, 75%, 50% ou 0%) ao calcular o tamanho e alocação de TODAS as novas sugestões de entrada.
+1. DISJUNTOR MACRO & REGIME DE VOLATILIDADE VIX (MOTOR 16):
+   - Inicia o relatório com o diagnóstico do **Disjuntor Macro Global** (`comboio_macro_temp.txt`) e do **Regime de Volatilidade VIX (Motor 16)**.
+   - Se o Disjuntor Macro estiver em **VERMELHO (BLOQUEADO)** ou o Motor 16 indicar **Lote Máximo Breakouts: 0%**, NENHUMA nova ordem de Breakout pode ser aprovada (apenas gestão de posições ativas e eventuais estratégias de reversão explícitas se autorizadas).
+   - **Atenção para não duplicar reduções de lote:** Se um motor já calculou a quantidade com o lote reduzido (ex.: `Lote: 50%` ou `Fator: 50%`), mantém esse valor sem o cortar uma segunda vez. Caso o motor tenha calculado a 100%, aplica o limite máximo do Motor 16.
 2. PRIORIDADE ABSOLUTA - MOTOR 21 (CONFLUÊNCIA SUPREMA):
-  - Se o Motor 21 reportar "SINAIS DE ALTA PROBABILIDADE (SNIPER)", DEVES OBRIGATORIAMENTE criar um destaque gigante logo no topo (após o VIX) intitulado "🚨🚨 ALERTA SNIPER: CONFLUÊNCIA SUPREMA DETETADA 🚨🚨".
-  - O Motor 21 é o modelo quantitativo absoluto com Risco/Retorno 2.5:1 / 3:1. Dá-lhe a máxima importância.
+   - Se o Motor 21 reportar "SINAIS DE ALTA PROBABILIDADE (SNIPER)", DEVES OBRIGATORIAMENTE criar um destaque gigante logo no topo (após o VIX) intitulado "🚨🚨 ALERTA SNIPER: CONFLUÊNCIA SUPREMA DETETADA 🚨🚨".
+   - O Motor 21 é o modelo quantitativo absoluto com Risco/Retorno 2.5:1 / 3:1. Dá-lhe a máxima importância.
 3. ⚠️ DIRETIVA ANTI-OMISSÃO ESTRITA (POSIÇÕES ATIVAS & SINAIS):
-  - É ESTRITAMENTE PROIBIDO resumir, omitir, truncar ou ignorar qualquer posição ativa em carteira (`GESTÃO DE POSIÇÕES ATIVAS`, `ATIVA_M17`, `ATIVA_M18`, `ATIVA_M19`, `ATIVA_M20`, `ATIVA_M21`) ou qualquer novo sinal presente nos relatórios dos motores.
-  - **DEVES LISTAR INTEGRALMENTE TODAS AS POSIÇÕES ATIVAS AUDITADAS (ex.: M17, M18, M19, M20, M21) NA SECÇÃO DO RESPETIVO MOTOR E INCLUÍ-LAS NA TABELA FINAL.**
+   - É ESTRITAMENTE PROIBIDO resumir, omitir, truncar ou ignorar qualquer posição ativa em carteira (`GESTÃO DE POSIÇÕES ATIVAS`, `ATIVA_M17`, `ATIVA_M18`, `ATIVA_M19`, `ATIVA_M20`, `ATIVA_M21`) ou qualquer novo sinal presente nos relatórios dos motores.
+   - **DEVES LISTAR INTEGRALMENTE TODAS AS POSIÇÕES ATIVAS AUDITADAS (ex.: M17, M18, M19, M20, M21) NA SECÇÃO DO RESPETIVO MOTOR E INCLUÍ-LAS NA TABELA FINAL.**
 4. ZERO CRIATIVIDADE DE DADOS: Não inventes preços, tickers, stops ou tamanhos de posição. Utiliza unicamente e na íntegra os dados fornecidos.
-5. VETO DE SOBREPOSIÇÃO: Posições ativas na carteira (com 'PosicaoAtiva: SIM' ou detidas) NÃO PODEM ter novas ordens de compra sugeridas.
+5. VETO DE SOBREPOSIÇÃO E CORRELAÇÃO (MOTOR 12): Posições ativas na carteira (com 'PosicaoAtiva: SIM' ou detidas) NÃO PODEM ter novas ordens de compra sugeridas. Respeita também eventuais vetos de correlação >= 80% reportados pelo Motor 12.
 6. TABELA FINAL OBRIGATÓRIA (SÍNTESE DE ORDENS):
    É ESTRITAMENTE OBRIGATÓRIO terminar o relatório com uma secção final intitulada "## 12. SÍNTESE DE ORDENS PARA APROVAÇÃO DO GESTOR DE CONTA" contendo uma tabela Markdown formatada exatamente com esta estrutura:
 
@@ -272,10 +286,10 @@ A tua missão é ler integralmente este conteúdo, processar **TODOS** os ativos
 
 - Inclui TODAS as ordens de colheita parcial de lucro a 2R (Profit Harvest) geradas pelo Motor 15 no topo da tabela.
 - Inclui TODAS as ações ativas em carteira auditadas pelos Motores (M17, M18, M19, M20, M21) com a respetiva recomendação (MANTER, SUBIR STOP P/ BE, FECHAR POR ALVO, FECHAR POR TIME-STOP ou STOP LOSS).
-- Inclui TODAS as novas ordens aprovadas ajustadas pelo Lote Máximo do VIX (Motor 16).
+- Inclui TODAS as novas ordens aprovadas (US e Europa) respeitando os limites do Disjuntor Macro e do Motor 16.
 - **Inclui TODOS os sinais gerados pelo Motor 17 (RSI Drop & Rebound), Motor 18, Motor 19 e Motor 20 com os respetivos alvos TP e dados de entrada exatos.**
 - Inclui os sinais do Motor 21 com nota explícita de "SNIPER" nas Notas Táticas.
-- Respeita rigorosamente a moeda de cada ativo (USD ou EUR).
+- Respeita rigorosamente a moeda de cada ativo (USD, EUR, GBP, CHF, etc.).
 
 DADOS RECOLHIDOS HOJE NOS FICHEIROS:
 {conteudo_bruto_total}
@@ -284,7 +298,7 @@ DADOS RECOLHIDOS HOJE NOS FICHEIROS:
 print("\nA enviar dados consolidados para o Gemini Auditar...")
 
 relatorio_final = None
-modelos_para_testar = ['gemini-2.5-flash', 'gemini-3.8-flash', 'gemini-3.6-flash', 'gemini-1.5-flash']
+modelos_para_testar = ['gemini-2.5-flash', 'gemini-2.5-pro', 'gemini-2.0-flash']
 
 for mod in modelos_para_testar:
     if relatorio_final:
@@ -312,16 +326,17 @@ for mod in modelos_para_testar:
         except Exception as e:
             err_msg = str(e)
             print(f"[AVISO] Tentativa {tentativa} no modelo {mod} falhou: {err_msg}")
-            if "503" in err_msg or "UNAVAILABLE" in err_msg:
-                time.sleep(4)
+            if "503" in err_msg or "429" in err_msg or "UNAVAILABLE" in err_msg:
+                time.sleep(5)
             else:
                 break
 
 if not relatorio_final:
     print("\n[ALERTA DE IA] Não foi possível obter resposta de nenhum modelo Gemini.")
     assunto_erro = f"tradingRelatorioIA - ⚠️ AVISO: FALHA NA IA ({data_hoje})"
-    corpo_erro = "Ocorreu um erro ao comunicar com a API do Gemini."
-    email_status = enviar_email(assunto_erro, corpo_erro)
+    corpo_erro = "Ocorreu um erro ao comunicar com a API do Gemini. Consulta o e-mail de backup 'DADOS BRUTOS PARA IA' para ver os relatórios dos motores."
+    enviar_email(assunto_erro, corpo_erro)
+    enviar_alerta(f"⚠️ *ORQUESTRADOR IA ({data_hoje})*\n\nFalha na comunicação com a API Gemini. Os dados brutos foram enviados para o teu e-mail de backup.")
     sys.exit(0)
 
 # ===================================================================
