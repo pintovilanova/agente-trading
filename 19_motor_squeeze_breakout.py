@@ -2,9 +2,10 @@
 # SISTEMA DE TRADING INSTITUCIONAL - MOTOR 19: VOLATILITY SQUEEZE BREAKOUT
 # ===================================================================================
 # Descrição Geral:
-# Identifica ativos líderes (RS >= 70) em consolidação apertada (Squeeze entre Bandas
-# de Bollinger e Canais de Keltner) prontos para rompimento de curto prazo
-# (Hit and Run | Alvo 1.5R | Time-Stop Adaptativo 72h), auditando as posições ATIVA_M19.
+# Identifica ativos líderes (RS >= 70 em Expansão | RS >= 80 em Corretivo) em
+# consolidação apertada (Squeeze entre Bandas de Bollinger e Canais de Keltner)
+# prontos para rompimento de curto prazo (Hit and Run | Alvo 1.5R | Time-Stop 72h),
+# auditando em simultâneo as posições ativas em carteira (ATIVA_M19).
 # ===================================================================================
 
 import pandas as pd
@@ -50,6 +51,11 @@ WEBHOOK_URL = os.environ.get('WEBHOOK_URL')
 EMAIL_USER = os.environ.get("EMAIL_USER")
 EMAIL_PASS = os.environ.get("EMAIL_PASS")
 
+if EMAIL_USER:
+    EMAIL_USER = EMAIL_USER.strip()
+if EMAIL_PASS:
+    EMAIL_PASS = EMAIL_PASS.strip()
+
 SMTP_SERVER = "smtp.gmail.com"
 SMTP_PORT = 587
 
@@ -87,6 +93,18 @@ def calcular_dias_uteis(data_abertura_str):
             dias_uteis += 1
     return dias_uteis
 
+def obter_preco_tempo_real(ticker_str, fallback_close):
+    try:
+        t = yf.Ticker(ticker_str, session=session)
+        fast = t.fast_info
+        for attr in ('pre_market_price', 'post_market_price', 'last_price'):
+            val = getattr(fast, attr, None)
+            if val is not None and not np.isnan(val) and float(val) > 0:
+                return round(float(val), 2)
+    except Exception:
+        pass
+    return round(float(fallback_close), 2)
+
 # ===================================================================
 # 2. FUNÇÕES DE REDE E CONFIGS
 # ===================================================================
@@ -97,7 +115,7 @@ def buscar_dados_completos():
         return [], {}, {}
     try:
         url_alvo = WEBHOOK_URL if "?" in WEBHOOK_URL else f"{WEBHOOK_URL}?aba=Analise Compra"
-        resp = requests.get(url_alvo, timeout=15)
+        resp = requests.get(url_alvo, timeout=20)
         
         if resp.status_code == 200:
             try:
@@ -119,11 +137,23 @@ def buscar_dados_completos():
         return [], {}, {}
 
 def verificar_regime_mercado():
-    """Bloqueia novas entradas de squeeze breakout se o SPY estiver abaixo da SMA200 ou em queda."""
+    """
+    Matriz Macro de 3 Estados (SPY + ^VIX) para Squeeze Breakout:
+    - Expansão (SPY > EMA20 > SMA200): RS >= 70 | Lote 100% (50% se VIX > 23)
+    - Corretivo (SMA200 < SPY <= EMA20): RS >= 80 | Lote 50% (35% se VIX > 23)
+    - Baixista / Queda <= -1.50% / VIX > 30: Bloqueia novas entradas (mantém gestão M19)
+    """
+    regime_default = {
+        "autorizado": True,
+        "modo": "EXPANSAO",
+        "rs_min": 70.0,
+        "fator_risco": 1.0,
+        "msg": "Dados SPY insuficientes (autorizado por defeito em modo Expansão)."
+    }
     try:
         df_spy = yf.download("SPY", period="1y", interval="1d", progress=False, session=session)
         if df_spy.empty or len(df_spy) < 200:
-            return True, "Dados SPY insuficientes (autorizado por defeito)."
+            return regime_default
         if isinstance(df_spy.columns, pd.MultiIndex):
             df_spy.columns = df_spy.columns.droplevel(1)
         
@@ -133,15 +163,70 @@ def verificar_regime_mercado():
         ema20 = float(df_spy['Close'].ewm(span=20, adjust=False).mean().iloc[-1])
         var_dia = ((close_hoje - close_ontem) / close_ontem) * 100
 
+        vix_atual = None
+        try:
+            df_vix = yf.download("^VIX", period="5d", interval="1d", progress=False, session=session)
+            if not df_vix.empty:
+                if isinstance(df_vix.columns, pd.MultiIndex):
+                    df_vix.columns = df_vix.columns.droplevel(1)
+                vix_atual = float(df_vix['Close'].iloc[-1])
+        except Exception:
+            pass
+
+        tag_vix = f" | VIX: {vix_atual:.2f}" if vix_atual is not None else ""
+
         if close_hoje < sma200:
-            return False, f"SPY (${close_hoje:.2f}) abaixo da SMA200 (${sma200:.2f}). Mercado em regime baixista."
-        if close_hoje < ema20 and var_dia <= -0.5:
-            return False, f"SPY (${close_hoje:.2f}) abaixo da EMA20 (${ema20:.2f}) com pressão vendedora ({var_dia:+.2f}%)."
-        if var_dia <= -1.0:
-            return False, f"SPY em queda forte hoje ({var_dia:.2f}% <= -1.00%)."
-        return True, f"SPY favorável (${close_hoje:.2f} > SMA200 | EMA20: ${ema20:.2f} | Var: {var_dia:+.2f}%)."
+            return {
+                "autorizado": False,
+                "modo": "BAIXISTA",
+                "rs_min": 80.0,
+                "fator_risco": 0.0,
+                "msg": f"SPY (${close_hoje:.2f}) abaixo da SMA200 (${sma200:.2f}). Mercado em regime baixista{tag_vix}."
+            }
+        if var_dia <= -1.50:
+            return {
+                "autorizado": False,
+                "modo": "QUEDA_DIARIA",
+                "rs_min": 80.0,
+                "fator_risco": 0.0,
+                "msg": f"SPY em queda forte hoje ({var_dia:.2f}% <= -1.50%){tag_vix}. Entradas M19 bloqueadas."
+            }
+        if vix_atual is not None and vix_atual > 30.0:
+            return {
+                "autorizado": False,
+                "modo": "PANICO_VIX",
+                "rs_min": 80.0,
+                "fator_risco": 0.0,
+                "msg": f"VIX em pânico sistémico ({vix_atual:.2f} > 30.00). Entradas M19 bloqueadas."
+            }
+
+        if close_hoje < ema20:
+            fator = 0.35 if (vix_atual is not None and vix_atual > 23.0) else 0.50
+            return {
+                "autorizado": True,
+                "modo": "CORRETIVO",
+                "rs_min": 80.0,
+                "fator_risco": fator,
+                "msg": (
+                    f"SPY em pullback/lateral (${close_hoje:.2f} < EMA20 ${ema20:.2f} | SMA200 ${sma200:.2f} | "
+                    f"Var: {var_dia:+.2f}%{tag_vix}) — M19 Tático: RS >= 80 e Lote {int(fator*100)}%."
+                )
+            }
+
+        fator = 0.50 if (vix_atual is not None and vix_atual > 23.0) else 1.0
+        return {
+            "autorizado": True,
+            "modo": "EXPANSAO",
+            "rs_min": 70.0,
+            "fator_risco": fator,
+            "msg": (
+                f"SPY em Expansão (${close_hoje:.2f} > EMA20 ${ema20:.2f} > SMA200 ${sma200:.2f} | "
+                f"Var: {var_dia:+.2f}%{tag_vix}) — RS >= 70 | Lote {int(fator*100)}%."
+            )
+        }
     except Exception as e:
-        return True, f"Aviso SPY: {e}"
+        regime_default["msg"] = f"Aviso SPY: {e}"
+        return regime_default
 
 def enviar_email(conteudo):
     print("\nA enviar relatório detalhado do Motor 19 por e-mail...")
@@ -182,6 +267,7 @@ def obter_setor_yf(ticker):
 # 3. CARGA DE DADOS E PARAMETRIZAÇÃO DE RISCO (LIDA DO NOVO CONFIGS)
 # ===================================================================
 ativos_sheets, posicoes_ativas_dict, configs_dict = buscar_dados_completos()
+regime_macro = verificar_regime_mercado()
 
 capital = limpar_float(configs_dict.get("CAPITAL_TOTAL_CONTA")) or 10400.00
 pct_risco = (
@@ -191,14 +277,37 @@ pct_risco = (
 )
 risco_fixo_usd = limpar_float(configs_dict.get("RISCO_MAXIMO_USD"))
 
-vol_diaria_usd = risco_fixo_usd if (risco_fixo_usd and risco_fixo_usd > 0) else (capital * pct_risco)
-print(f"[CONFIG] Capital Total: ${capital:,.2f} | Orçamento Risco/Trade: ${vol_diaria_usd:,.2f} USD\n")
+risco_base_usd = risco_fixo_usd if (risco_fixo_usd and risco_fixo_usd > 0) else (capital * pct_risco)
+vol_diaria_usd = round(risco_base_usd * regime_macro["fator_risco"], 2) if regime_macro["autorizado"] else 0.0
+
+print(f"[CONFIG] Capital Total: ${capital:,.2f} | Risco Base: ${risco_base_usd:,.2f} | Risco Ajustado ({regime_macro['modo']}): ${vol_diaria_usd:,.2f} USD")
+print(f"[MACRO] {regime_macro['msg']}\n")
+
+# Mapeamento de setores e posições realmente ativas (ignora posições FECHADA)
+mapa_setores_watchlist = {}
+for item in ativos_sheets:
+    t_item = str(item.get("ticker", "")).strip().upper().replace(".", "-")
+    s_item = str(item.get("setor") or item.get("setorAtivo") or item.get("sector") or "").strip()
+    if t_item and s_item and s_item.lower() not in ["desconhecido", "n/a", "none", "#n/a"]:
+        mapa_setores_watchlist[t_item] = s_item
+
+tickers_ativos_set = set()
+setores_ocupados = set()
+for chave_pos, info in posicoes_ativas_dict.items():
+    if isinstance(info, dict) and str(info.get("status", "")).strip().upper().startswith("ATIVA"):
+        t_pos = "AI" if chave_pos.lower() in ["c3.ai", "c3"] else chave_pos.strip().upper().replace(".", "-")
+        tickers_ativos_set.add(t_pos)
+        setor_pos = str(info.get("setor") or mapa_setores_watchlist.get(t_pos, "")).strip()
+        if setor_pos and setor_pos.lower() not in ["desconhecido", "n/a", "none", "#n/a"]:
+            setores_ocupados.add(setor_pos.lower())
 
 # ===================================================================
 # 4. AUDITAR POSIÇÕES EM CARTEIRA (ALVO 1.5R + BE +0.8R + TIME-STOP ADAPTATIVO 72H)
 # ===================================================================
 bloco_posicoes_ativas = ""
 alerta_timestop_ativo = False
+alerta_gestao_urgente = False
+qtd_posicoes_auditadas = 0
 
 def obter_dados_posicao_m19(ticker, dt_abertura=None):
     preco_atual = 0.0
@@ -241,17 +350,7 @@ def obter_dados_posicao_m19(ticker, dt_abertura=None):
         print(f"[AVISO] Falha ao extrair intraday para {ticker}: {e}")
 
     if preco_atual <= 0:
-        try:
-            t = yf.Ticker(ticker, session=session)
-            fast = t.fast_info
-            p_pre = getattr(fast, 'pre_market_price', None)
-            p_last = getattr(fast, 'last_price', None)
-            if p_pre and not np.isnan(p_pre) and p_pre > 0:
-                preco_atual = round(float(p_pre), 2)
-            elif p_last and not np.isnan(p_last) and p_last > 0:
-                preco_atual = round(float(p_last), 2)
-        except Exception:
-            pass
+        preco_atual = obter_preco_tempo_real(ticker, 0.0)
 
     maxima_efetiva = max(maxima_desde_abertura, preco_atual)
     return preco_atual, atr_atual, maxima_efetiva, minima_vela_anterior
@@ -261,8 +360,10 @@ for chave_pos, info in posicoes_ativas_dict.items():
     status = str(info.get("status", "")).strip().upper()
     
     if status == "ATIVA_M19":
+        qtd_posicoes_auditadas += 1
         try:
-            ticker = "AI" if chave_pos.lower() in ["c3.ai", "c3"] else chave_pos.strip().upper()
+            ticker = "AI" if chave_pos.lower() in ["c3.ai", "c3"] else chave_pos.strip().upper().replace(".", "-")
+            if ticker == "BRK-A": ticker = "BRK-B"
             
             data_abertura = info.get("dataAbertura", "")
             dt_abertura = parse_data_abertura(data_abertura)
@@ -303,7 +404,7 @@ for chave_pos, info in posicoes_ativas_dict.items():
             qtd = info.get("quantidade", "N/A")
             
             # Proteção Break-Even aos +0.8R
-            be_calculado = round(entrada * 1.0005, 2)
+            be_calculado = round(entrada * 1.001, 2)
             patamar_lucro_be = entrada + (risco_inicial * 0.8)
             em_lucro_protegido = (
                 (stop >= entrada) or 
@@ -319,16 +420,21 @@ for chave_pos, info in posicoes_ativas_dict.items():
 
             if alvo_tp > 0 and preco_atual >= alvo_tp:
                 acao = f"🎯 ALVO ALCANÇADO ({label_alvo})! Recomendado FECHAR POSIÇÃO com Lucro (WIN)."
+                alerta_gestao_urgente = True
             elif stop > 0 and preco_atual <= stop:
                 acao = f"🚨 STOP LOSS ATINGIDO (${stop})! Recomendado LIQUIDAR POSIÇÃO (LOSS)."
+                alerta_gestao_urgente = True
             elif dias_uteis is not None and dias_uteis >= 3:
                 if em_lucro_protegido and preco_atual >= patamar_lucro_be:
                     acao = (
                         f"🚀 EXTENSÃO DE VENCEDOR ({dias_uteis}d úteis > 72h, mas em lucro >= +0.8R)! "
                         f"MANTER rumo a {label_alvo} com Trailing Stop elevado para ${trailing_extensao}."
                     )
+                    if trailing_extensao > stop:
+                        alerta_gestao_urgente = True
                 else:
                     alerta_timestop_ativo = True
+                    alerta_gestao_urgente = True
                     acao = (
                         f"⏰ TIME-STOP ATINGIDO ({dias_uteis}d úteis > 72h, sem impulso >= +0.8R)! "
                         f"Recomendado FECHAR A MERCADO (${preco_atual}) antes de varrer o Stop (${stop})."
@@ -336,12 +442,15 @@ for chave_pos, info in posicoes_ativas_dict.items():
             elif dias_uteis == 2:
                 if em_lucro_protegido:
                     acao = f"🛡️ JANELA 48h + LUCRO PROTEGIDO (+0.8R)! Sobe Stop p/ BE: ${sugestao_stop} | Pode estender além de 72h rumo a {label_alvo}."
+                    if sugestao_stop > stop:
+                        alerta_gestao_urgente = True
                 elif preco_atual < entrada:
                     acao = f"⚠️ ÚLTIMO DIA (48h) EM NEGATIVO (${preco_atual} < ${entrada}). Se não recuperar no fecho, encerrar antecipadamente para poupar risco | Stop: ${stop}."
                 else:
                     acao = f"⚠️ ÚLTIMO DIA DA JANELA (48h). Se não arrancar hoje rumo a {label_alvo}, preparar saída no fecho | Stop: ${stop}."
             elif sugestao_stop > stop and preco_atual > entrada:
                 acao = f"🛡️ PROTEGER POSIÇÃO{tag_tempo}. +0.8R Atingido! Sobe o Stop para Break-Even: ${sugestao_stop} | Alvo: {label_alvo}."
+                alerta_gestao_urgente = True
             else:
                 acao = f"⏳ MANTER POSIÇÃO (Squeeze Breakout{tag_tempo}). Alvo: {label_alvo} | Stop: ${stop}."
             
@@ -353,21 +462,57 @@ for chave_pos, info in posicoes_ativas_dict.items():
             print(f"[ERRO] Falha ao auditar posição ativa {chave_pos}: {e}")
 
 # ===================================================================
-# 5. MOTOR MATEMÁTICO: VOLATILITY SQUEEZE (RS >= 70 | ALVO 1.5R)
+# 5. MOTOR MATEMÁTICO: VOLATILITY SQUEEZE (ALVO 1.5R)
 # ===================================================================
 def analisar_squeeze(ativo_info):
     try:
-        # FILTRO DE FORÇA RELATIVA (RS SCORE MÍNIMO >= 70)
+        # FILTRO DE FORÇA RELATIVA DINÂMICO POR REGIME (70 em Expansão | 80 em Corretivo)
         rs_score = limpar_float(ativo_info.get("rs_score")) or 0.0
-        if rs_score < 70.0:
+        if rs_score < regime_macro["rs_min"]:
             return None
 
-        ticker = str(ativo_info.get("ticker", "")).strip().upper()
+        ticker = str(ativo_info.get("ticker", "")).strip().upper().replace(".", "-")
         if not ticker or ticker == "#N/A" or ticker == "NONE": return None
-        if ticker in posicoes_ativas_dict: return None
         if ticker == "BRK-A": ticker = "BRK-B"
+        if ticker in tickers_ativos_set: return None
 
-        time.sleep(random.uniform(0.5, 1.2))
+        nome_empresa = ativo_info.get("nome") or ativo_info.get("nomeEmpresa") or ativo_info.get("name") or "N/A"
+        setor = str(
+            ativo_info.get("setor") or 
+            ativo_info.get("setorAtivo") or 
+            ativo_info.get("sector") or 
+            ativo_info.get("Setor") or ""
+        ).strip()
+
+        if setor and setor.lower() not in ["desconhecido", "n/a", "none", "#n/a"] and setor.lower() in setores_ocupados:
+            return None
+
+        time.sleep(random.uniform(0.4, 1.0))
+
+        # Verificar setor e earnings iminentes (<= 3 dias)
+        alerta_earnings = "OK"
+        try:
+            ticker_obj = yf.Ticker(ticker, session=session)
+            if not setor or setor.lower() in ["desconhecido", "n/a", "", "none", "#n/a"]:
+                setor = ticker_obj.info.get('sector') or obter_setor_yf(ticker)
+
+            calendario = ticker_obj.calendar
+            if isinstance(calendario, dict) and 'Earnings Date' in calendario and len(calendario['Earnings Date']) > 0:
+                proxima_data = calendario['Earnings Date'][0]
+                if hasattr(proxima_data, 'date'): proxima_data = proxima_data.date()
+                dias_restantes = (proxima_data - datetime.now(ZoneInfo("Europe/Lisbon")).date()).days
+                if 0 <= dias_restantes <= 3:
+                    alerta_earnings = f"PERIGO (em {dias_restantes} dias)"
+        except Exception:
+            if not setor or setor.lower() in ["desconhecido", "n/a", "", "none", "#n/a"]:
+                setor = obter_setor_yf(ticker)
+
+        if "PERIGO" in alerta_earnings:
+            return None
+        if setor and setor.lower() not in ["desconhecido", "n/a", "none", "#n/a"] and setor.lower() in setores_ocupados:
+            return None
+        if setor and any(termo in setor.lower() for termo in ["real estate", "reit", "mortgage"]):
+            return None
 
         df = pd.DataFrame()
         for _ in range(3):
@@ -381,6 +526,7 @@ def analisar_squeeze(ativo_info):
         if df.empty or len(df) < 200: return None
         if isinstance(df.columns, pd.MultiIndex): df.columns = df.columns.droplevel(1)
         df = df.dropna(subset=['Close', 'High', 'Low', 'Volume'])
+        if len(df) < 200: return None
 
         preco = float(df['Close'].iloc[-1])
         if preco < 10.00: return None
@@ -394,6 +540,7 @@ def analisar_squeeze(ativo_info):
         # 2. Keltner Channels (EMA 20, ATR(20) com suavização RMA) e Tendência Primária
         df['EMA_20'] = df['Close'].ewm(span=20, adjust=False).mean()
         df['SMA_200'] = df['Close'].rolling(window=200).mean()
+        df['Vol_SMA_20_Prev'] = df['Volume'].shift(1).rolling(window=20).mean()
         df.ta.atr(length=20, mamode="rma", append=True)
         
         col_atr = [c for c in df.columns if str(c).startswith('ATRr_') or str(c).startswith('ATR_')][0]
@@ -401,7 +548,7 @@ def analisar_squeeze(ativo_info):
         df['KC_Upper'] = df['EMA_20'] + (df[col_atr] * 1.5)
         df['KC_Lower'] = df['EMA_20'] - (df[col_atr] * 1.5)
 
-        df = df.dropna(subset=['BB_Upper', 'BB_Lower', 'KC_Upper', 'KC_Lower', 'SMA_200', col_atr])
+        df = df.dropna(subset=['BB_Upper', 'BB_Lower', 'KC_Upper', 'KC_Lower', 'SMA_200', 'Vol_SMA_20_Prev', col_atr])
         if df.empty: return None
 
         # 3. Registo histórico de Squeeze (BB dentro dos KC) e Filtro de Squeeze Recente (últimos 5 dias)
@@ -415,6 +562,14 @@ def analisar_squeeze(ativo_info):
         atr = float(ultimo[col_atr])
         maximo_hoje = float(ultimo['High'])
         minimo_hoje = float(ultimo['Low'])
+        vol_atual = float(ultimo['Volume'])
+        vol_sma20_prev = float(ultimo['Vol_SMA_20_Prev'])
+
+        # Liquidez institucional (>= 300k ações/dia)
+        if vol_sma20_prev < 300000:
+            return None
+
+        rvol = vol_atual / vol_sma20_prev if vol_sma20_prev > 0 else 0.0
 
         # Exige estrutura de tendência ascendente (Preço > EMA20 > SMA200)
         if not (preco > ema20 and ema20 > sma200):
@@ -425,8 +580,13 @@ def analisar_squeeze(ativo_info):
         breakout_alta = (
             (preco > kc_upper) and 
             (float(df['Close'].iloc[-2]) <= float(df['KC_Upper'].iloc[-2])) and 
-            bool(ultimo['Squeeze_Recente'])
+            bool(ultimo['Squeeze_Recente']) and
+            (rvol >= 1.20)  # Exige confirmação de volume na ignição
         )
+
+        # Se estiver apenas em squeeze sem rompimento ainda, exige contração de volume (<= 85% da média)
+        if squeeze_on and not breakout_alta and rvol > 0.85:
+            squeeze_on = False
 
         # Filtro de exaustão: descarta se já esticou > 1 ATR acima do Keltner
         limite_exaustao = kc_upper + (atr * 1.0)
@@ -435,9 +595,14 @@ def analisar_squeeze(ativo_info):
             squeeze_on = False
 
         if breakout_alta or squeeze_on:
+            preco_rt = obter_preco_tempo_real(ticker, preco)
             entrada_gatilho = round(maximo_hoje * 1.002, 2)
+
+            # Não perseguir se já abriu esticado > 2.5% acima do gatilho ou caiu > 1.5% abaixo do fecho
+            if preco_rt > entrada_gatilho * 1.025 or preco_rt < preco * 0.985:
+                return None
+
             stop_loss = round(min(minimo_hoje * 0.995, entrada_gatilho - (atr * 1.5)), 2)
-            
             risco = entrada_gatilho - stop_loss
             if risco <= 0:
                 return None
@@ -446,17 +611,24 @@ def analisar_squeeze(ativo_info):
             alvo_tp = round(entrada_gatilho + (risco * 1.5), 2)
 
             qtd_calc = round(vol_diaria_usd / risco, 2)
+            if qtd_calc <= 0:
+                return None
+
             val_calc = entrada_gatilho * qtd_calc
 
             return {
                 "ticker": ticker,
-                "preco_atual": round(preco, 2),
+                "nome_empresa": nome_empresa,
+                "setor": setor,
+                "preco_atual": preco_rt,
                 "gatilho": entrada_gatilho,
                 "stop_loss": stop_loss,
                 "alvo_tp": alvo_tp,
                 "qtd_acoes": qtd_calc,
                 "valor_investir": round(val_calc, 2),
                 "estado_squeeze": "A ATIVAR (Breakout Detetado)" if breakout_alta else "EM COMPRESSÃO EXTREMA",
+                "prioridade": 1 if breakout_alta else 0,
+                "rvol": round(rvol, 2),
                 "rs_score": rs_score
             }
         return None
@@ -468,7 +640,7 @@ def analisar_squeeze(ativo_info):
 # 6. EXECUÇÃO PRINCIPAL E RELATÓRIO DETALHADO
 # ===================================================================
 def executar_motor():
-    alertas_squeeze = []
+    candidatos_squeeze = []
     total_analisados = 0
     
     mercado_ok, msg_mercado = verificar_regime_mercado()
@@ -480,7 +652,18 @@ def executar_motor():
             
             total_analisados += 1
             res = analisar_squeeze(ativo_info)
-            if res: alertas_squeeze.append(res)
+            if res: candidatos_squeeze.append(res)
+
+    # Prioriza breakouts em ativação e maior RS Score, limitando a 1 sinal por setor livre
+    candidatos_squeeze = sorted(candidatos_squeeze, key=lambda k: (k['prioridade'], k['rs_score']), reverse=True)
+    alertas_squeeze = []
+    setores_novos_usados = set()
+    for item in candidatos_squeeze:
+        s_key = item["setor"].lower()
+        if s_key not in setores_novos_usados:
+            alertas_squeeze.append(item)
+            if s_key not in ["desconhecido", "n/a", ""]:
+                setores_novos_usados.add(s_key)
 
     data_hoje = datetime.now(ZoneInfo("Europe/Lisbon")).strftime("%d/%m/%Y %H:%M")
     
@@ -488,7 +671,7 @@ def executar_motor():
         f"⚡ RELATÓRIO DETALHADO - MOTOR 19: VOLATILITY SQUEEZE BREAKOUT ({data_hoje})\n"
         f"==================================================================\n"
         f"🌐 Filtro Macro: {msg_mercado}\n"
-        f"💰 Risco Configurado por Trade: ${vol_diaria_usd:,.2f} USD\n\n"
+        f"💰 Risco Configurado por Trade: ${vol_diaria_usd:,.2f} USD (Base: ${risco_base_usd:,.2f} | Fator: {int(regime_macro['fator_risco']*100)}%)\n\n"
     )
 
     if bloco_posicoes_ativas:
@@ -501,23 +684,9 @@ def executar_motor():
     elif alertas_squeeze:
         bloco_texto += f"🎯 NOVOS SINAIS DE EXPANSÃO DE VOLATILIDADE ({len(alertas_squeeze)}):\n\n"
         for a in alertas_squeeze:
-            info_ativo = next((item for item in ativos_sheets if str(item.get("ticker","")).strip().upper() == a['ticker']), {})
-            
-            nome_empresa = info_ativo.get("nome") or info_ativo.get("nomeEmpresa") or info_ativo.get("name") or "N/A"
-            
-            setor = (
-                info_ativo.get("setor") or 
-                info_ativo.get("setorAtivo") or 
-                info_ativo.get("sector") or 
-                info_ativo.get("Setor")
-            )
-            
-            if not setor or str(setor).strip().lower() in ["desconhecido", "n/a", "none", "#n/a", ""]:
-                setor = obter_setor_yf(a['ticker'])
-
             bloco_texto += (
-                f"🔹 [{a['ticker']}] - {nome_empresa} ({setor})\n"
-                f"   - 📊 Contexto Técnico: {a['estado_squeeze']} (BB dentro de KC | EMA20 > SMA200)\n"
+                f"🔹 [{a['ticker']}] - {a['nome_empresa']} ({a['setor']})\n"
+                f"   - 📊 Contexto Técnico: {a['estado_squeeze']} | RVOL: {a['rvol']}x (BB dentro de KC | EMA20 > SMA200)\n"
                 f"   - ⚙️ Tática: Breakout Explosivo de Curto Prazo (Alvo 1.5R | Time-Stop Adaptativo 72h)\n"
                 f"   - 📋 Tipo de Ordem: BUY STOP (Gatilho na quebra da máxima diária)\n"
                 f"   - 🔢 Dados Exatos: Gatilho Compra: ${a['gatilho']} | Stop Loss: ${a['stop_loss']} | Alvo (1.5R): ${a['alvo_tp']}\n"
@@ -525,6 +694,7 @@ def executar_motor():
                 f"   - 📈 RS Score Institucional: {a['rs_score']}\n"
                 f"--------------------------------------------------\n"
             )
+        bloco_texto += "\n🔄 LEMBRETE OPERACIONAL: Assim que uma ordem Buy Stop for executada na corretora, altera o estado no Google Sheets para 'ATIVA_M19' para iniciar a gestão automática de Break-Even (+0.8R) e Time-Stop de 72h.\n"
     else:
         bloco_texto += "✅ Nenhum novo sinal de Squeeze / Breakout detetado hoje.\n"
 
@@ -534,18 +704,18 @@ def executar_motor():
         f.write(bloco_texto)
 
     # ===================================================================
-    # 7. NOTIFICAÇÃO TELEGRAM (DEBUG OU ALERTA TIME-STOP)
+    # 7. NOTIFICAÇÃO TELEGRAM (DEBUG, NOVO SINAL OU ALERTA DE POSIÇÃO ATIVA)
     # ===================================================================
     debug_telegram_ativado = str(configs_dict.get("TELEGRAM_NOTIFICATIONS_DEBUG", "false")).strip().lower() in ["true", "1", "sim", "yes"]
 
-    if debug_telegram_ativado or len(alertas_squeeze) > 0 or alerta_timestop_ativo:
+    if debug_telegram_ativado or len(alertas_squeeze) > 0 or alerta_gestao_urgente:
         print("A enviar notificação para o Telegram via função modular...")
         total_acionados = len(alertas_squeeze)
         aviso_ts = "\n⏰ *ALERTA TIME-STOP:* Tens posição(ões) M19 expirada(s) (>72h sem impulso) para fechar!" if alerta_timestop_ativo else ""
         mensagem_debug = (
             f"19 ⚡ *MOTOR 19 (SQUEEZE BREAKOUT)*\n\n"
-            f"🔍 [STATUS] Execução concluída com sucesso.\n"
-            f"📊 Analisados: *{total_analisados}* | Acionados: *{total_acionados}*{aviso_ts}\n"
+            f"🔍 Execução concluída ({regime_macro['modo']}).\n"
+            f"📊 Analisados: *{total_analisados}* | Novos Sinais: *{total_acionados}* | Em Gestão: *{qtd_posicoes_auditadas}*{aviso_ts}\n"
             f"💰 Risco/Trade: *${vol_diaria_usd:.2f}*\n"
             f"✉️ Relatório de expansão de volatilidade gerado e enviado por e-mail."
         )
