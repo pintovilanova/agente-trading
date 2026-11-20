@@ -120,21 +120,30 @@ def buscar_dados_completos():
 
 def verificar_regime_mercado():
     """
-    Alinhado com o Disjuntor Macro Intermarket:
-    Autoriza reversão à média em Bull Market (SPY > SMA200), tolerando pullbacks diários
-    até -2.50% (onde nascem os melhores sinais RSI(2)), bloqueando apenas regime baixista,
-    crash diário (> -2.50%) ou pânico sistémico (VIX > 30).
+    Avalia o regime do SPY e devolve parâmetros adaptativos:
+    - Expansão (SPY > EMA20): TP 1.5R | RS >= 70 | Fator Lote 1.0 (ou 0.5 se VIX > 25)
+    - Corretivo/Lateral (SMA200 < SPY <= EMA20): TP 1.0R | RS >= 80 | Fator Lote 0.5
+    - Baixista (SPY < SMA200 ou VIX > 30): Bloqueia novas entradas
     """
+    regime_default = {
+        "autorizado": True,
+        "modo": "EXPANSAO",
+        "tp_mult": 1.5,
+        "rs_min": 70.0,
+        "fator_risco": 1.0,
+        "msg": "Dados SPY insuficientes (autorizado por defeito em modo Expansão)."
+    }
     try:
         df_spy = yf.download("SPY", period="1y", interval="1d", progress=False, session=session)
         if df_spy.empty or len(df_spy) < 200:
-            return True, "Dados SPY insuficientes (autorizado por defeito)."
+            return regime_default
         if isinstance(df_spy.columns, pd.MultiIndex):
             df_spy.columns = df_spy.columns.droplevel(1)
         
         close_hoje = float(df_spy['Close'].iloc[-1])
         close_ontem = float(df_spy['Close'].iloc[-2])
         sma200 = float(df_spy['Close'].rolling(200).mean().iloc[-1])
+        ema20 = float(df_spy['Close'].ewm(span=20, adjust=False).mean().iloc[-1])
         var_dia = ((close_hoje - close_ontem) / close_ontem) * 100
 
         vix_atual = None
@@ -147,19 +156,67 @@ def verificar_regime_mercado():
         except Exception:
             pass
 
-        if close_hoje < sma200:
-            return False, f"SPY (${close_hoje:.2f}) abaixo da SMA200 (${sma200:.2f}). Regime baixista."
-        if var_dia <= -2.5:
-            return False, f"SPY em queda extrema/crash hoje ({var_dia:.2f}% <= -2.50%)."
-        if vix_atual is not None and vix_atual > 30.0:
-            return False, f"VIX em pânico sistémico ({vix_atual:.2f} > 30.00)."
-
         tag_vix = f" | VIX: {vix_atual:.2f}" if vix_atual is not None else ""
-        if var_dia <= -1.0:
-            return True, f"SPY em pullback tático dentro de Bull Market (${close_hoje:.2f} > SMA200 ${sma200:.2f} | Var: {var_dia:+.2f}%{tag_vix}) — Reversão autorizada com Buy Stop."
-        return True, f"SPY estável (${close_hoje:.2f} > SMA200 ${sma200:.2f} | Var: {var_dia:+.2f}%{tag_vix})."
+
+        if close_hoje < sma200:
+            return {
+                "autorizado": False,
+                "modo": "BAIXISTA",
+                "tp_mult": 1.0,
+                "rs_min": 85.0,
+                "fator_risco": 0.0,
+                "msg": f"SPY (${close_hoje:.2f}) abaixo da SMA200 (${sma200:.2f}). Regime baixista{tag_vix}."
+            }
+        if var_dia <= -2.5:
+            return {
+                "autorizado": False,
+                "modo": "CRASH",
+                "tp_mult": 1.0,
+                "rs_min": 85.0,
+                "fator_risco": 0.0,
+                "msg": f"SPY em queda extrema/crash hoje ({var_dia:.2f}% <= -2.50%){tag_vix}."
+            }
+        if vix_atual is not None and vix_atual > 30.0:
+            return {
+                "autorizado": False,
+                "modo": "PANICO_VIX",
+                "tp_mult": 1.0,
+                "rs_min": 85.0,
+                "fator_risco": 0.0,
+                "msg": f"VIX em pânico sistémico ({vix_atual:.2f} > 30.00)."
+            }
+
+        # Regime Corretivo / Lateral (SPY acima da SMA200 mas abaixo da EMA20)
+        if close_hoje < ema20:
+            fator = 0.35 if (vix_atual is not None and vix_atual > 23.0) else 0.50
+            return {
+                "autorizado": True,
+                "modo": "CORRETIVO",
+                "tp_mult": 1.0,
+                "rs_min": 80.0,
+                "fator_risco": fator,
+                "msg": (
+                    f"SPY em pullback/lateral (${close_hoje:.2f} < EMA20 ${ema20:.2f} | SMA200 ${sma200:.2f} | "
+                    f"Var: {var_dia:+.2f}%{tag_vix}) — Modo Tático: Alvo 1.0R, RS >= 80 e Lote {int(fator*100)}%."
+                )
+            }
+
+        # Regime em Expansão (SPY > EMA20 > SMA200)
+        fator = 0.50 if (vix_atual is not None and vix_atual > 23.0) else 1.0
+        return {
+            "autorizado": True,
+            "modo": "EXPANSAO",
+            "tp_mult": 1.5,
+            "rs_min": 70.0,
+            "fator_risco": fator,
+            "msg": (
+                f"SPY em Expansão (${close_hoje:.2f} > EMA20 ${ema20:.2f} > SMA200 ${sma200:.2f} | "
+                f"Var: {var_dia:+.2f}%{tag_vix}) — Alvo 1.5R | Lote {int(fator*100)}%."
+            )
+        }
     except Exception as e:
-        return True, f"Aviso SPY: {e}"
+        regime_default["msg"] = f"Aviso SPY: {e}"
+        return regime_default
 
 def enviar_email(assunto, conteudo):
     print(f"\nA enviar e-mail ('{assunto}')...")
@@ -185,9 +242,10 @@ def enviar_email(assunto, conteudo):
         return False
 
 # ===================================================================
-# 3. CARGA DE DADOS E PARAMETRIZAÇÃO DE RISCO
+# 3. CARGA DE DADOS, REGIME MACRO E PARAMETRIZAÇÃO DE RISCO
 # ===================================================================
 ativos_sheets, posicoes_ativas_dict, configs_dict = buscar_dados_completos()
+regime_macro = verificar_regime_mercado()
 
 capital = limpar_float(configs_dict.get("CAPITAL_TOTAL_CONTA")) or 10400.00
 pct_risco = (
@@ -197,11 +255,32 @@ pct_risco = (
 )
 risco_fixo_usd = limpar_float(configs_dict.get("RISCO_MAXIMO_USD"))
 
-vol_diaria_usd = risco_fixo_usd if (risco_fixo_usd and risco_fixo_usd > 0) else (capital * pct_risco)
-print(f"[CONFIG] Capital Total: ${capital:,.2f} | Orçamento Risco/Trade: ${vol_diaria_usd:,.2f} USD\n")
+risco_base_usd = risco_fixo_usd if (risco_fixo_usd and risco_fixo_usd > 0) else (capital * pct_risco)
+vol_diaria_usd = round(risco_base_usd * regime_macro["fator_risco"], 2) if regime_macro["autorizado"] else 0.0
+
+print(f"[CONFIG] Capital Total: ${capital:,.2f} | Risco Base: ${risco_base_usd:,.2f} | Risco Ajustado Regime ({regime_macro['modo']}): ${vol_diaria_usd:,.2f} USD\n")
+
+# Mapeia setores já ocupados por posições ativas para evitar stops em cadeia no mesmo setor
+mapa_setores_watchlist = {}
+for item in ativos_sheets:
+    t_item = str(item.get("ticker", "")).strip().upper()
+    s_item = str(item.get("setor") or item.get("setorAtivo") or item.get("sector") or item.get("Setor") or "").strip()
+    if t_item and s_item and s_item not in ["Desconhecido", "N/A", "NONE"]:
+        mapa_setores_watchlist[t_item] = s_item
+
+setores_ocupados = set()
+for chave_pos, info in posicoes_ativas_dict.items():
+    if isinstance(info, dict) and str(info.get("status", "")).strip().upper().startswith("ATIVA"):
+        t_pos = "AI" if chave_pos.lower() in ["c3.ai", "c3"] else chave_pos.strip().upper()
+        setor_pos = str(info.get("setor") or mapa_setores_watchlist.get(t_pos, "")).strip()
+        if setor_pos and setor_pos not in ["Desconhecido", "N/A", "NONE"]:
+            setores_ocupados.add(setor_pos.lower())
+
+if setores_ocupados:
+    print(f"[PROTEÇÃO SETORIAL] Setores já com posição ativa (bloqueados para novas entradas): {', '.join(sorted(setores_ocupados))}\n")
 
 # ===================================================================
-# 4. AUDITAR POSIÇÕES EM CARTEIRA (ALVO 1.5R + BE +0.8R + TIME-STOP ADAPTATIVO 72H)
+# 4. AUDITAR POSIÇÕES EM CARTEIRA (ALVO DINÂMICO + BE +0.8R + TIME-STOP 72H)
 # ===================================================================
 bloco_posicoes_ativas = ""
 alerta_timestop_ativo = False
@@ -299,17 +378,23 @@ for chave_pos, info in posicoes_ativas_dict.items():
                 0.0
             )
             
-            alvo_15r = round(entrada + (risco_inicial * 1.5), 2) if risco_inicial > 0 else ema5_dinamica
+            mult_r_ativo = regime_macro["tp_mult"]
+            alvo_dinamico = round(entrada + (risco_inicial * mult_r_ativo), 2) if risco_inicial > 0 else ema5_dinamica
             
             if tp_sheets > (entrada * 1.005):
-                alvo_efetivo = tp_sheets
-                label_alvo = f"${alvo_efetivo}"
-            elif ema5_dinamica > (entrada + (risco_inicial * 0.8)) and (alvo_15r <= 0 or ema5_dinamica <= alvo_15r):
+                # Em regime corretivo/baixista, avisa também do alvo tático 1.0R caso seja inferior ao TP original
+                if regime_macro["modo"] != "EXPANSAO" and alvo_dinamico > 0 and alvo_dinamico < tp_sheets:
+                    alvo_efetivo = alvo_dinamico
+                    label_alvo = f"${alvo_efetivo} (TP Tático 1.0R | Original: ${tp_sheets})"
+                else:
+                    alvo_efetivo = tp_sheets
+                    label_alvo = f"${alvo_efetivo}"
+            elif ema5_dinamica > (entrada + (risco_inicial * 0.8)) and (alvo_dinamico <= 0 or ema5_dinamica <= alvo_dinamico):
                 alvo_efetivo = ema5_dinamica
                 label_alvo = f"${alvo_efetivo} (EMA5)"
             else:
-                alvo_efetivo = alvo_15r
-                label_alvo = f"${alvo_efetivo} (TP 1.5R)"
+                alvo_efetivo = alvo_dinamico
+                label_alvo = f"${alvo_efetivo} (TP {mult_r_ativo:.1f}R)"
                 
             qtd = info.get("quantidade", "N/A")
 
@@ -362,18 +447,28 @@ for chave_pos, info in posicoes_ativas_dict.items():
             print(f"[ERRO] Falha ao auditar posição ativa {chave_pos}: {e}")
 
 # ===================================================================
-# 5. MOTOR MATEMÁTICO V2: 2-DAY RSI DROP COM GATILHO DE CONFIRMAÇÃO (1.5R)
+# 5. MOTOR MATEMÁTICO V3: 2-DAY RSI DROP COM ALVO ADAPTATIVO AO REGIME SPY
 # ===================================================================
-def analisar_rsi_drop(ativo_info):
+def analisar_rsi_drop(ativo_info, regime):
     try:
         rs_score = limpar_float(ativo_info.get("rs_score")) or 0.0
-        if rs_score < 70.0:
+        if rs_score < regime["rs_min"]:
             return None
 
         ticker = str(ativo_info.get("ticker", "")).strip().upper()
         if not ticker or ticker == "#N/A" or ticker == "NONE": return None
         if ticker in posicoes_ativas_dict: return None
         if ticker == "BRK-A": ticker = "BRK-B"
+
+        setor_inicial = str(
+            ativo_info.get("setor") or 
+            ativo_info.get("setorAtivo") or 
+            ativo_info.get("sector") or 
+            ativo_info.get("Setor") or "Desconhecido"
+        ).strip()
+
+        if setor_inicial != "Desconhecido" and setor_inicial.lower() in setores_ocupados:
+            return None
 
         df = yf.download(ticker, period="1y", interval="1d", progress=False, session=session)
         if df.empty or len(df) < 200: return None
@@ -388,6 +483,7 @@ def analisar_rsi_drop(ativo_info):
         df.ta.sma(length=200, append=True)
         df.ta.sma(length=50, append=True)
         df.ta.atr(length=14, append=True)
+        df['EMA5'] = df['Close'].ewm(span=5, adjust=False).mean()
 
         cols_rsi = [c for c in df.columns if str(c).startswith('RSI_2')]
         cols_sma200 = [c for c in df.columns if str(c).startswith('SMA_200')]
@@ -408,6 +504,7 @@ def analisar_rsi_drop(ativo_info):
         sma200 = float(ultimo[cols_sma200[0]])
         sma50 = float(ultimo[cols_sma50[0]])
         atr = float(ultimo[cols_atr[0]])
+        ema5 = float(ultimo['EMA5'])
 
         if preco > sma200 and sma50 > sma200 and rsi2 <= 8.0:
             entrada_gatilho = round(maxima_dia * 1.002, 2)
@@ -416,8 +513,14 @@ def analisar_rsi_drop(ativo_info):
             if risco <= 0:
                 return None
 
-            alvo_tp = round(entrada_gatilho + (risco * 1.5), 2)
+            # Alvo dinâmico: 1.5R em Expansão (SPY > EMA20) | 1.0R em Corretivo (SPY < EMA20)
+            tp_mult = regime["tp_mult"]
+            alvo_tp = round(entrada_gatilho + (risco * tp_mult), 2)
+            
+            # Dimensionamento fracionado exato pelo risco ajustado
             qtd_calc = round(vol_diaria_usd / risco, 2)
+            if qtd_calc <= 0:
+                return None
             val_calc = entrada_gatilho * qtd_calc
 
             nome_empresa = (
@@ -425,12 +528,7 @@ def analisar_rsi_drop(ativo_info):
                 ativo_info.get("nomeEmpresa") or 
                 ativo_info.get("name") or "N/A"
             )
-            setor = (
-                ativo_info.get("setor") or 
-                ativo_info.get("setorAtivo") or 
-                ativo_info.get("sector") or 
-                ativo_info.get("Setor") or "Desconhecido"
-            )
+            setor = setor_inicial
 
             if nome_empresa == "N/A" or setor == "Desconhecido":
                 try:
@@ -443,15 +541,20 @@ def analisar_rsi_drop(ativo_info):
                 except Exception:
                     pass
 
+            if setor != "Desconhecido" and setor.lower() in setores_ocupados:
+                return None
+
             return {
                 "ticker": ticker,
                 "nome_empresa": nome_empresa,
                 "setor": setor,
                 "preco_atual": round(preco, 2),
+                "ema5": round(ema5, 2),
                 "rsi2": round(rsi2, 2),
                 "gatilho": entrada_gatilho,
                 "stop_loss": stop_loss,
                 "alvo_tp": alvo_tp,
+                "tp_mult": tp_mult,
                 "qtd_acoes": qtd_calc,
                 "valor_investir": round(val_calc, 2),
                 "rs_score": rs_score
@@ -469,14 +572,16 @@ def executar_motor():
         alertas_rsi = []
         total_analisados = 0
 
-        mercado_ok, msg_mercado = verificar_regime_mercado()
+        mercado_ok = regime_macro["autorizado"]
+        msg_mercado = regime_macro["msg"]
+        tp_mult_label = f"{regime_macro['tp_mult']:.1f}R"
 
         if mercado_ok and ativos_sheets:
             for ativo_info in ativos_sheets:
                 ticker = ativo_info.get("ticker")
                 if not ticker or ticker == "#N/A": continue
                 total_analisados += 1
-                res = analisar_rsi_drop(ativo_info)
+                res = analisar_rsi_drop(ativo_info, regime_macro)
                 if res: alertas_rsi.append(res)
 
         data_hoje = datetime.now(ZoneInfo("Europe/Lisbon")).strftime("%d/%m/%Y %H:%M")
@@ -485,7 +590,7 @@ def executar_motor():
             f"⚡ RELATÓRIO DETALHADO - MOTOR 17: 2-DAY RSI DROP CONFIRMADO ({data_hoje})\n"
             f"==================================================================\n"
             f"🌐 Filtro Macro: {msg_mercado}\n"
-            f"💰 Risco Configurado por Trade: ${vol_diaria_usd:,.2f} USD\n\n"
+            f"💰 Risco Configurado por Trade: ${vol_diaria_usd:,.2f} USD (Base: ${risco_base_usd:,.2f} | Fator: {int(regime_macro['fator_risco']*100)}%)\n\n"
         )
 
         if bloco_posicoes_ativas:
@@ -500,10 +605,10 @@ def executar_motor():
             for a in alertas_rsi:
                 bloco_texto += (
                     f"🔹 [{a['ticker']}] - {a['nome_empresa']} ({a['setor']})\n"
-                    f"    - 📊 Contexto Técnico: RSI(2) em {a['rsi2']} (Sobrevendido Extremo | SMA50 > SMA200)\n"
-                    f"    - ⚙️ Tática: Reversão à Média com Confirmação de Força (Alvo 1.5R | Time-Stop Adaptativo 72h)\n"
+                    f"    - 📊 Contexto Técnico: RSI(2) em {a['rsi2']} (Sobrevendido Extremo | EMA5: ${a['ema5']} | SMA50 > SMA200)\n"
+                    f"    - ⚙️ Tática: Reversão à Média Adaptativa (Alvo {tp_mult_label} [{regime_macro['modo']}] | Time-Stop 72h)\n"
                     f"    - 📋 Tipo de Ordem: BUY STOP (Só ativa se romper máxima de hoje: ${a['gatilho']})\n"
-                    f"    - 🔢 Dados Exatos: Gatilho Compra: ${a['gatilho']} | Stop Loss: ${a['stop_loss']} | Alvo TP (1.5R): ${a['alvo_tp']}\n"
+                    f"    - 🔢 Dados Exatos: Gatilho Compra: ${a['gatilho']} | Stop Loss: ${a['stop_loss']} | Alvo TP ({tp_mult_label}): ${a['alvo_tp']}\n"
                     f"    - 💰 Dimensionamento: Qtd: {a['qtd_acoes']} | Valor a Investir: ~${a['valor_investir']} USD\n"
                     f"    - 📈 RS Score Institucional: {a['rs_score']}\n"
                     f"--------------------------------------------------\n"
@@ -525,7 +630,7 @@ def executar_motor():
             aviso_ts = "\n⏰ *ALERTA TIME-STOP:* Tens posição(ões) M17 expirada(s) (>72h sem impulso) para fechar!" if alerta_timestop_ativo else ""
             mensagem_telegram = (
                 f"17 ⚡ *MOTOR 17 (RSI DROP CONFIRMADO)*\n\n"
-                f"🔍 [STATUS] Execução concluída.\n"
+                f"🔍 [STATUS] Execução concluída ({regime_macro['modo']} | Alvo {tp_mult_label}).\n"
                 f"📊 Analisados: *{total_analisados}* | Gatilhos Buy Stop: *{total_acionados}*{aviso_ts}\n"
                 f"💰 Risco/Trade: *${vol_diaria_usd:.2f}*\n"
                 f"✉️ Relatório enviado por e-mail."
