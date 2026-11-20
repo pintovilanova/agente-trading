@@ -48,6 +48,25 @@ def obter_vix_tempo_real(ticker_str, fallback_close):
         pass
     return round(float(fallback_close), 2)
 
+def obter_volatilidade_europa():
+    """
+    Substitui o descontinuado ^V2TX pelo cálculo da Volatilidade Realizada
+    Anualizada (20 sessões) do Euro Stoxx 50 (^STOXX50E / FEZ), eliminando erros 404.
+    """
+    for ticker_eu in ["^STOXX50E", "FEZ"]:
+        try:
+            df_eu = yf.download(ticker_eu, period="3mo", interval="1d", progress=False, session=session, timeout=15)
+            if not df_eu.empty and len(df_eu) >= 22:
+                if isinstance(df_eu.columns, pd.MultiIndex):
+                    df_eu.columns = df_eu.columns.droplevel(1)
+                retornos_eu = df_eu['Close'].dropna().pct_change().dropna()
+                if len(retornos_eu) >= 20:
+                    vol_20d = float(retornos_eu.tail(20).std() * np.sqrt(252) * 100)
+                    return f" | Vol EU 20D ({ticker_eu}): {vol_20d:.2f}%"
+        except Exception:
+            pass
+    return ""
+
 print("A iniciar Motor 16 - Volatility Regime & VIX Dynamic Targeting...")
 
 configs_dict = {}
@@ -66,7 +85,7 @@ data_hoje = datetime.now(ZoneInfo("Europe/Lisbon")).strftime("%d/%m/%Y %H:%M")
 
 try:
     # Obter histórico do VIX (^VIX) via yfinance
-    df_vix = yf.download("^VIX", period="3mo", interval="1d", progress=False, session=session)
+    df_vix = yf.download("^VIX", period="3mo", interval="1d", progress=False, session=session, timeout=15)
     if df_vix.empty or len(df_vix) < 20:
         print("[AVISO] Não foi possível obter dados do VIX. A assumir regime Neutro (100%) e a gravar fallback.")
         bloco_fallback = (
@@ -94,52 +113,43 @@ try:
     df_vix['SMA_20'] = df_vix['Close'].rolling(window=20).mean()
     vix_sma20 = float(df_vix['SMA_20'].iloc[-1])
 
-    # Tentativa opcional de obter V2TX (Volatilidade Euro Stoxx 50)
-    info_v2tx = ""
-    try:
-        df_v2tx = yf.download("^V2TX", period="1mo", interval="1d", progress=False, session=session)
-        if not df_v2tx.empty:
-            if isinstance(df_v2tx.columns, pd.MultiIndex):
-                df_v2tx.columns = df_v2tx.columns.droplevel(1)
-            v2tx_atual = float(df_v2tx['Close'].iloc[-1])
-            info_v2tx = f" | V2TX (Europa): {v2tx_atual:.2f}"
-    except Exception:
-        pass
+    # Volatilidade Realizada Europeia (^STOXX50E / FEZ) sem chamar o ^V2TX
+    info_vol_eu = obter_volatilidade_europa()
 
     # Deteção de choque súbito de volatilidade (Spike > +15% no dia ou > 25% acima da SMA20)
     spike_volatilidade = (vix_var_dia >= 15.0) or (vix_sma20 > 0 and vix_atual >= vix_sma20 * 1.25)
     
     # ===================================================================
-    # DETERMINAÇÃO DO REGIME E MULTIPLICADOR DE LOTE
+    # DETERMINAÇÃO DO REGIME E MULTIPLICADOR DE LOTE (ALINHADO COM DISJUNTOR MACRO)
     # ===================================================================
     alerta_critico_macro = False
 
-    if vix_atual >= 25.0:
-        regime_nome = "PÂNICO / EXPANSÃO EXTREMA"
+    if vix_atual >= 30.0:
+        regime_nome = "PÂNICO SISTÉMICO EXTREMO"
         lote_breakout_pct = 0
-        lote_carver_pct = 50
-        instrucao = "🚨 VIX EM PÂNICO (>= 25)! BLOQUEIO TOTAL de novas entradas em Breakouts. Apenas Mean Reversion/Trend reduzido a 50%."
+        lote_carver_pct = 25
+        instrucao = "🚨 VIX EM PÂNICO (>= 30)! BLOQUEIO TOTAL de novas entradas em Breakouts. Apenas Mean Reversion/Trend reduzido a 25%."
         cor_alerta = "🔴"
         alerta_critico_macro = True
-    elif 20.0 <= vix_atual < 25.0 or (spike_volatilidade and vix_atual >= 18.0):
-        regime_nome = "TENSÃO / VENTO CONTRA" + (" (SPIKE VIX!)" if spike_volatilidade else "")
+    elif 23.0 <= vix_atual < 30.0 or (spike_volatilidade and vix_atual >= 20.0):
+        regime_nome = "ALTA VOLATILIDADE / TENSÃO" + (" (SPIKE VIX!)" if spike_volatilidade else "")
         lote_breakout_pct = 50
         lote_carver_pct = 75
-        instrucao = "Elevação de risco sistémico ou choque súbito de volatilidade. Redução rigorosa de lote para 50% em Breakouts e 75% em Trend."
+        instrucao = "Volatilidade elevada (23–30) ou choque súbito. Redução rigorosa de lote para 50% em Breakouts e 75% em Trend."
         cor_alerta = "🟠"
         if spike_volatilidade:
             alerta_critico_macro = True
-    elif 15.0 <= vix_atual < 20.0 or spike_volatilidade:
+    elif 18.0 <= vix_atual < 23.0 or spike_volatilidade:
         regime_nome = "MODERADO / ALERTA" + (" (SPIKE VIX!)" if spike_volatilidade else "")
         lote_breakout_pct = 75
         lote_carver_pct = 100
-        instrucao = "Volatilidade controlada com ligeiro ruído. Lote de Breakout ajustado para 75%."
+        instrucao = "Volatilidade moderada com ruído intradiário. Lote de Breakout ajustado para 75%."
         cor_alerta = "🟡"
-    else:  # VIX < 15.0 e sem spike
+    else:  # VIX < 18.0 e sem spike
         regime_nome = "CALMO / VENTO A FAVOR"
         lote_breakout_pct = 100
         lote_carver_pct = 100
-        instrucao = "Ambiente propício a expansão de tendência. Utilizar dimensão total de posição (100%)."
+        instrucao = "Ambiente institucional calmo e propício a expansão de tendência. Utilizar dimensão total (100%)."
         cor_alerta = "🟢"
 
 except Exception as e:
@@ -152,14 +162,14 @@ except Exception as e:
         f"--------------------------------------------------\n"
     )
     gravar_ficheiro_vix(bloco_erro)
-    sys.exit(1)
+    sys.exit(0)
 
 # ===================================================================
 # GERAR FICHEIRO TEMPORÁRIO PARA O ORQUESTRADOR
 # ===================================================================
 bloco_texto = (
     f"{cor_alerta} MOTOR 16: REGIME DE VOLATILIDADE VIX ({data_hoje})\n"
-    f"📊 VIX Atual: {vix_atual:.2f} (Var Dia: {vix_var_dia:+.2f}%) | Média 20 Dias: {vix_sma20:.2f}{info_v2tx}\n"
+    f"📊 VIX Atual: {vix_atual:.2f} (Var Dia: {vix_var_dia:+.2f}%) | Média 20 Dias: {vix_sma20:.2f}{info_vol_eu}\n"
     f"STATUS MACRO: REGIME {regime_nome}\n"
     f"   - Lote Máximo Breakouts (US / Europa): {lote_breakout_pct}%\n"
     f"   - Lote Máximo Trend Carver / Reversão: {lote_carver_pct}%\n"
