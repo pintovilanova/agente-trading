@@ -138,15 +138,21 @@ def get_yf_history_safe(tickers_list, period="6mo"):
 def extrair_tickers_dos_comboios():
     """
     Lê todos os ficheiros temporários comboio_*_temp.txt para descobrir os sinais novos de hoje,
-    ignorando a secção de gestão de posições ativas para evitar falsos positivos.
+    ignorando a secção de gestão de posições ativas e palavras-chave de cabeçalho/exemplo.
     """
     arquivos = sorted(glob.glob("comboio_*_temp.txt"))
     origem_sinais = {}  # ticker -> list de ficheiros/motores onde surgiu
 
+    blacklist_tickers = {
+        "TICKER", "SYMBOL", "ATIVO", "ACAO", "NOME", "SETOR", "ESTADO",
+        "NONE", "NULL", "NAN", "N-A", "NA", "INFO", "ALERTA", "DEBUG",
+        "ERRO", "AVISO", "SUCESSO", "MODO", "TOP", "BUY", "SELL", "STOP"
+    }
+
     padrao_novo = re.compile(r"^\s*(?:🔹|💎|🚀|⚡|🎯|📌)?\s*\[([A-Z]{1,6}(?:-[A-Z]{1,2})?)\]\s*-")
 
     for arq in arquivos:
-        if any(ign in arq for ign in ("rotacao", "macro", "correlacao")):
+        if any(ign in arq for ign in ("rotacao", "macro", "correlacao", "sazonalidade", "exaustao")):
             continue
 
         nome_fonte = arq.replace("comboio_", "").replace("_temp.txt", "").upper()
@@ -170,7 +176,8 @@ def extrair_tickers_dos_comboios():
                         ticker = m.group(1).strip().upper().replace(".", "-")
                         if ticker == "BRK-A":
                             ticker = "BRK-B"
-                        origem_sinais.setdefault(ticker, []).append(nome_fonte)
+                        if ticker not in blacklist_tickers:
+                            origem_sinais.setdefault(ticker, []).append(nome_fonte)
                         continue
 
                     # 2. Formato legado: "NVDA,Nome: Nvidia,Setor: ..."
@@ -178,7 +185,7 @@ def extrair_tickers_dos_comboios():
                         ticker = linha_strip.split(",")[0].strip().upper().replace(".", "-")
                         if ticker == "BRK-A":
                             ticker = "BRK-B"
-                        if re.match(r"^[A-Z]{1,6}(?:-[A-Z]{1,2})?$", ticker):
+                        if ticker not in blacklist_tickers and re.match(r"^[A-Z]{1,6}(?:-[A-Z]{1,2})?$", ticker):
                             origem_sinais.setdefault(ticker, []).append(nome_fonte)
         except Exception as e:
             print(f"[AVISO] Falha ao ler {arq}: {e}")
