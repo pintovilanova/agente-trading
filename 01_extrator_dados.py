@@ -1,5 +1,5 @@
 # ===================================================================================
-# SISTEMA DE TRADING INSTITUCIONAL - EXTRATOR DE DADOS & US BREAKOUTS
+# SISTEMA DE TRADING INSTITUCIONAL - EXTRATOR DE DADOS & US BREAKOUTS (MODELO 01)
 # ===================================================================================
 
 import os
@@ -55,8 +55,19 @@ def limpar_float(val):
     except (ValueError, TypeError):
         return None
 
+def parse_data_abertura(data_abertura_str):
+    if not data_abertura_str:
+        return None
+    formatos = ("%d/%m/%Y %H:%M:%S", "%d/%m/%Y %H:%M", "%d/%m/%Y", "%Y-%m-%d %H:%M:%S", "%Y-%m-%d")
+    for fmt in formatos:
+        try:
+            return datetime.strptime(str(data_abertura_str).strip(), fmt).replace(tzinfo=ZoneInfo("Europe/Lisbon"))
+        except ValueError:
+            continue
+    return None
+
 # ===================================================================
-# 2. FUNÇÕES DE REDE (LEITURA E ESCRITA NO GOOGLE SHEETS)
+# 2. FUNÇÕES DE REDE & REGIME MACRO
 # ===================================================================
 def buscar_dados_completos():
     print("A carregar a Watchlist, Posições Ativas e Configurações a partir do Google Sheets...")
@@ -79,6 +90,104 @@ def buscar_dados_completos():
     except Exception as e:
         print(f"[ERRO CRÍTICO] Falha ao conectar ao Sheets: {e}")
         return [], {}, {}
+
+def verificar_regime_mercado():
+    """
+    Alinhado com M17, M20 e PEAD:
+    - Expansão (SPY > EMA20): TP 1.5R | RS >= 70 | Fator Risco 1.0 (ou 0.5 se VIX > 23)
+    - Corretivo/Lateral (SMA200 < SPY <= EMA20): TP 1.0R | RS >= 80 | Fator Risco 0.5 (ou 0.35 se VIX > 23)
+    - Baixista / Queda <= -1.50% / VIX > 30: Veto ativo para novos breakouts
+    """
+    regime_default = {
+        "autorizado": True,
+        "modo": "EXPANSAO",
+        "tp_mult": 1.5,
+        "rs_min": 70.0,
+        "fator_risco": 1.0,
+        "msg": "Dados SPY insuficientes (autorizado por defeito em modo Expansão)."
+    }
+    try:
+        df_spy = yf.download("SPY", period="1y", interval="1d", progress=False, session=session)
+        if df_spy.empty or len(df_spy) < 200:
+            return regime_default
+        if isinstance(df_spy.columns, pd.MultiIndex):
+            df_spy.columns = df_spy.columns.droplevel(1)
+
+        close_hoje = float(df_spy['Close'].iloc[-1])
+        close_ontem = float(df_spy['Close'].iloc[-2])
+        sma200 = float(df_spy['Close'].rolling(200).mean().iloc[-1])
+        ema20 = float(df_spy['Close'].ewm(span=20, adjust=False).mean().iloc[-1])
+        var_dia = ((close_hoje - close_ontem) / close_ontem) * 100
+
+        vix_atual = None
+        try:
+            df_vix = yf.download("^VIX", period="5d", interval="1d", progress=False, session=session)
+            if not df_vix.empty:
+                if isinstance(df_vix.columns, pd.MultiIndex):
+                    df_vix.columns = df_vix.columns.droplevel(1)
+                vix_atual = float(df_vix['Close'].iloc[-1])
+        except Exception:
+            pass
+
+        tag_vix = f" | VIX: {vix_atual:.2f}" if vix_atual is not None else ""
+
+        if close_hoje < sma200:
+            return {
+                "autorizado": False,
+                "modo": "BAIXISTA",
+                "tp_mult": 1.0,
+                "rs_min": 85.0,
+                "fator_risco": 0.0,
+                "msg": f"SPY (${close_hoje:.2f}) abaixo da SMA200 (${sma200:.2f}). Regime baixista{tag_vix}."
+            }
+        if var_dia <= -1.50:
+            return {
+                "autorizado": False,
+                "modo": "QUEDA_DIARIA",
+                "tp_mult": 1.0,
+                "rs_min": 85.0,
+                "fator_risco": 0.0,
+                "msg": f"SPY em queda acentuada hoje ({var_dia:.2f}% <= -1.50%){tag_vix}. Breakouts bloqueados."
+            }
+        if vix_atual is not None and vix_atual > 30.0:
+            return {
+                "autorizado": False,
+                "modo": "PANICO_VIX",
+                "tp_mult": 1.0,
+                "rs_min": 85.0,
+                "fator_risco": 0.0,
+                "msg": f"VIX em pânico sistémico ({vix_atual:.2f} > 30.00)."
+            }
+
+        if close_hoje < ema20:
+            fator = 0.35 if (vix_atual is not None and vix_atual > 23.0) else 0.50
+            return {
+                "autorizado": True,
+                "modo": "CORRETIVO",
+                "tp_mult": 1.0,
+                "rs_min": 80.0,
+                "fator_risco": fator,
+                "msg": (
+                    f"SPY em pullback/lateral (${close_hoje:.2f} < EMA20 ${ema20:.2f} | SMA200 ${sma200:.2f} | "
+                    f"Var: {var_dia:+.2f}%{tag_vix}) — Modo Tático: Alvo 1.0R, RS >= 80 e Lote {int(fator*100)}%."
+                )
+            }
+
+        fator = 0.50 if (vix_atual is not None and vix_atual > 23.0) else 1.0
+        return {
+            "autorizado": True,
+            "modo": "EXPANSAO",
+            "tp_mult": 1.5,
+            "rs_min": 70.0,
+            "fator_risco": fator,
+            "msg": (
+                f"SPY em Expansão (${close_hoje:.2f} > EMA20 ${ema20:.2f} > SMA200 ${sma200:.2f} | "
+                f"Var: {var_dia:+.2f}%{tag_vix}) — Alvo 1.5R | Lote {int(fator*100)}%."
+            )
+        }
+    except Exception as e:
+        regime_default["msg"] = f"Aviso SPY: {e}"
+        return regime_default
 
 def atualizar_sheets_colunas_todas(lista_dados):
     print(f"\nA enviar {len(lista_dados)} ativos para o Google Sheets (acao: 'atualizar_colunas_todas')...")
@@ -139,23 +248,44 @@ def enviar_email(assunto, conteudo):
 # 3. CARGA DE DADOS & PARÂMETROS DE CONFIGURAÇÃO
 # ===================================================================
 ativos_sheets, posicoes_ativas_dict, configs_dict = buscar_dados_completos()
-print(f"[SUCESSO] {len(ativos_sheets)} ativos carregados da Watchlist.")
-print(f"[SUCESSO] {len(posicoes_ativas_dict)} posições ativas detetadas.\n")
+regime_macro = verificar_regime_mercado()
 
-# Lê risco máximo e trailing multiplier da aba Configs (tal como no Apps Script)
-risco_maximo_dolares = 25.00
+print(f"[SUCESSO] {len(ativos_sheets)} ativos carregados da Watchlist.")
+print(f"[SUCESSO] {len(posicoes_ativas_dict)} posições ativas detetadas.")
+print(f"[MACRO] {regime_macro['msg']}\n")
+
+risco_base_dolares = 25.00
 multiplicador_trailing = 1.5
 for k, v in configs_dict.items():
     k_low = str(k).lower()
-    if "risco" in k_low:
+    if "risco" in k_low and "pct" not in k_low:
         val = limpar_float(v)
-        if val and val > 0: risco_maximo_dolares = val
+        if val and val > 0: risco_base_dolares = val
     if "trailing" in k_low:
         val = limpar_float(v)
         if val and val > 0: multiplicador_trailing = val
 
+risco_maximo_dolares = round(risco_base_dolares * regime_macro["fator_risco"], 2) if regime_macro["autorizado"] else 0.0
+
+# Mapeamento de setores ocupados para evitar stops em cadeia
+mapa_setores_watchlist = {}
+for item in ativos_sheets:
+    if isinstance(item, dict):
+        t_item = str(item.get("ticker", "")).strip().upper()
+        s_item = str(item.get("setor") or item.get("setorAtivo") or item.get("sector") or item.get("Setor") or "").strip()
+        if t_item and s_item and s_item not in ["Desconhecido", "N/A", "NONE"]:
+            mapa_setores_watchlist[t_item] = s_item
+
+setores_ocupados = set()
+for chave_pos, info in posicoes_ativas_dict.items():
+    if isinstance(info, dict) and str(info.get("status", "")).strip().upper().startswith("ATIVA"):
+        t_pos = "AI" if chave_pos.lower() in ["c3.ai", "c3"] else chave_pos.strip().upper()
+        setor_pos = str(info.get("setor") or mapa_setores_watchlist.get(t_pos, "")).strip()
+        if setor_pos and setor_pos not in ["Desconhecido", "N/A", "NONE"]:
+            setores_ocupados.add(setor_pos.lower())
+
 # ===================================================================
-# 4. AUDITAR POSIÇÕES EM CARTEIRA
+# 4. AUDITAR POSIÇÕES EM CARTEIRA (RESPEITANDO DATA DE ABERTURA)
 # ===================================================================
 bloco_posicoes_ativas = ""
 for chave_pos, info in posicoes_ativas_dict.items():
@@ -172,20 +302,30 @@ for chave_pos, info in posicoes_ativas_dict.items():
                 
                 stop = limpar_float(info.get("stopAtual")) or limpar_float(info.get("stopLoss")) or 0.0
                 alvo_tp = limpar_float(info.get("alvoTp")) or limpar_float(info.get("takeProfit")) or 0.0
+                dt_abertura = parse_data_abertura(info.get("dataAbertura", ""))
                 
+                preco_atual = round(float(df_pos['Close'].iloc[-1]), 2)
+                maxima_desde_abertura = preco_atual
+
                 try:
-                    df_intra = yf.download(ticker, period="2d", interval="1m", prepost=True, progress=False, session=session)
-                    if isinstance(df_intra.columns, pd.MultiIndex):
-                        df_intra.columns = df_intra.columns.droplevel(1)
-                    preco_atual = round(float(df_intra['Close'].iloc[-1]), 2)
-                    maxima_hoje = round(float(df_intra['High'].max()), 2)
+                    df_intra = yf.download(ticker, period="5d", interval="1m", prepost=True, progress=False, session=session)
+                    if not df_intra.empty:
+                        if isinstance(df_intra.columns, pd.MultiIndex):
+                            df_intra.columns = df_intra.columns.droplevel(1)
+                        df_intra = df_intra.dropna(subset=['Close', 'High'])
+                        if not df_intra.empty:
+                            preco_atual = round(float(df_intra['Close'].iloc[-1]), 2)
+                            if dt_abertura is not None:
+                                idx_lisbon = df_intra.index.tz_convert("Europe/Lisbon") if df_intra.index.tzinfo else df_intra.index.tz_localize("UTC").tz_convert("Europe/Lisbon")
+                                df_filtrado = df_intra[idx_lisbon >= dt_abertura]
+                                if not df_filtrado.empty:
+                                    maxima_desde_abertura = round(float(df_filtrado['High'].max()), 2)
                 except Exception:
-                    preco_atual = round(float(df_pos['Close'].iloc[-1]), 2)
-                    maxima_hoje = round(float(df_pos['High'].iloc[-1]), 2)
+                    pass
                 
                 entrada = limpar_float(info.get("precoEntrada")) or preco_atual
                 qtd = info.get("quantidade", "N/A")
-                maxima_efetiva = max(maxima_hoje, preco_atual)
+                maxima_efetiva = max(maxima_desde_abertura, preco_atual)
                 
                 if alvo_tp > 0 and maxima_efetiva >= alvo_tp:
                     acao = f"🎯 ALVO ALCANÇADO (TP em ${alvo_tp})! Recomendado FECHAR POSIÇÃO com Lucro (WIN)."
@@ -202,32 +342,11 @@ for chave_pos, info in posicoes_ativas_dict.items():
             print(f"[ERRO] Falha ao auditar posição ativa {chave_pos}: {e}")
 
 # ===================================================================
-# 5. VERIFICAÇÃO DE VETO MACRO (SPY)
+# 5. EXTRAÇÃO DE DADOS (SEMPRE EXECUTA P/ SHEETS) & GUILHOTINA V3
 # ===================================================================
-print("A verificar Veto Macro (SPY)...")
-veto_macro_ativo = False
-motivo_veto = ""
+veto_macro_ativo = not regime_macro["autorizado"]
+motivo_veto = regime_macro["msg"]
 
-try:
-    df_spy = yf.download("SPY", period="1y", interval="1d", progress=False, session=session)
-    if isinstance(df_spy.columns, pd.MultiIndex):
-        df_spy.columns = df_spy.columns.droplevel(1)
-        
-    if not df_spy.empty and len(df_spy) >= 2:
-        preco_spy = float(df_spy['Close'].iloc[-1])
-        preco_spy_ontem = float(df_spy['Close'].iloc[-2])
-        var_spy = ((preco_spy - preco_spy_ontem) / preco_spy_ontem) * 100
-        
-        if var_spy <= -1.50:
-            veto_macro_ativo = True
-            motivo_veto = f"SPY em Pânico: Caiu {var_spy:.2f}% (<= -1.50%). Abertura de novas posições bloqueada."
-            print(f"[ALERTA MACRO] {motivo_veto}")
-except Exception as e:
-    print(f"[AVISO] Falha ao verificar filtro SPY: {e}")
-
-# ===================================================================
-# 6. EXTRAÇÃO DE DADOS & GUILHOTINA MATEMÁTICA V2 (US WATCHLIST)
-# ===================================================================
 dados_para_sheets = []
 bloco_ativos_acionados = ""
 
@@ -238,15 +357,15 @@ if ativos_sheets:
         if isinstance(item, dict):
             ticker_orig = str(item.get("ticker", "")).strip().upper()
             nome = item.get("nome", ticker_orig)
+            setor = str(item.get("setor") or item.get("setorAtivo") or item.get("sector") or "Desconhecido").strip()
             rs_score = item.get("rs_score") or item.get("rsScore") or "N/A"
         else:
             ticker_orig = str(item).strip().upper()
-            nome, rs_score = ticker_orig, "N/A"
+            nome, setor, rs_score = ticker_orig, "Desconhecido", "N/A"
 
         if not ticker_orig or ticker_orig == "#N/A":
             continue
 
-        # Filtra ativos europeus (que têm sufixo .PA, .DE, .LS, etc., exceto BRK.A/BRK.B)
         if "." in ticker_orig and ticker_orig not in ["BRK.A", "BRK.B"]:
             continue
 
@@ -254,7 +373,7 @@ if ativos_sheets:
 
         try:
             time.sleep(random.uniform(0.25, 0.6))
-            df = yf.download(ticker_yf, period="3mo", interval="1d", progress=False, session=session)
+            df = yf.download(ticker_yf, period="1y", interval="1d", progress=False, session=session)
             if df.empty or len(df) < 20: continue
             if isinstance(df.columns, pd.MultiIndex): df.columns = df.columns.droplevel(1)
             df = df.dropna(subset=['Close', 'High', 'Low', 'Volume'])
@@ -264,34 +383,30 @@ if ativos_sheets:
             var_perc = ((preco - preco_anterior) / preco_anterior) * 100
 
             mm20 = float(df['Close'].rolling(20).mean().iloc[-1])
+            sma200 = float(df['Close'].rolling(200).mean().iloc[-1]) if len(df) >= 200 else 0.0
             val_dist_mm20 = ((preco - mm20) / mm20) * 100
             dist_mm20_str = f"{val_dist_mm20:.2f}%"
             
-            # Momentum (14 períodos, igual ao valores[14] do teu Apps Script)
             val_momentum = round(float(preco - float(df['Close'].iloc[-15])), 2) if len(df) >= 15 else 0.0
 
-            # RSI (14)
             df.ta.rsi(length=14, append=True)
             col_rsi = [c for c in df.columns if str(c).startswith('RSI_')][0]
             val_rsi = round(float(df[col_rsi].iloc[-1]), 2)
 
-            # ADX (14)
             df.ta.adx(length=14, append=True)
             col_adx = [c for c in df.columns if str(c).startswith('ADX_')][0]
             val_adx = round(float(df[col_adx].iloc[-1]), 2)
 
-            # ATR (14)
             df.ta.atr(length=14, append=True)
             col_atr = [c for c in df.columns if str(c).startswith('ATRr_') or str(c).startswith('ATR_')][0]
             atr = round(float(df[col_atr].iloc[-1]), 2)
             atr_perc = round((atr / preco) * 100, 2)
 
-            # RVOL (20)
             vol_media = float(df['Volume'].rolling(20).mean().iloc[-1])
             val_rvol = round(float(df['Volume'].iloc[-1] / vol_media), 2) if vol_media > 0 else 1.0
 
             # ===============================================================
-            # GUILHOTINA MATEMÁTICA V2 (Réplica exata do teu Apps Script)
+            # GUILHOTINA MATEMÁTICA V3 (COM FILTRO MACRO, RS SCORE & SETOR)
             # ===============================================================
             recomendacao = "Observar"
             preco_entrada = "N/A"
@@ -300,12 +415,19 @@ if ativos_sheets:
             preco_be = "N/A"
             qtd_acoes = "N/A"
             multiplicador_atr = 1.0
-            racio_tp = 1.2
+            racio_tp = regime_macro["tp_mult"]
+
+            rs_num = limpar_float(rs_score)
+            rs_aprovado = (rs_num is not None and rs_num >= regime_macro["rs_min"])
+            tendencia_lp_ok = (sma200 > 0 and preco > sma200)
+            ja_em_carteira = (ticker_orig in posicoes_ativas_dict)
+            setor_bloqueado = (setor not in ["Desconhecido", "N/A", ""] and setor.lower() in setores_ocupados)
 
             preco_caiu_hoje = preco < preco_anterior
             volume_despejo = val_rvol > 1.20
 
-            if (preco_caiu_hoje and volume_despejo) or val_momentum <= 0.5:
+            if (veto_macro_ativo or not rs_aprovado or not tendencia_lp_ok or 
+                ja_em_carteira or setor_bloqueado or (preco_caiu_hoje and volume_despejo) or val_momentum <= 0.5):
                 recomendacao = "Observar"
             elif var_perc > 0 and val_adx < 25:
                 recomendacao = "Aguardar Recuo"
@@ -324,21 +446,19 @@ if ativos_sheets:
             else:
                 recomendacao = "Observar"
 
-            if recomendacao != "Observar" and preco_entrada != "N/A":
+            if recomendacao != "Observar" and preco_entrada != "N/A" and risco_maximo_dolares > 0:
                 ent_num = float(preco_entrada)
                 stop_num = ent_num - (atr * multiplicador_atr)
                 preco_stop = f"{stop_num:.2f}"
                 risco_por_acao = ent_num - stop_num
                 if risco_por_acao > 0:
+                    # Risco fixo estrito pelo regime (sem duplicar lote)
                     risco_alocado = risco_maximo_dolares
-                    if val_rvol >= 3.00: risco_alocado += (risco_maximo_dolares * 0.5)
-                    if val_adx >= 35.00: risco_alocado += (risco_maximo_dolares * 0.5)
                     tp_num = ent_num + (risco_por_acao * racio_tp)
                     preco_tp = f"{tp_num:.2f}"
                     qtd_acoes = f"{(risco_alocado / risco_por_acao):.2f}"
-                    preco_be = f"{(ent_num + ((tp_num - ent_num) / 2)):.2f}"
+                    preco_be = f"{(ent_num + (risco_por_acao * 0.8)):.2f}"
 
-            # Trailing Stop (Math.max com stop atual da carteira se existir)
             trailing_calc = preco - (atr * multiplicador_trailing)
             stop_carteira = 0.0
             if ticker_orig in posicoes_ativas_dict and isinstance(posicoes_ativas_dict[ticker_orig], dict):
@@ -353,7 +473,6 @@ if ativos_sheets:
 
             timestamp_str = datetime.now(ZoneInfo("Europe/Lisbon")).strftime("%d/%m/%Y %H:%M:%S")
 
-            # String "Comboio" exata para a Coluna S (19)
             comboio_str = (
                 f"{ticker_orig},"
                 f"Preço: {preco:.2f},"
@@ -366,14 +485,13 @@ if ativos_sheets:
                 f"Estado: {recomendacao},"
                 f"Entrada: {preco_entrada},"
                 f"Stop: {preco_stop},"
-                f"Take-Profit: {preco_tp},"
+                f"Take-Profit ({racio_tp:.1f}R): {preco_tp},"
                 f"Break-Even: {preco_be},"
                 f"Qtd: {qtd_acoes},"
                 f"Trailing: {preco_trailing},"
                 f"Data: {timestamp_str}"
             )
 
-            # Objeto exato esperado pelo doPost ("atualizar_colunas_todas")
             dados_para_sheets.append({
                 "ticker": ticker_orig,
                 "preco": preco,
@@ -386,14 +504,14 @@ if ativos_sheets:
             })
 
             if recomendacao in ["Forca Consolidada", "Alerta Iminente"]:
-                bloco_ativos_acionados += f"{comboio_str} | Nome: {nome} | RS Score: {rs_score}\n"
+                bloco_ativos_acionados += f"{comboio_str} | Nome: {nome} | Setor: {setor} | RS Score: {rs_score}\n"
 
         except Exception as e:
             print(f"[AVISO] Falha ao processar {ticker_orig}: {e}")
             continue
 
 # ===================================================================
-# 7. ESCRITA NO GOOGLE SHEETS + MONTAGEM DO RELATÓRIO
+# 6. ESCRITA NO GOOGLE SHEETS + MONTAGEM DO RELATÓRIO
 # ===================================================================
 atualizar_sheets_colunas_todas(dados_para_sheets)
 
@@ -401,15 +519,17 @@ data_hoje = datetime.now(ZoneInfo("Europe/Lisbon")).strftime("%d/%m/%Y %H:%M")
 
 bloco_texto = (
     f"⚡ RELATÓRIO EXTRATOR DE DADOS US ({data_hoje})\n"
-    f"==================================================================\n\n"
+    f"==================================================================\n"
+    f"🌐 Filtro Macro: {regime_macro['msg']}\n"
+    f"💰 Risco Configurado por Trade: ${risco_maximo_dolares:,.2f} USD (Base: ${risco_base_dolares:,.2f} | Fator: {int(regime_macro['fator_risco']*100)}%)\n\n"
 )
 
 if veto_macro_ativo:
     bloco_texto += f"🚨 [VETO MACRO ATIVADO]\n{motivo_veto}\n"
-    bloco_texto += "⚠️ Novas compras suspensas hoje, mas a pipeline continua para auditar e gerir as POSIÇÕES ATIVAS em carteira.\n"
+    bloco_texto += "⚠️ Novas compras suspensas hoje, mas a pipeline continua para atualizar o Sheets e gerir POSIÇÕES ATIVAS.\n"
     bloco_texto += "--------------------------------------------------\n\n"
 else:
-    bloco_texto += "🟢 [MERCADO ESTÁVEL] Filtro do SPY dentro dos parâmetros normais. Pipeline autorizada.\n"
+    bloco_texto += f"🟢 [PIPELINE AUTORIZADA - MODO {regime_macro['modo']}] Alvo {regime_macro['tp_mult']:.1f}R | RS >= {int(regime_macro['rs_min'])}.\n"
     bloco_texto += "--------------------------------------------------\n\n"
 
 if bloco_posicoes_ativas:
@@ -418,7 +538,7 @@ else:
     bloco_texto += "📌 GESTÃO DE POSIÇÕES ATIVAS: Nenhuma posição ativa detetada.\n--------------------------------------------------\n\n"
 
 if veto_macro_ativo:
-    bloco_texto += "✅ Análise de novas entradas da watchlist omitida devido ao Veto Macro.\n"
+    bloco_texto += f"✅ Watchlist atualizada no Sheets ({len(dados_para_sheets)}/{len(ativos_sheets)} ativos), mas novos sinais de entrada estão bloqueados pelo Veto Macro.\n"
 else:
     bloco_texto += "DADOS DOS ATIVOS ACIONADOS (US BREAKOUTS):\n\n"
     if bloco_ativos_acionados:
@@ -428,7 +548,7 @@ else:
     bloco_texto += f"--------------------------------------------------\nWatchlist auditada e atualizada no Sheets ({len(dados_para_sheets)}/{len(ativos_sheets)} ativos).\n"
 
 # ===================================================================
-# 8. GRAVAÇÃO DO FICHEIRO E NOTIFICAÇÕES
+# 7. GRAVAÇÃO DO FICHEIRO E NOTIFICAÇÕES
 # ===================================================================
 print("A gravar ficheiro temporário 'comboio_temp.txt'...")
 with open("comboio_temp.txt", "w", encoding="utf-8") as f:
@@ -441,7 +561,7 @@ debug_telegram_ativado = str(configs_dict.get("TELEGRAM_NOTIFICATIONS_DEBUG", "f
 
 if debug_telegram_ativado or veto_macro_ativo:
     print("A enviar notificação para o Telegram...")
-    status_macro = "🚨 *VETO MACRO ATIVADO*" if veto_macro_ativo else "🟢 *MERCADO ESTÁVEL*"
+    status_macro = f"🚨 *VETO MACRO ({regime_macro['modo']})*" if veto_macro_ativo else f"🟢 *AUTORIZADO ({regime_macro['modo']})*"
     mensagem_telegram = (
         f"📥⚡ *EXTRATOR DE DADOS US*\n\n"
         f"🔍 [STATUS] Extração e auditoria concluídas.\n"
