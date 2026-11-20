@@ -266,21 +266,22 @@ def enviar_email(conteudo):
 # ===================================================================
 # 3. MOTOR MATEMÁTICO: EARNINGS DRIFT (PEAD)
 # ===================================================================
-def analisar_earnings_drift(ativo_info, risco_por_trade_usd, posicoes_ativas_dict, setores_ocupados, regime):
-    ticker = str(ativo_info.get("ticker", "")).strip().upper()
+def analisar_earnings_drift(ativo_info, risco_por_trade_usd, tickers_ativos_set, setores_ocupados, regime):
+    ticker = str(ativo_info.get("ticker", "")).strip().upper().replace(".", "-")
     nome_empresa = ativo_info.get("nome", "N/A")
     setor = str(ativo_info.get("setor") or ativo_info.get("setorAtivo") or ativo_info.get("sector") or "Desconhecido").strip()
     rs_score = ativo_info.get("rs_score", "N/A")
 
     if not ticker or ticker == "#N/A" or ticker == "NONE":
         return None
-    if ticker in posicoes_ativas_dict:
-        return None
-    if setor not in ["Desconhecido", "N/A", "", "NONE"] and setor.lower() in setores_ocupados:
-        return None
 
     if ticker == "BRK-A":
         ticker = "BRK-B"
+
+    if ticker in tickers_ativos_set:
+        return None
+    if setor not in ["Desconhecido", "N/A", "", "NONE"] and setor.lower() in setores_ocupados:
+        return None
 
     # Alinhamento institucional dinâmico (RS >= 70 em Expansão | RS >= 80 em Corretivo)
     val_rs_num = limpar_float(rs_score)
@@ -310,18 +311,19 @@ def analisar_earnings_drift(ativo_info, risco_por_trade_usd, posicoes_ativas_dic
         media_volume_20 = df['Volume'].rolling(window=20).mean()
         df['RVOL'] = df['Volume'] / media_volume_20
 
-        # Exige tendência primária de alta (Close > SMA200)
+        # Exige liquidez institucional (Preço >= $10 e Volume Médio 20d >= 300k) e tendência primária (Close > SMA200)
         fecho_atual_df = float(df['Close'].iloc[-1])
+        vol_medio_atual = float(media_volume_20.iloc[-1]) if pd.notna(media_volume_20.iloc[-1]) else 0.0
         sma200_atual = float(df['SMA_200'].iloc[-1])
-        if pd.isna(sma200_atual) or fecho_atual_df <= sma200_atual:
+        if fecho_atual_df < 10.0 or vol_medio_atual < 300000 or pd.isna(sma200_atual) or fecho_atual_df <= sma200_atual:
             return None
 
         earnings_recente = False
         data_earnings_str = "N/A"
         d_earn_alvo = None
+        hoje = datetime.now(ZoneInfo("Europe/Lisbon")).date()
         
         if earnings_df is not None and not earnings_df.empty:
-            hoje = datetime.now(ZoneInfo("Europe/Lisbon")).date()
             for idx, _ in earnings_df.head(6).iterrows():
                 d_earn = idx.date() if hasattr(idx, 'date') else pd.to_datetime(idx).date()
                 dias_passados = (hoje - d_earn).days
@@ -334,12 +336,11 @@ def analisar_earnings_drift(ativo_info, risco_por_trade_usd, posicoes_ativas_dic
         if not earnings_recente or d_earn_alvo is None:
             return None
 
-        # Localiza a barra exata da reação ao earnings (pode ser o próprio dia ou o dia útil seguinte se foi After-Hours)
+        # Localiza a barra exata da reação ao earnings (próprio dia ou dia útil seguinte se foi After-Hours)
         datas_df = [idx.date() if hasattr(idx, 'date') else pd.to_datetime(idx).date() for idx in df.index]
         pos_evento = None
         for i, d_bar in enumerate(datas_df):
             if d_bar >= d_earn_alvo and i >= 1:
-                # Se a barra do próprio dia não saltou, verifica a barra seguinte (anúncios pós-fecho)
                 var_i = ((float(df['Close'].iloc[i]) - float(df['Close'].iloc[i - 1])) / float(df['Close'].iloc[i - 1])) * 100
                 if var_i >= 2.0 or i == len(df) - 1:
                     pos_evento = i
@@ -349,7 +350,7 @@ def analisar_earnings_drift(ativo_info, risco_por_trade_usd, posicoes_ativas_dic
         cols_atr = [c for c in df.columns if str(c).startswith('ATRr_') or str(c).startswith('ATR_')]
         atr = float(df[cols_atr[0]].iloc[-1]) if cols_atr and pd.notna(df[cols_atr[0]].iloc[-1]) else np.nan
 
-        # Caso A: Reação já consolidada numa vela diária (últimos 1-5 dias)
+        # Caso A: Reação já consolidada numa vela diária (últimos 1-5 dias), sem estar parabólica (2% a 15%)
         sinal_valido = False
         if pos_evento is not None and pos_evento >= 1:
             barra_ev = df.iloc[pos_evento]
@@ -359,18 +360,18 @@ def analisar_earnings_drift(ativo_info, risco_por_trade_usd, posicoes_ativas_dic
             min_evento = float(barra_ev['Low'])
             max_recente = float(df['High'].iloc[pos_evento:].max())
 
-            # Confirma explosão no dia do earnings + preço atual ainda sustenta acima da mínima do dia do evento
-            if var_evento >= 2.0 and rvol_evento >= 2.0 and preco_rt >= min_evento:
+            if (2.0 <= var_evento <= 15.0) and rvol_evento >= 2.0 and (min_evento <= preco_rt <= max_recente * 1.02):
                 sinal_valido = True
                 var_perc = var_evento
                 rvol = rvol_evento
                 topo_referencia = max(max_recente, preco_rt)
                 base_stop = min_evento
 
-        # Caso B: Anúncio After-Hours recente com gap confirmado em pré-abertura/pós-fecho (>= +3.5%)
-        if not sinal_valido:
+        # Caso B: Anúncio After-Hours recente (apenas hoje/ontem, antes da vela diária fechar)
+        dias_desde_earn = (hoje - d_earn_alvo).days
+        if not sinal_valido and (-1 <= dias_desde_earn <= 1) and (d_earn_alvo >= datas_df[-1]):
             var_ah = ((preco_rt - fecho_atual_df) / fecho_atual_df) * 100
-            if var_ah >= 3.5:
+            if 3.5 <= var_ah <= 15.0:
                 sinal_valido = True
                 var_perc = var_ah
                 rvol = float(df['RVOL'].iloc[-1]) if pd.notna(df['RVOL'].iloc[-1]) else 2.0
@@ -470,18 +471,20 @@ def executar_motor():
     risco_base_usd = risco_fixo_usd if (risco_fixo_usd and risco_fixo_usd > 0) else (capital_total_conta * pct_risco)
     risco_por_trade_usd = round(risco_base_usd * regime_macro["fator_risco"], 2) if regime_macro["autorizado"] else 0.0
 
-    # Proteção anti-correlação setorial
+    # Mapeamento de setores e posições realmente ativas (ignora posições FECHADA)
     mapa_setores_watchlist = {}
     for item in ativos:
-        t_item = str(item.get("ticker", "")).strip().upper()
+        t_item = str(item.get("ticker", "")).strip().upper().replace(".", "-")
         s_item = str(item.get("setor") or item.get("setorAtivo") or item.get("sector") or item.get("Setor") or "").strip()
         if t_item and s_item and s_item not in ["Desconhecido", "N/A", "NONE"]:
             mapa_setores_watchlist[t_item] = s_item
 
+    tickers_ativos_set = set()
     setores_ocupados = set()
     for chave_pos, info in posicoes_ativas_dict.items():
         if isinstance(info, dict) and str(info.get("status", "")).strip().upper().startswith("ATIVA"):
-            t_pos = "AI" if chave_pos.lower() in ["c3.ai", "c3"] else chave_pos.strip().upper()
+            t_pos = "AI" if chave_pos.lower() in ["c3.ai", "c3"] else chave_pos.strip().upper().replace(".", "-")
+            tickers_ativos_set.add(t_pos)
             setor_pos = str(info.get("setor") or mapa_setores_watchlist.get(t_pos, "")).strip()
             if setor_pos and setor_pos not in ["Desconhecido", "N/A", "NONE"]:
                 setores_ocupados.add(setor_pos.lower())
@@ -496,7 +499,7 @@ def executar_motor():
             if not ticker or ticker == "#N/A": continue
             
             total_analisados += 1
-            res = analisar_earnings_drift(ativo_info, risco_por_trade_usd, posicoes_ativas_dict, setores_ocupados, regime_macro)
+            res = analisar_earnings_drift(ativo_info, risco_por_trade_usd, tickers_ativos_set, setores_ocupados, regime_macro)
             
             if res:
                 print(f"[SUCESSO] {ticker} ativado no motor PEAD!")
