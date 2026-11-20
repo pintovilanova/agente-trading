@@ -298,7 +298,7 @@ DADOS RECOLHIDOS HOJE NOS FICHEIROS:
 print("\nA enviar dados consolidados para o Gemini Auditar...")
 
 relatorio_final = None
-modelos_para_testar = ['gemini-2.5-flash', 'gemini-2.5-pro', 'gemini-2.0-flash']
+modelos_para_testar = ['gemini-3.8-flash','gemini-3.8-flash', 'gemini-3.1-pro-preview','gemini-2.5-flash', 'gemini-2.5-pro', 'gemini-2.0-flash']
 
 for mod in modelos_para_testar:
     if relatorio_final:
