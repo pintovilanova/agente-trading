@@ -2,10 +2,14 @@
 # SISTEMA DE TRADING INSTITUCIONAL - MOTOR DE REVERSÃO À MÉDIA (PÂNICO)
 # ===================================================================
 # Descrição Geral:
-# Este script opera como um "Predador de Pânico" (Mean Reversion). O seu 
-# objetivo não é caçar tendências, mas sim identificar quedas massivas e 
-# anomalias estatísticas em ativos da Watchlist, acionando entradas cirúrgicas 
-# para ressaltos rápidos ("Dead Cat Bounce" / Estratégia Hit & Run).
+# "Predador de Pânico" (Mean Reversion / Hit & Run).
+# Identifica quedas extremas (Dist MM20 <= -8%, RSI < 30) com absorção
+# institucional (RVOL >= 1.5 ou sombra inferior > 1.5x corpo) em ativos
+# estruturalmente saudáveis (Close >= SMA200 * 0.98).
+# Adapta-se ao regime do SPY:
+#   - Expansão (SPY > EMA20): RS >= 55 | Lote 100%
+#   - Corretivo (SMA200 < SPY <= EMA20): RS >= 70 | Lote 50%
+#   - Baixista (SPY < SMA200, crash <= -2.5% ou VIX > 32): Bloqueia entradas
 # ===================================================================
 
 import pandas as pd
@@ -20,13 +24,21 @@ import requests
 import json
 import smtplib
 import time
+import random
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 import warnings
 warnings.filterwarnings("ignore")
 
-# Importação da função modular de notificação do Telegram
 from F01_notificador_telegram import enviar_alerta
+
+# ===================================================================
+# BYPASS SESSÃO YAHOO FINANCE (PARA GITHUB ACTIONS)
+# ===================================================================
+session = requests.Session()
+session.headers.update({
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+})
 
 # ===================================================================
 # 0. TRAVA DE FIM DE SEMANA
@@ -34,7 +46,7 @@ from F01_notificador_telegram import enviar_alerta
 dia_da_semana = datetime.now(ZoneInfo("Europe/Lisbon")).weekday()
 if dia_da_semana >= 5:
     print("[INFO] Fim de semana detetado. O mercado está fechado. O Agente de Reversão vai descansar.")
-    #sys.exit(0)
+    # sys.exit(0)
 
 # ===================================================================
 # 1. CONFIGURAÇÕES E CREDENCIAIS (GitHub Secrets)
@@ -57,35 +69,139 @@ def limpar_float(val):
         return None
 
 # ===================================================================
-# 2. FUNÇÕES DE REDE
+# 2. FUNÇÕES DE REDE, REGIME MACRO & PREÇO TEMPO REAL
 # ===================================================================
-def buscar_watchlist():
-    print("A carregar a Watchlist e Configurações a partir do Google Sheets...")
+def verificar_regime_mercado_reversao():
+    """
+    Avalia o regime do SPY para Reversão à Média:
+    - Expansão (SPY > EMA20): RS >= 55 | Fator Lote 1.0 (0.5 se VIX > 25)
+    - Corretivo (SMA200 < SPY <= EMA20): RS >= 70 | Fator Lote 0.5 (0.35 se VIX > 25)
+    - Baixista / Crash / Pânico Sistémico: Bloqueia novas entradas
+    """
+    regime_default = {
+        "autorizado": True,
+        "modo": "EXPANSAO",
+        "rs_min": 55.0,
+        "fator_risco": 1.0,
+        "msg": "Dados SPY insuficientes (autorizado por defeito em modo Expansão)."
+    }
+    try:
+        df_spy = yf.download("SPY", period="1y", interval="1d", progress=False, session=session)
+        if df_spy.empty or len(df_spy) < 200:
+            return regime_default
+        if isinstance(df_spy.columns, pd.MultiIndex):
+            df_spy.columns = df_spy.columns.droplevel(1)
+
+        close_hoje = float(df_spy['Close'].iloc[-1])
+        close_ontem = float(df_spy['Close'].iloc[-2])
+        sma200 = float(df_spy['Close'].rolling(200).mean().iloc[-1])
+        ema20 = float(df_spy['Close'].ewm(span=20, adjust=False).mean().iloc[-1])
+        var_dia = ((close_hoje - close_ontem) / close_ontem) * 100
+
+        vix_atual = None
+        try:
+            df_vix = yf.download("^VIX", period="5d", interval="1d", progress=False, session=session)
+            if not df_vix.empty:
+                if isinstance(df_vix.columns, pd.MultiIndex):
+                    df_vix.columns = df_vix.columns.droplevel(1)
+                vix_atual = float(df_vix['Close'].iloc[-1])
+        except Exception:
+            pass
+
+        tag_vix = f" | VIX: {vix_atual:.2f}" if vix_atual is not None else ""
+
+        if close_hoje < sma200:
+            return {
+                "autorizado": False,
+                "modo": "BAIXISTA",
+                "rs_min": 80.0,
+                "fator_risco": 0.0,
+                "msg": f"SPY (${close_hoje:.2f}) abaixo da SMA200 (${sma200:.2f}). Mercado em tendência de baixa{tag_vix}."
+            }
+        if var_dia <= -2.5:
+            return {
+                "autorizado": False,
+                "modo": "CRASH",
+                "rs_min": 80.0,
+                "fator_risco": 0.0,
+                "msg": f"SPY em queda extrema hoje ({var_dia:.2f}% <= -2.50%){tag_vix}. Evitar apanhar facas a cair."
+            }
+        if vix_atual is not None and vix_atual > 32.0:
+            return {
+                "autorizado": False,
+                "modo": "PANICO_SISTEMICO",
+                "rs_min": 80.0,
+                "fator_risco": 0.0,
+                "msg": f"VIX em pânico sistémico extremo ({vix_atual:.2f} > 32.00)."
+            }
+
+        if close_hoje < ema20:
+            fator = 0.35 if (vix_atual is not None and vix_atual > 25.0) else 0.50
+            return {
+                "autorizado": True,
+                "modo": "CORRETIVO",
+                "rs_min": 70.0,
+                "fator_risco": fator,
+                "msg": (
+                    f"SPY em correção (${close_hoje:.2f} < EMA20 ${ema20:.2f} | SMA200 ${sma200:.2f} | "
+                    f"Var: {var_dia:+.2f}%{tag_vix}) — Reversão Seletiva: RS >= 70 e Lote {int(fator*100)}%."
+                )
+            }
+
+        fator = 0.50 if (vix_atual is not None and vix_atual > 25.0) else 1.0
+        return {
+            "autorizado": True,
+            "modo": "EXPANSAO",
+            "rs_min": 55.0,
+            "fator_risco": fator,
+            "msg": (
+                f"SPY em Expansão (${close_hoje:.2f} > EMA20 ${ema20:.2f} > SMA200 ${sma200:.2f} | "
+                f"Var: {var_dia:+.2f}%{tag_vix}) — RS >= 55 | Lote {int(fator*100)}%."
+            )
+        }
+    except Exception as e:
+        regime_default["msg"] = f"Aviso SPY: {e}"
+        return regime_default
+
+def obter_preco_tempo_real(ticker_str, fallback_close):
+    try:
+        t = yf.Ticker(ticker_str, session=session)
+        fast = t.fast_info
+        for attr in ('pre_market_price', 'post_market_price', 'last_price'):
+            val = getattr(fast, attr, None)
+            if val is not None and not np.isnan(val) and float(val) > 0:
+                return round(float(val), 2)
+    except Exception:
+        pass
+    return round(float(fallback_close), 2)
+
+def buscar_dados_completos():
+    print("A carregar a Watchlist, Posições Ativas e Configurações a partir do Google Sheets...")
     if not WEBHOOK_URL: 
         print("[ERRO] WEBHOOK_URL não configurado.")
-        return [], {}
+        return [], {}, {}
     try:
-        resp = requests.get(WEBHOOK_URL, timeout=15)
+        url_alvo = WEBHOOK_URL if "?" in WEBHOOK_URL else f"{WEBHOOK_URL}?aba=Analise Compra"
+        resp = requests.get(url_alvo, timeout=20)
         if resp.status_code == 200:
             dados = resp.json()
             if isinstance(dados, dict):
                 ativos = dados.get("ativos", [])
+                posicoes = dados.get("posicoesAtivas", {}) or dados.get("posicoes", {})
                 configs = dados.get("configs", {})
             elif isinstance(dados, list):
-                ativos = dados
-                configs = {}
+                ativos, posicoes, configs = dados, {}, {}
             else:
-                ativos = []
-                configs = {}
+                ativos, posicoes, configs = [], {}, {}
                 
             print(f"[SUCESSO] {len(ativos)} ativos carregados para monitorização de pânico.")
-            return ativos, configs
+            return ativos, posicoes, configs
         else:
             print(f"[ERRO] Falha ao descarregar dados: {resp.status_code}")
-            return [], {}
+            return [], {}, {}
     except Exception as e:
         print(f"[ERRO CRÍTICO] Falha de comunicação com Sheets: {e}")
-        return [], {}
+        return [], {}, {}
 
 def enviar_email(conteudo):
     print("\nA enviar email de Reversão para o Agente IA...")
@@ -96,8 +212,7 @@ def enviar_email(conteudo):
     msg = MIMEMultipart()
     msg['From'] = EMAIL_USER
     msg['To'] = EMAIL_USER
-    msg['Subject'] = "🚨 tradingRelatorioIA US - PÂNICO E REVERSÃO ⚡"
-    
+    msg['Subject'] = f"🚨 tradingRelatorioIA US - PÂNICO E REVERSÃO ({datetime.now(ZoneInfo('Europe/Lisbon')).strftime('%d/%m/%Y')}) ⚡"
     msg.attach(MIMEText(conteudo, 'plain', 'utf-8'))
     
     max_tentativas = 3
@@ -108,41 +223,41 @@ def enviar_email(conteudo):
             server.login(EMAIL_USER, EMAIL_PASS)
             server.sendmail(EMAIL_USER, EMAIL_USER, msg.as_string())
             server.quit()
-            
-            print(f"[SUCESSO] Email enviado na tentativa {tentativa + 1}! O Agente IA tem novos alvos para triagem.")
+            print(f"[SUCESSO] Email enviado na tentativa {tentativa + 1}!")
             break
-            
         except Exception as e:
             print(f"[ERRO] Falha ao enviar email (tentativa {tentativa + 1} de {max_tentativas}): {e}")
             if tentativa < max_tentativas - 1:
-                print("A aguardar 5 segundos antes de tentar novamente...")
                 time.sleep(5)
             else:
-                print("[ERRO CRÍTICO] Falha definitiva na ligação ao servidor de email. Gravado apenas no comboio local.")
+                print("[ERRO CRÍTICO] Falha definitiva no envio de email.")
 
 # ===================================================================
-# 3. MOTOR MATEMÁTICO: REVERSÃO À MÉDIA (COM TARGET VOLATILITY)
+# 3. MOTOR MATEMÁTICO: REVERSÃO À MÉDIA (RISCO REAL + REGIME SPY)
 # ===================================================================
-def analisar_reversao_media(ativo_info, vol_alvo_diaria_usd):
+def analisar_reversao_media(ativo_info, risco_por_trade_usd, posicoes_ativas_dict, setores_ocupados, regime):
     ticker = str(ativo_info.get("ticker", "")).strip().upper()
     nome_empresa = ativo_info.get("nome", "N/A")
-    setor = str(ativo_info.get("setor", "Desconhecido")).strip()
+    setor = str(ativo_info.get("setor") or ativo_info.get("setorAtivo") or ativo_info.get("sector") or "Desconhecido").strip()
     rs_score = ativo_info.get("rs_score", "N/A")
 
     if not ticker or ticker == "#N/A" or ticker == "NONE":
         return None
+    if ticker in posicoes_ativas_dict:
+        return None
+    if setor not in ["Desconhecido", "N/A", "", "NONE"] and setor.lower() in setores_ocupados:
+        return None
 
     if ticker == "BRK-A":
-        print("[AJUSTE] Ticker BRK-A convertido automaticamente para BRK-B.")
         ticker = "BRK-B"
 
     val_rs_num = limpar_float(rs_score)
-    if val_rs_num is not None and val_rs_num < 50:
-        print(f"[FILTRADO] {ticker} rejeitado por RS Score fraco ({val_rs_num} < 50 - Laggard).")
+    if val_rs_num is not None and val_rs_num < regime["rs_min"]:
         return None
 
     try:
-        df = yf.download(ticker, period="1y", interval="1d", progress=False)
+        time.sleep(random.uniform(0.35, 0.8))
+        df = yf.download(ticker, period="1y", interval="1d", progress=False, session=session)
         if df.empty:
             return None
             
@@ -150,44 +265,47 @@ def analisar_reversao_media(ativo_info, vol_alvo_diaria_usd):
             df.columns = df.columns.droplevel(1)
 
         df = df.dropna(subset=['Close', 'High', 'Low', 'Volume'])
-        if len(df) < 25:
+        if len(df) < 200:
             return None
 
         ultimo_dia = df.iloc[-1]
-        preco = ultimo_dia['Close']
+        preco = float(ultimo_dia['Close'])
 
-        if pd.isna(preco) or preco < 3.00:
-            print(f"[FILTRADO] {ticker} rejeitado por preço baixo (Preço: {preco}).")
+        if pd.isna(preco) or preco < 10.00:
             return None
 
         alerta_earnings = "OK"
         try:
-            ticker_obj = yf.Ticker(ticker)
-            
+            ticker_obj = yf.Ticker(ticker, session=session)
             if setor in ["Desconhecido", "N/A", "", "NONE"]:
                 setor_yf = ticker_obj.info.get('sector')
                 if setor_yf:
                     setor = setor_yf
 
+            if setor not in ["Desconhecido", "N/A", "", "NONE"] and setor.lower() in setores_ocupados:
+                return None
+
             calendario = ticker_obj.calendar
-            if isinstance(calendario, dict) and 'Earnings Date' in calendario:
+            if isinstance(calendario, dict) and 'Earnings Date' in calendario and len(calendario['Earnings Date']) > 0:
                 proxima_data = calendario['Earnings Date'][0]
                 if hasattr(proxima_data, 'date'):
                     proxima_data = proxima_data.date()
                 
                 hoje = datetime.now(ZoneInfo("Europe/Lisbon")).date()
                 dias_restantes = (proxima_data - hoje).days
-                
                 if 0 <= dias_restantes <= 3:
                     alerta_earnings = f"PERIGO (em {dias_restantes} dias)"
         except Exception:
             pass
 
+        # Veto duro no Python para Earnings iminentes ou REITs
+        if alerta_earnings.startswith("PERIGO"):
+            return None
         if setor and any(termo in str(setor).lower() for termo in ["real estate", "reit", "mortgage"]):
-            print(f"[FILTRADO] {ticker} rejeitado por pertencer ao setor REIT/Imobiliário.")
             return None
 
         df['SMA_20'] = df['Close'].rolling(window=20).mean()
+        df['SMA_200'] = df['Close'].rolling(window=200).mean()
         
         delta = df['Close'].diff()
         gain = (delta.where(delta > 0, 0)).rolling(window=14).mean()
@@ -196,27 +314,31 @@ def analisar_reversao_media(ativo_info, vol_alvo_diaria_usd):
         df['RSI_14'] = 100 - (100 / (1 + rs))
         
         df['EMA_9'] = df['Close'].ewm(span=9, adjust=False).mean()
-        
         df['SMA_20_Vol'] = df['Volume'].rolling(window=20).mean()
         df['RVOL'] = df['Volume'] / df['SMA_20_Vol']
         df.ta.atr(length=14, append=True)
 
-        df = df.dropna(subset=['SMA_20', 'RSI_14', 'EMA_9', 'RVOL', 'ATRr_14'])
+        df = df.dropna(subset=['SMA_20', 'SMA_200', 'RSI_14', 'EMA_9', 'RVOL', 'ATRr_14'])
         if df.empty:
             return None
 
         ultimo_dia = df.iloc[-1]
 
-        sma20 = ultimo_dia.get('SMA_20', np.nan)
-        ema9 = ultimo_dia.get('EMA_9', preco)
-        rsi = ultimo_dia.get('RSI_14', np.nan)
-        rvol = ultimo_dia.get('RVOL', 1.0)
-        atr = ultimo_dia.get('ATRr_14', np.nan)
+        sma20 = float(ultimo_dia['SMA_20'])
+        sma200 = float(ultimo_dia['SMA_200'])
+        ema9 = float(ultimo_dia['EMA_9'])
+        rsi = float(ultimo_dia['RSI_14'])
+        rvol = float(ultimo_dia['RVOL'])
+        atr = float(ultimo_dia['ATRr_14'])
         
-        dist_mm20 = ((preco - sma20) / sma20) * 100 if pd.notna(sma20) and sma20 > 0 else 0.0
+        # Exige que a ação não esteja em colapso estrutural abaixo da SMA 200
+        if preco < (sma200 * 0.98):
+            return None
+
+        dist_mm20 = ((preco - sma20) / sma20) * 100 if sma20 > 0 else 0.0
         
-        abertura = ultimo_dia.get('Open', preco)
-        minimo = ultimo_dia.get('Low', preco)
+        abertura = float(ultimo_dia['Open'])
+        minimo = float(ultimo_dia['Low'])
         
         corpo = abs(abertura - preco)
         sombra_inferior = min(abertura, preco) - minimo
@@ -229,46 +351,50 @@ def analisar_reversao_media(ativo_info, vol_alvo_diaria_usd):
         qtd_acoes = "N/A"
         valor_investir = "N/A"
         
-        if pd.notna(dist_mm20) and dist_mm20 <= -8.0 and pd.notna(rsi) and rsi < 30 and (rvol >= 1.5 or absorcao):
-            estado = "PÂNICO EXTREMO - Oportunidade de Reversão"
-            entrada = round(preco, 2)
+        if dist_mm20 <= -8.0 and rsi < 30 and (rvol >= 1.5 or absorcao):
+            preco_rt = obter_preco_tempo_real(ticker, preco)
+            # Se o preço já recuperou acima da EMA 9 antes da entrada, o ressalto já aconteceu
+            if preco_rt >= ema9:
+                return None
+
+            estado = f"PÂNICO EXTREMO - Oportunidade de Reversão ({regime['modo']})"
+            entrada = round(min(preco, preco_rt), 2)
             alvo_tp = round(ema9, 2)
-            stop_loss = round(minimo * 0.99, 2)
+            
+            # Stop Loss técnico: abaixo da mínima da capitulação, mas limitado a 1.5x ATR
+            stop_minima = minimo * 0.992
+            stop_atr = entrada - (atr * 1.5) if atr > 0 else stop_minima
+            stop_loss = round(max(stop_minima, stop_atr), 2)
             
             risco = entrada - stop_loss
             recompensa = alvo_tp - entrada
             
-            if recompensa < risco or risco <= 0:
-                estado = "Rejeitado (Rácio de Risco Negativo)"
-                entrada = alvo_tp = stop_loss = "N/A"
-            else:
-                if pd.notna(atr) and atr > 0:
-                    qtd_calc = round(vol_alvo_diaria_usd / atr, 2)
-                else:
-                    qtd_calc = round(vol_alvo_diaria_usd / risco, 2) if risco > 0 else 0
+            if recompensa < (risco * 1.2) or risco <= 0:
+                return None
 
-                if qtd_calc <= 0:
-                    estado = "Rejeitado (Quantidade Nula)"
-                    entrada = alvo_tp = stop_loss = "N/A"
-                else:
-                    qtd_acoes = qtd_calc
-                    val_calc = entrada * qtd_acoes
-                    valor_investir = f"~{val_calc:.2f} USD"
+            # Dimensionamento pelo RISCO REAL (Entrada - Stop) para garantir perda máxima controlada
+            qtd_calc = round(risco_por_trade_usd / risco, 2)
+            if qtd_calc <= 0:
+                return None
+
+            qtd_acoes = qtd_calc
+            val_calc = entrada * qtd_acoes
+            valor_investir = f"~${val_calc:.2f} USD"
 
         def limpa(v):
             if pd.isna(v) or v == "N/A": return "N/A"
             try:
                 return round(float(v), 2)
-            except:
+            except Exception:
                 return "N/A"
 
         if val_rs_num is not None:
             if val_rs_num >= 80:
                 status_rs = "🔥 ELITE (RS >= 80 - Vento a Favor)"
-            elif val_rs_num >= 50:
-                status_rs = "⚖️ NEUTRO (RS 50-79 - Acompanha o Mercado)"
+            elif val_rs_num >= 70:
+                status_rs = "⚖️ FORTE (RS 70-79 - Suporte Institucional)"
             else:
-                status_rs = "⚠️ FRACO / LAGGARD (RS < 50 - Vento Contra)"
+                status_rs = "⚠️ MODERADO (RS 55-69 - Exige Absorção Clara)"
         else:
             status_rs = "❓ SEM DADO DE RS"
 
@@ -278,7 +404,7 @@ def analisar_reversao_media(ativo_info, vol_alvo_diaria_usd):
             f"Dist MM20: {limpa(dist_mm20)}%,EMA9: {limpa(ema9)},"
             f"RSI: {limpa(rsi)},RVOL: {limpa(rvol)},Absorção: {'Sim' if absorcao else 'Não'},"
             f"Estado: {estado},Ordem: BUY LIMIT,Entrada: {limpa(entrada)},"
-            f"Stop: {limpa(stop_loss)},Take-Profit: {limpa(alvo_tp)},"
+            f"Stop: {limpa(stop_loss)},Take-Profit (EMA9): {limpa(alvo_tp)},"
             f"Qtd: {qtd_acoes},ValorInvestir: {valor_investir},Earnings: {alerta_earnings},"
             f"Data: {datetime.now(ZoneInfo('Europe/Lisbon')).strftime('%d/%m/%Y %H:%M:%S')}"
         )
@@ -297,50 +423,67 @@ def analisar_reversao_media(ativo_info, vol_alvo_diaria_usd):
 # 4. EXECUÇÃO PRINCIPAL E GERAÇÃO DE PROMPT
 # ===================================================================
 def executar_motor():
-    ativos, configs = buscar_watchlist()
+    ativos, posicoes_ativas_dict, configs = buscar_dados_completos()
     if not ativos:
         print("[AVISO] Nenhum ativo carregado para análise. A terminar a execução sem erro.")
         sys.exit(0)
+
+    regime_macro = verificar_regime_mercado_reversao()
         
-    try:
-        capital_total_conta = float(configs.get("CAPITAL_TOTAL_CONTA", 10400.00))
-        alvo_volatilidade_anual = float(configs.get("ALVO_VOLATILIDADE_ANUAL", 0.05))
-    except (ValueError, TypeError):
-        capital_total_conta = 10400.00
-        alvo_volatilidade_anual = 0.05
+    capital_total_conta = limpar_float(configs.get("CAPITAL_TOTAL_CONTA")) or 10400.00
+    alvo_volatilidade_anual = limpar_float(configs.get("ALVO_VOLATILIDADE_ANUAL")) or 0.05
+    risco_fixo_usd = limpar_float(configs.get("RISCO_MAXIMO_USD"))
 
     volatilidade_alvo_diaria_usd = (capital_total_conta * alvo_volatilidade_anual) / 16.0
+    risco_base_usd = risco_fixo_usd if (risco_fixo_usd and risco_fixo_usd > 0) else volatilidade_alvo_diaria_usd
+    risco_ajustado_usd = round(risco_base_usd * regime_macro["fator_risco"], 2) if regime_macro["autorizado"] else 0.0
 
-    print(f"[CONFIG] Capital Total da Conta: ${capital_total_conta:,.2f}")
-    print(f"[CONFIG] Alvo Volatilidade Anual: {alvo_volatilidade_anual*100:.1f}%")
-    print(f"[CONFIG] Orçamento Diário de Volatilidade: ${volatilidade_alvo_diaria_usd:.2f}\n")
+    # Proteção anti-correlação setorial
+    mapa_setores_watchlist = {}
+    for item in ativos:
+        t_item = str(item.get("ticker", "")).strip().upper()
+        s_item = str(item.get("setor") or item.get("setorAtivo") or item.get("sector") or "").strip()
+        if t_item and s_item and s_item not in ["Desconhecido", "N/A", "NONE"]:
+            mapa_setores_watchlist[t_item] = s_item
+
+    setores_ocupados = set()
+    for chave_pos, info in posicoes_ativas_dict.items():
+        if isinstance(info, dict) and str(info.get("status", "")).strip().upper().startswith("ATIVA"):
+            t_pos = "AI" if chave_pos.lower() in ["c3.ai", "c3"] else chave_pos.strip().upper()
+            setor_pos = str(info.get("setor") or mapa_setores_watchlist.get(t_pos, "")).strip()
+            if setor_pos and setor_pos not in ["Desconhecido", "N/A", "NONE"]:
+                setores_ocupados.add(setor_pos.lower())
+
+    print(f"[CONFIG] Capital Total: ${capital_total_conta:,.2f} | Risco Base: ${risco_base_usd:.2f} | Risco Ajustado ({regime_macro['modo']}): ${risco_ajustado_usd:.2f} USD")
+    print(f"[MACRO] {regime_macro['msg']}\n")
 
     ativos_acionados = []
     total_analisados = 0
     
-    for ativo_info in ativos:
-        ticker = ativo_info.get("ticker")
-        if not ticker or ticker == "#N/A": continue
-        
-        total_analisados += 1
-        res = analisar_reversao_media(ativo_info, volatilidade_alvo_diaria_usd)
-        
-        res_dict = res if isinstance(res, dict) else None
-        if res_dict:
-            print(f"[OK] {ticker} analisado. Estado: {res_dict['estado']}")
-            if "PÂNICO EXTREMO" in res_dict['estado']:
-                ativos_acionados.append(res_dict)
+    if regime_macro["autorizado"]:
+        for ativo_info in ativos:
+            ticker = ativo_info.get("ticker")
+            if not ticker or ticker == "#N/A": continue
+            
+            total_analisados += 1
+            res = analisar_reversao_media(ativo_info, risco_ajustado_usd, posicoes_ativas_dict, setores_ocupados, regime_macro)
+            
+            res_dict = res if isinstance(res, dict) else None
+            if res_dict:
+                print(f"[OK] {ticker} analisado. Estado: {res_dict['estado']}")
+                if "PÂNICO EXTREMO" in res_dict['estado']:
+                    ativos_acionados.append(res_dict)
                 
     prompt_ia = (
         "Atuas como o Analista Quantitativo Chefe de um fundo institucional. O teu mandato é auditar ações que sofreram quedas massivas e identificar fundos institucionais para ressaltos rápidos (Dead Cat Bounce).\n"
-        "Não estás à procura de tendências; estás a apanhar a correção de uma anomalia estatística baseada no orçamento de volatilidade da conta.\n\n"
+        "Não estás à procura de tendências; estás a apanhar a correção de uma anomalia estatística baseada no orçamento de risco da conta.\n\n"
         "REGRAS ESTRITAS (ANTI-ALUCINAÇÃO):\n"
         "- NUNCA inventes, deduzas ou alteres preços, tickers ou indicadores. Usa EXATAMENTE os números fornecidos nos dados.\n"
         "- O tom deve ser militar, frio e puramente matemático. Sem saudações.\n\n"
         "REGRAS DE TRIAGEM E EXECUÇÃO:\n"
         "1. VALIDAÇÃO DE FUNDO: Confirma a Capitulação. Um RVOL > 1.5 ou 'Absorção: Sim' indicam que o dinheiro institucional começou a comprar o pânico.\n"
-        "2. CONTEXTO INSTITUCIONAL (RS SCORE): Avalia o RS Score reportado. Se o ativo tiver RS Score de Elite (>= 80), o ressalto beneficia de suporte de fundo forte; se for laggard (< 50), exige cautela redobrada ou desclassificação.\n"
-        "3. VETO FUNDAMENTAL: O motor já filtra penny stocks (<$3), mREITs e RS < 50. Se um ativo detetar EARNINGS = PERIGO ou queda motivada por fraude/falência iminente, emite VETO OBRIGATÓRIO.\n"
+        "2. CONTEXTO INSTITUCIONAL (RS SCORE): Avalia o RS Score reportado. Se o ativo tiver RS Score de Elite (>= 80), o ressalto beneficia de suporte de fundo forte.\n"
+        "3. VETO FUNDAMENTAL: O motor já filtra ações <$10, mREITs, ativos abaixo da SMA200 e Earnings iminentes. Se a queda for motivada por fraude/falência ou revisão drástica de guidance, emite VETO OBRIGATÓRIO.\n"
         "4. TÁTICA DE SAÍDA (Hit & Run): O alvo de Take-Profit é fixo e cravado na EMA9. Não recomendes o uso de Trailing Stops. O objetivo é comprar barato e largar a ação mal ela toque na linha dos 9 dias.\n"
         "5. TÁTICA DE ENTRADA: Recomenda execução próxima do fecho (para confirmar a vela de absorção) ou o uso de Buy Limit na zona de pânico.\n\n"
         "ESTRUTURA VISUAL OBRIGATÓRIA:\n"
@@ -354,9 +497,15 @@ def executar_motor():
         "Termina o relatório com: 'EXECUÇÃO MECÂNICA. NÃO PERSEGUIR O PREÇO. O RISCO DITA A SOBREVIVÊNCIA.'"
     )
     
-    bloco_texto_ia = f"{prompt_ia}\n\n--------------------------------------------------\n"
+    bloco_texto_ia = (
+        f"🌐 Filtro Macro: {regime_macro['msg']}\n"
+        f"💰 Risco Configurado por Trade: ${risco_ajustado_usd:.2f} USD (Base: ${risco_base_usd:.2f} | Fator: {int(regime_macro['fator_risco']*100)}%)\n\n"
+        f"{prompt_ia}\n\n--------------------------------------------------\n"
+    )
     
-    if not ativos_acionados:
+    if not regime_macro["autorizado"]:
+        bloco_texto_ia += f"🛡️ [MODO DEFENSIVO] Novas entradas de Reversão à Média bloqueadas hoje ({regime_macro['msg']}).\n"
+    elif not ativos_acionados:
         bloco_texto_ia += "[SEM SINAIS DE PÂNICO] - Nenhuma ação da Watchlist cumpre os requisitos matemáticos de sobrevenda extrema hoje.\n"
     else:
         bloco_texto_ia += "DADOS DOS ATIVOS EM PÂNICO (COMBOIO):\n\n"
@@ -369,17 +518,18 @@ def executar_motor():
     enviar_email(bloco_texto_ia)
 
     # ===================================================================
-    # 5. NOTIFICAÇÃO TELEGRAM DEBUG (CONTROLADA PELA FLAG DE CONFIGS)
+    # 5. NOTIFICAÇÃO TELEGRAM (DEBUG OU SINAL DE PÂNICO DETETADO)
     # ===================================================================
     debug_telegram_ativado = str(configs.get("TELEGRAM_NOTIFICATIONS_DEBUG", "false")).strip().lower() in ["true", "1", "sim", "yes"]
 
-    if debug_telegram_ativado:
-        print("A enviar notificação de Debug para o Telegram via função modular...")
+    if debug_telegram_ativado or len(ativos_acionados) > 0:
+        print("A enviar notificação para o Telegram via função modular...")
         total_acionados = len(ativos_acionados)
         mensagem_debug = (
             f"03 🚨 *MOTOR DE REVERSÃO À MÉDIA (PÂNICO)*\n\n"
-            f"🔍 [DEBUG] Execução concluída com sucesso.\n"
+            f"🔍 Execução concluída ({regime_macro['modo']}).\n"
             f"📊 Ativos analisados: *{total_analisados}* | Acionados: *{total_acionados}*\n"
+            f"💰 Risco/Trade: *${risco_ajustado_usd:.2f} USD*\n"
             f"✉️ Relatório de pânico gerado e enviado por e-mail."
         )
         enviar_alerta(mensagem_debug)
