@@ -48,6 +48,11 @@ EMAIL_USER = os.environ.get("EMAIL_USER")
 EMAIL_PASS = os.environ.get("EMAIL_PASS")
 NOME_ABA_EUROPA = "Analise Compra EU"
 
+if EMAIL_USER:
+    EMAIL_USER = EMAIL_USER.strip()
+if EMAIL_PASS:
+    EMAIL_PASS = EMAIL_PASS.strip()
+
 SMTP_SERVER = "smtp.gmail.com"
 SMTP_PORT = 587
 
@@ -537,4 +542,93 @@ if ativos_data:
 # ===================================================================
 # 4. FORMATAÇÃO DO COMBOIO & PREPARAÇÃO PARA SHEETS
 # ===================================================================
-tipo_lote = f"{int(regime_macro['fator_risco']*100)}% ({regime_macro['modo']
+tipo_lote = f"{int(regime_macro['fator_risco']*100)}% ({regime_macro['modo']})"
+data_hoje = datetime.now(ZoneInfo("Europe/Lisbon")).strftime("%d/%m/%Y %H:%M")
+
+# Filtra apenas os sinais acionáveis e limita a 1 entrada por setor livre
+candidatos_acionaveis = [
+    d for d in dados_temporarios
+    if d["estado"] not in ["Observar", "Aguardar Recuo"] and d["qtd_bruta"] != "N/A"
+]
+candidatos_acionaveis = sorted(
+    candidatos_acionaveis,
+    key=lambda x: (limpar_float(x["rs_score"]) or 0.0, limpar_float(x["rvol"]) or 0.0),
+    reverse=True
+)
+
+sinais_selecionados = []
+setores_usados_hoje = set()
+for item in candidatos_acionaveis:
+    s_key = str(item["setor"]).strip().lower()
+    if s_key not in setores_usados_hoje:
+        sinais_selecionados.append(item)
+        if s_key not in ["europa", "desconhecido", "n/a", ""]:
+            setores_usados_hoje.add(s_key)
+
+# Monta o relatório do comboio Europa
+texto_comboio = (
+    f"🇪🇺 RELATÓRIO DE TRADING - MOTOR EUROPA ({data_hoje})\n"
+    f"==================================================================\n"
+    f"🌐 Regime Macro: {regime_macro['msg']}\n"
+    f"💰 Risco Configurado por Trade: ${risco_ajustado_usd:,.2f} USD (Base: ${risco_base_usd:,.2f} | Lote: {tipo_lote})\n"
+    f"==================================================================\n\n"
+)
+
+if veto_macro_ativo:
+    texto_comboio += f"🛡️ [MODO DEFENSIVO EUROPA] Novas compras bloqueadas hoje ({motivo_veto}).\n"
+elif sinais_selecionados:
+    texto_comboio += f"🎯 SINAIS DE ENTRADA ACIONÁVEIS EUROPA ({len(sinais_selecionados)}):\n\n"
+    for s in sinais_selecionados:
+        simbolo_moeda = "€" if s["moeda"] == "EUR" else ("£" if s["moeda"] == "GBP" else f"{s['moeda']} ")
+        texto_comboio += (
+            f"🔹 [{s['ticker']}] - {s['nome']} ({s['setor']}) | Moeda: {s['moeda']}\n"
+            f"   - 📊 Setup: {s['estado']} | RS Score: {s['rs_score']} ({s['status_rs']})\n"
+            f"   - 📈 Indicadores: Preço: {simbolo_moeda}{s['preco']} | RVOL: {s['rvol']}x | ADX: {s['adx']} | RSI: {s['rsi']}\n"
+            f"   - 🔢 Plano de Execução: Entrada: {simbolo_moeda}{s['entrada']} | Stop Loss: {simbolo_moeda}{s['stop']} | Alvo ({racio_tp_base}R): {simbolo_moeda}{s['tp']} | BE (+0.8R): {simbolo_moeda}{s['be']}\n"
+            f"   - 💰 Dimensionamento: Qtd: {s['qtd_bruta']} ações | Trailing Stop: {simbolo_moeda}{s['trailing']}\n"
+            f"--------------------------------------------------\n"
+        )
+else:
+    texto_comboio += "✅ Nenhum ativo europeu atingiu os critérios institucionais de entrada hoje.\n"
+
+# Gravar ficheiro temporário para o Orquestrador
+with open("comboio_europa_temp.txt", "w", encoding="utf-8") as f:
+    f.write(texto_comboio)
+
+print("\n" + texto_comboio)
+
+# Atualizar a aba Analise Compra EU no Google Sheets via Webhook POST
+if WEBHOOK_URL and dados_temporarios:
+    try:
+        payload_sheets = {
+            "acao": "atualizarAnalise",
+            "aba": NOME_ABA_EUROPA,
+            "dados": dados_temporarios
+        }
+        resp_post = requests.post(WEBHOOK_URL, json=payload_sheets, timeout=25)
+        print(f"[SHEETS] Atualização enviada para '{NOME_ABA_EUROPA}' (HTTP {resp_post.status_code}).")
+    except Exception as e:
+        print(f"[ERRO] Falha ao atualizar Google Sheets ({NOME_ABA_EUROPA}): {e}")
+
+# Enviar e-mail apenas se houver sinais acionáveis ou veto macro relevante
+if sinais_selecionados:
+    enviar_email_para_agente_ia(
+        texto_comboio,
+        assunto=f"🇪🇺🎯 tradingRelatorioIA Europa - {len(sinais_selecionados)} Sinal(is) ({datetime.now(ZoneInfo('Europe/Lisbon')).strftime('%d/%m/%Y')})"
+    )
+
+# ===================================================================
+# 5. NOTIFICAÇÃO TELEGRAM (DEBUG OU NOVOS SINAIS EUROPA)
+# ===================================================================
+debug_telegram_ativado = str(configs.get("TELEGRAM_NOTIFICATIONS_DEBUG", "false")).strip().lower() in ["true", "1", "sim", "yes"]
+
+if debug_telegram_ativado or len(sinais_selecionados) > 0:
+    print("A enviar notificação Europa para o Telegram via função modular...")
+    lista_tickers_tg = ", ".join([s["ticker"] for s in sinais_selecionados]) if sinais_selecionados else "Nenhum"
+    mensagem_tg = (
+        f"🇪🇺 *MOTOR EUROPA (BREAKOUTS)*\n\n"
+        f"🔍 Execução concluída ({regime_macro['modo']}).\n"
+        f"📊 Analisados: *{len(dados_temporarios)}* | Sinais Acionáveis: *{len(sinais_selecionados)}* ({lista_tickers_tg})\n"
+        f"💰 Risco/Trade: *${risco_ajustado_usd:.2f} USD*"
+    )
+    enviar_alerta(mensagem_tg)
