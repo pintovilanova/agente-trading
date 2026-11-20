@@ -3,11 +3,11 @@
 # ===================================================================================
 # Descrição Geral:
 # O modelo "Sniper". Exige confluência absoluta:
-# 1. Filtro de Mercado (SPY > EMA 20 e SMA 200 diária)
-# 2. Força Relativa de Elite (RS Score >= 75)
-# 3. Pullback à EMA 20 em Tendência Primária (EMA 20 > SMA 50 > SMA 200)
+# 1. Filtro de Mercado (SPY > EMA 20 e SMA 200 diária + ^VIX controlado)
+# 2. Força Relativa de Elite (RS Score >= 75 | >= 80 se VIX > 23)
+# 3. Pullback à Zona da EMA 20 em Tendência Primária (EMA 20 > SMA 50 > SMA 200)
 # 4. Squeeze de Volatilidade (BB dentro de KC)
-# 5. Entrada Institucional Silenciosa (RVOL >= 1.5)
+# 5. Entrada Institucional Silenciosa (RVOL >= 1.5x vs média dos 20 dias anteriores)
 # Assimetria Sniper (2.5R) | Break-Even +1.0R | Time-Stop Adaptativo 96h (4 dias úteis).
 # ===================================================================================
 
@@ -54,6 +54,11 @@ WEBHOOK_URL = os.environ.get('WEBHOOK_URL')
 EMAIL_USER = os.environ.get("EMAIL_USER")
 EMAIL_PASS = os.environ.get("EMAIL_PASS")
 
+if EMAIL_USER:
+    EMAIL_USER = EMAIL_USER.strip()
+if EMAIL_PASS:
+    EMAIL_PASS = EMAIL_PASS.strip()
+
 SMTP_SERVER = "smtp.gmail.com"
 SMTP_PORT = 587
 
@@ -91,15 +96,47 @@ def calcular_dias_uteis(data_abertura_str):
             dias_uteis += 1
     return dias_uteis
 
+def obter_preco_tempo_real(ticker_str, fallback_close):
+    try:
+        t = yf.Ticker(ticker_str, session=session)
+        fast = t.fast_info
+        for attr in ('pre_market_price', 'post_market_price', 'last_price'):
+            val = getattr(fast, attr, None)
+            if val is not None and not np.isnan(val) and float(val) > 0:
+                return round(float(val), 2)
+    except Exception:
+        pass
+    return round(float(fallback_close), 2)
+
+def obter_setor_yf(ticker):
+    try:
+        t = yf.Ticker(ticker, session=session)
+        setor = t.info.get('sector')
+        return setor if setor else "Desconhecido"
+    except Exception:
+        return "Desconhecido"
+
 # ===================================================================
-# 2. FILTRO GERAL DE MERCADO (S&P 500)
+# 2. FILTRO GERAL DE MERCADO (S&P 500 + VIX)
 # ===================================================================
 def verificar_regime_mercado():
-    """Exige SPY acima da EMA 20 e da SMA 200 para autorizar entradas Sniper."""
+    """
+    Exige SPY > EMA 20 > SMA 200 e VIX controlado para autorizar entradas Sniper:
+    - Expansão (VIX <= 23): RS >= 75 | Lote 100%
+    - Expansão Cautela (23 < VIX <= 28): RS >= 80 | Lote 50%
+    - Bloqueado (SPY < EMA20, SPY < SMA200, queda <= -1.50% ou VIX > 28): Sem novas entradas
+    """
+    regime_default = {
+        "autorizado": True,
+        "modo": "EXPANSAO",
+        "rs_min": 75.0,
+        "fator_risco": 1.0,
+        "msg": "Dados SPY insuficientes (autorizado por defeito em modo Expansão)."
+    }
     try:
         df_spy = yf.download("SPY", period="1y", interval="1d", progress=False, session=session)
         if df_spy.empty or len(df_spy) < 200:
-            return True, "Dados SPY insuficientes (autorizado por defeito)."
+            return regime_default
         if isinstance(df_spy.columns, pd.MultiIndex):
             df_spy.columns = df_spy.columns.droplevel(1)
         
@@ -109,14 +146,77 @@ def verificar_regime_mercado():
         sma200 = float(df_spy['Close'].rolling(200).mean().iloc[-1])
         var_dia = ((close_hoje - close_ontem) / close_ontem) * 100
 
+        vix_atual = None
+        try:
+            df_vix = yf.download("^VIX", period="5d", interval="1d", progress=False, session=session)
+            if not df_vix.empty:
+                if isinstance(df_vix.columns, pd.MultiIndex):
+                    df_vix.columns = df_vix.columns.droplevel(1)
+                vix_atual = float(df_vix['Close'].iloc[-1])
+        except Exception:
+            pass
+
+        tag_vix = f" | VIX: {vix_atual:.2f}" if vix_atual is not None else ""
+
         if close_hoje < sma200:
-            return False, f"SPY (${close_hoje:.2f}) abaixo da SMA200 (${sma200:.2f}). Regime baixista."
+            return {
+                "autorizado": False,
+                "modo": "BAIXISTA",
+                "rs_min": 80.0,
+                "fator_risco": 0.0,
+                "msg": f"SPY (${close_hoje:.2f}) abaixo da SMA200 (${sma200:.2f}). Regime baixista{tag_vix}."
+            }
         if close_hoje < ema20:
-            return False, f"SPY (${close_hoje:.2f}) abaixo da EMA20 (${ema20:.2f}). Sem momentum de curto prazo."
-        return True, f"SPY em tendência (${close_hoje:.2f} > EMA20 ${ema20:.2f} > SMA200 ${sma200:.2f} | Var: {var_dia:+.2f}%)."
+            return {
+                "autorizado": False,
+                "modo": "PULLBACK_MACRO",
+                "rs_min": 80.0,
+                "fator_risco": 0.0,
+                "msg": f"SPY (${close_hoje:.2f}) abaixo da EMA20 (${ema20:.2f}). Sem momentum de curto prazo{tag_vix}."
+            }
+        if var_dia <= -1.50:
+            return {
+                "autorizado": False,
+                "modo": "QUEDA_DIARIA",
+                "rs_min": 80.0,
+                "fator_risco": 0.0,
+                "msg": f"SPY em queda forte hoje ({var_dia:.2f}% <= -1.50%){tag_vix}. Entradas Sniper bloqueadas."
+            }
+        if vix_atual is not None and vix_atual > 28.0:
+            return {
+                "autorizado": False,
+                "modo": "PANICO_VIX",
+                "rs_min": 80.0,
+                "fator_risco": 0.0,
+                "msg": f"VIX elevado ({vix_atual:.2f} > 28.00). Entradas Sniper bloqueadas."
+            }
+
+        if vix_atual is not None and vix_atual > 23.0:
+            return {
+                "autorizado": True,
+                "modo": "EXPANSAO_CAUTELA",
+                "rs_min": 80.0,
+                "fator_risco": 0.50,
+                "msg": (
+                    f"SPY em tendência (${close_hoje:.2f} > EMA20 ${ema20:.2f} > SMA200 ${sma200:.2f} | "
+                    f"Var: {var_dia:+.2f}%{tag_vix}) — Cautela VIX: RS >= 80 e Lote 50%."
+                )
+            }
+
+        return {
+            "autorizado": True,
+            "modo": "EXPANSAO",
+            "rs_min": 75.0,
+            "fator_risco": 1.0,
+            "msg": (
+                f"SPY em tendência (${close_hoje:.2f} > EMA20 ${ema20:.2f} > SMA200 ${sma200:.2f} | "
+                f"Var: {var_dia:+.2f}%{tag_vix}) — RS >= 75 | Lote 100%."
+            )
+        }
     except Exception as e:
         print(f"[AVISO] Falha ao verificar filtro SPY: {e}")
-        return True, f"Aviso SPY: {e}"
+        regime_default["msg"] = f"Aviso SPY: {e}"
+        return regime_default
 
 # ===================================================================
 # 3. FUNÇÕES DE REDE E CARGA DE DADOS
@@ -126,7 +226,7 @@ def buscar_dados_completos():
     if not WEBHOOK_URL: return [], {}, {}
     try:
         url_alvo = WEBHOOK_URL if "?" in WEBHOOK_URL else f"{WEBHOOK_URL}?aba=Analise Compra"
-        resp = requests.get(url_alvo, timeout=15)
+        resp = requests.get(url_alvo, timeout=20)
         if resp.status_code == 200:
             dados = resp.json()
             if isinstance(dados, dict):
@@ -158,6 +258,7 @@ def enviar_email(conteudo):
     return False
 
 ativos_sheets, posicoes_ativas_dict, configs_dict = buscar_dados_completos()
+regime_macro = verificar_regime_mercado()
 
 capital = limpar_float(configs_dict.get("CAPITAL_TOTAL_CONTA")) or 10400.00
 pct_risco = (
@@ -167,14 +268,37 @@ pct_risco = (
 )
 risco_fixo_usd = limpar_float(configs_dict.get("RISCO_MAXIMO_USD"))
 
-vol_diaria_usd = risco_fixo_usd if (risco_fixo_usd and risco_fixo_usd > 0) else (capital * pct_risco)
-print(f"[CONFIG] Capital Total: ${capital:,.2f} | Orçamento Risco/Trade: ${vol_diaria_usd:,.2f} USD\n")
+risco_base_usd = risco_fixo_usd if (risco_fixo_usd and risco_fixo_usd > 0) else (capital * pct_risco)
+vol_diaria_usd = round(risco_base_usd * regime_macro["fator_risco"], 2) if regime_macro["autorizado"] else 0.0
+
+print(f"[CONFIG] Capital Total: ${capital:,.2f} | Risco Base: ${risco_base_usd:,.2f} | Risco Ajustado ({regime_macro['modo']}): ${vol_diaria_usd:,.2f} USD")
+print(f"[MACRO] {regime_macro['msg']}\n")
+
+# Mapeamento de setores e posições realmente ativas (ignora posições FECHADA)
+mapa_setores_watchlist = {}
+for item in ativos_sheets:
+    t_item = str(item.get("ticker", "")).strip().upper().replace(".", "-")
+    s_item = str(item.get("setor") or item.get("setorAtivo") or item.get("sector") or "").strip()
+    if t_item and s_item and s_item.lower() not in ["desconhecido", "n/a", "none", "#n/a"]:
+        mapa_setores_watchlist[t_item] = s_item
+
+tickers_ativos_set = set()
+setores_ocupados = set()
+for chave_pos, info in posicoes_ativas_dict.items():
+    if isinstance(info, dict) and str(info.get("status", "")).strip().upper().startswith("ATIVA"):
+        t_pos = "AI" if chave_pos.lower() in ["c3.ai", "c3"] else chave_pos.strip().upper().replace(".", "-")
+        tickers_ativos_set.add(t_pos)
+        setor_pos = str(info.get("setor") or mapa_setores_watchlist.get(t_pos, "")).strip()
+        if setor_pos and setor_pos.lower() not in ["desconhecido", "n/a", "none", "#n/a"]:
+            setores_ocupados.add(setor_pos.lower())
 
 # ===================================================================
 # 3B. AUDITAR POSIÇÕES EM CARTEIRA (ALVO 2.5R + BE +1.0R + TIME-STOP ADAPTATIVO 96H)
 # ===================================================================
 bloco_posicoes_ativas = ""
 alerta_timestop_ativo = False
+alerta_gestao_urgente = False
+qtd_posicoes_auditadas = 0
 
 def obter_dados_posicao_m21(ticker, dt_abertura=None):
     preco_atual = 0.0
@@ -217,17 +341,7 @@ def obter_dados_posicao_m21(ticker, dt_abertura=None):
         print(f"[AVISO] Falha ao extrair intraday para {ticker}: {e}")
 
     if preco_atual <= 0:
-        try:
-            t = yf.Ticker(ticker, session=session)
-            fast = t.fast_info
-            p_pre = getattr(fast, 'pre_market_price', None)
-            p_last = getattr(fast, 'last_price', None)
-            if p_pre and not np.isnan(p_pre) and p_pre > 0:
-                preco_atual = round(float(p_pre), 2)
-            elif p_last and not np.isnan(p_last) and p_last > 0:
-                preco_atual = round(float(p_last), 2)
-        except Exception:
-            pass
+        preco_atual = obter_preco_tempo_real(ticker, 0.0)
 
     maxima_efetiva = max(maxima_desde_abertura, preco_atual)
     return preco_atual, atr_atual, maxima_efetiva, minima_vela_anterior
@@ -237,8 +351,10 @@ for chave_pos, info in posicoes_ativas_dict.items():
     status = str(info.get("status", "")).strip().upper()
     
     if status == "ATIVA_M21":
+        qtd_posicoes_auditadas += 1
         try:
-            ticker = "AI" if chave_pos.lower() in ["c3.ai", "c3"] else chave_pos.strip().upper()
+            ticker = "AI" if chave_pos.lower() in ["c3.ai", "c3"] else chave_pos.strip().upper().replace(".", "-")
+            if ticker == "BRK-A": ticker = "BRK-B"
             
             data_abertura = info.get("dataAbertura", "")
             dt_abertura = parse_data_abertura(data_abertura)
@@ -280,7 +396,7 @@ for chave_pos, info in posicoes_ativas_dict.items():
             qtd = info.get("quantidade", "N/A")
             
             # Proteção Break-Even aos +1.0R
-            be_calculado = round(entrada * 1.0005, 2)
+            be_calculado = round(entrada * 1.001, 2)
             patamar_lucro_1r = entrada + (risco_inicial * 1.0)
             em_lucro_protegido = (
                 (stop >= entrada) or 
@@ -296,16 +412,21 @@ for chave_pos, info in posicoes_ativas_dict.items():
             
             if alvo_tp > 0 and preco_atual >= alvo_tp:
                 acao = f"🎯 ALVO ALCANÇADO ({label_alvo})! Recomendado FECHAR POSIÇÃO com Lucro (WIN)."
+                alerta_gestao_urgente = True
             elif stop > 0 and preco_atual <= stop:
                 acao = f"🚨 STOP LOSS ATINGIDO (${stop})! Recomendado LIQUIDAR POSIÇÃO (LOSS)."
+                alerta_gestao_urgente = True
             elif dias_uteis is not None and dias_uteis >= 4:
                 if em_lucro_protegido and preco_atual >= patamar_lucro_1r:
                     acao = (
                         f"🚀 EXTENSÃO DE VENCEDOR ({dias_uteis}d úteis > 96h, mas em lucro >= +1.0R)! "
                         f"MANTER rumo a {label_alvo} com Trailing Stop elevado para ${trailing_extensao}."
                     )
+                    if trailing_extensao > stop:
+                        alerta_gestao_urgente = True
                 else:
                     alerta_timestop_ativo = True
+                    alerta_gestao_urgente = True
                     acao = (
                         f"⏰ TIME-STOP ATINGIDO ({dias_uteis}d úteis > 96h, sem impulso >= +1.0R)! "
                         f"Recomendado FECHAR A MERCADO (${preco_atual}) antes de varrer o Stop (${stop})."
@@ -313,12 +434,15 @@ for chave_pos, info in posicoes_ativas_dict.items():
             elif dias_uteis == 3:
                 if em_lucro_protegido:
                     acao = f"🛡️ JANELA SNIPER 72h->96h + LUCRO PROTEGIDO (+1.0R)! Sobe Stop p/ BE: ${sugestao_stop} | Pode estender além de 96h rumo a {label_alvo}."
+                    if sugestao_stop > stop:
+                        alerta_gestao_urgente = True
                 elif preco_atual < entrada:
                     acao = f"⚠️ ÚLTIMO DIA SNIPER (4.º dia) EM NEGATIVO (${preco_atual} < ${entrada}). Se não recuperar no fecho, encerrar antecipadamente para poupar risco | Stop: ${stop}."
                 else:
                     acao = f"⚠️ ÚLTIMO DIA DA JANELA SNIPER (4.º dia). Se não arrancar rumo a {label_alvo}, preparar saída no fecho | Stop: ${stop}."
             elif sugestao_stop > stop and preco_atual > entrada:
                 acao = f"🛡️ PROTEGER POSIÇÃO{tag_tempo}. +1.0R Atingido! Sobe o Stop para Break-Even: ${sugestao_stop} | Alvo: {label_alvo}."
+                alerta_gestao_urgente = True
             else:
                 acao = f"⏳ MANTER POSIÇÃO (Confluência Suprema{tag_tempo}). Alvo: {label_alvo} | Stop: ${stop}."
             
@@ -334,17 +458,53 @@ for chave_pos, info in posicoes_ativas_dict.items():
 # ===================================================================
 def analisar_confluencia_suprema(ativo_info):
     try:
-        # FILTRO 1: FORÇA RELATIVA DE ELITE (RS SCORE >= 75)
+        # FILTRO 1: FORÇA RELATIVA DE ELITE (RS >= 75 | >= 80 se VIX > 23)
         rs_score = limpar_float(ativo_info.get("rs_score")) or 0.0
-        if rs_score < 75.0:
+        if rs_score < regime_macro["rs_min"]:
             return None
 
-        ticker = str(ativo_info.get("ticker", "")).strip().upper()
+        ticker = str(ativo_info.get("ticker", "")).strip().upper().replace(".", "-")
         if not ticker or ticker == "#N/A" or ticker == "NONE": return None
-        if ticker in posicoes_ativas_dict: return None
         if ticker == "BRK-A": ticker = "BRK-B"
+        if ticker in tickers_ativos_set: return None
 
-        time.sleep(random.uniform(0.5, 1.2))
+        nome_empresa = ativo_info.get("nome") or ativo_info.get("nomeEmpresa") or ativo_info.get("name") or "N/A"
+        setor = str(
+            ativo_info.get("setor") or 
+            ativo_info.get("setorAtivo") or 
+            ativo_info.get("sector") or 
+            ativo_info.get("Setor") or ""
+        ).strip()
+
+        if setor and setor.lower() not in ["desconhecido", "n/a", "none", "#n/a"] and setor.lower() in setores_ocupados:
+            return None
+
+        time.sleep(random.uniform(0.4, 1.0))
+
+        # Verificar setor e earnings iminentes (<= 3 dias)
+        alerta_earnings = "OK"
+        try:
+            ticker_obj = yf.Ticker(ticker, session=session)
+            if not setor or setor.lower() in ["desconhecido", "n/a", "", "none", "#n/a"]:
+                setor = ticker_obj.info.get('sector') or obter_setor_yf(ticker)
+
+            calendario = ticker_obj.calendar
+            if isinstance(calendario, dict) and 'Earnings Date' in calendario and len(calendario['Earnings Date']) > 0:
+                proxima_data = calendario['Earnings Date'][0]
+                if hasattr(proxima_data, 'date'): proxima_data = proxima_data.date()
+                dias_restantes = (proxima_data - datetime.now(ZoneInfo("Europe/Lisbon")).date()).days
+                if 0 <= dias_restantes <= 3:
+                    alerta_earnings = f"PERIGO (em {dias_restantes} dias)"
+        except Exception:
+            if not setor or setor.lower() in ["desconhecido", "n/a", "", "none", "#n/a"]:
+                setor = obter_setor_yf(ticker)
+
+        if "PERIGO" in alerta_earnings:
+            return None
+        if setor and setor.lower() not in ["desconhecido", "n/a", "none", "#n/a"] and setor.lower() in setores_ocupados:
+            return None
+        if setor and any(termo in setor.lower() for termo in ["real estate", "reit", "mortgage"]):
+            return None
 
         df = pd.DataFrame()
         for _ in range(3):
@@ -357,6 +517,7 @@ def analisar_confluencia_suprema(ativo_info):
         if df.empty or len(df) < 200: return None
         if isinstance(df.columns, pd.MultiIndex): df.columns = df.columns.droplevel(1)
         df = df.dropna(subset=['Close', 'High', 'Low', 'Volume'])
+        if len(df) < 200: return None
 
         preco = float(df['Close'].iloc[-1])
         if preco < 10.00: return None
@@ -365,7 +526,7 @@ def analisar_confluencia_suprema(ativo_info):
         df['EMA_20'] = df['Close'].ewm(span=20, adjust=False).mean()
         df['SMA_50'] = df['Close'].rolling(window=50).mean()
         df['SMA_200'] = df['Close'].rolling(window=200).mean()
-        df['Vol_SMA_20'] = df['Volume'].rolling(window=20).mean()
+        df['Vol_SMA_20_Prev'] = df['Volume'].shift(1).rolling(window=20).mean()
         
         # Bollinger Bands (SMA 20)
         df['SMA_20'] = df['Close'].rolling(window=20).mean()
@@ -379,7 +540,7 @@ def analisar_confluencia_suprema(ativo_info):
         df['KC_Upper'] = df['EMA_20'] + (df[col_atr] * 1.5)
         df['KC_Lower'] = df['EMA_20'] - (df[col_atr] * 1.5)
 
-        df = df.dropna(subset=['EMA_20', 'SMA_50', 'SMA_200', 'BB_Upper', 'KC_Upper', col_atr])
+        df = df.dropna(subset=['EMA_20', 'SMA_50', 'SMA_200', 'BB_Upper', 'KC_Upper', 'Vol_SMA_20_Prev', col_atr])
         if df.empty: return None
 
         ultimo = df.iloc[-1]
@@ -390,28 +551,36 @@ def analisar_confluencia_suprema(ativo_info):
         kc_upper, kc_lower = float(ultimo['KC_Upper']), float(ultimo['KC_Lower'])
         atr = float(ultimo[col_atr])
         vol_atual = float(ultimo['Volume'])
-        vol_sma20 = float(ultimo['Vol_SMA_20'])
+        vol_sma20_prev = float(ultimo['Vol_SMA_20_Prev'])
         
+        if vol_sma20_prev < 300000:
+            return None
+
         minimo_hoje = float(ultimo['Low'])
         fecho_hoje = float(ultimo['Close'])
         maximo_hoje = float(ultimo['High'])
 
         # LÓGICA DE CONFLUÊNCIA ABSOLUTA:
-        # A. Tendência Alinhada (Motor 20)
+        # A. Tendência Alinhada & Pullback na Zona da EMA 20
         tendencia_alta = (ema20 > sma50) and (sma50 > sma200)
-        toque_ema20 = (minimo_hoje <= ema20) and (fecho_hoje >= ema20)
+        toque_ema20 = (minimo_hoje <= ema20 * 1.012) and (fecho_hoje >= ema20 * 0.992)
         
-        # B. Compressão (Motor 19)
+        # B. Compressão (BB dentro de KC)
         em_squeeze = (bb_upper <= kc_upper) and (bb_lower >= kc_lower)
         
-        # C. Acumulação Institucional (Motor 18 - RVOL >= 1.5)
-        rvol = vol_atual / vol_sma20 if vol_sma20 > 0 else 0.0
+        # C. Acumulação Institucional (RVOL >= 1.5x vs média dos 20 dias anteriores)
+        rvol = vol_atual / vol_sma20_prev if vol_sma20_prev > 0 else 0.0
         volume_anomalo = rvol >= 1.5
 
         if tendencia_alta and toque_ema20 and em_squeeze and volume_anomalo:
+            preco_rt = obter_preco_tempo_real(ticker, preco)
             entrada_gatilho = round(maximo_hoje * 1.002, 2)
+
+            # Não perseguir se já abriu esticado > 2.5% acima do gatilho ou caiu > 1.5% abaixo do fecho
+            if preco_rt > entrada_gatilho * 1.025 or preco_rt < preco * 0.985:
+                return None
+
             stop_loss = round(min(minimo_hoje * 0.995, entrada_gatilho - (atr * 1.5)), 2)
-            
             risco = entrada_gatilho - stop_loss
             if risco <= 0:
                 return None
@@ -420,11 +589,16 @@ def analisar_confluencia_suprema(ativo_info):
             alvo_tp = round(entrada_gatilho + (risco * 2.5), 2)
 
             qtd_calc = round(vol_diaria_usd / risco, 2)
+            if qtd_calc <= 0:
+                return None
+
             val_calc = entrada_gatilho * qtd_calc
 
             return {
                 "ticker": ticker,
-                "preco_atual": round(preco, 2),
+                "nome_empresa": nome_empresa,
+                "setor": setor,
+                "preco_atual": preco_rt,
                 "gatilho": entrada_gatilho,
                 "stop_loss": stop_loss,
                 "alvo_tp": alvo_tp,
@@ -444,13 +618,12 @@ def analisar_confluencia_suprema(ativo_info):
 # ===================================================================
 def executar_motor():
     data_hoje = datetime.now(ZoneInfo("Europe/Lisbon")).strftime("%d/%m/%Y %H:%M")
-    mercado_ok, msg_mercado = verificar_regime_mercado()
 
     bloco_texto = (
         f"⚡ RELATÓRIO DETALHADO - MOTOR 21: CONFLUÊNCIA SUPREMA ({data_hoje})\n"
         f"==================================================================\n"
-        f"🌐 Filtro Macro: {msg_mercado}\n"
-        f"💰 Risco Configurado por Trade: ${vol_diaria_usd:,.2f} USD\n\n"
+        f"🌐 Filtro Macro: {regime_macro['msg']}\n"
+        f"💰 Risco Configurado por Trade: ${vol_diaria_usd:,.2f} USD (Base: ${risco_base_usd:,.2f} | Fator: {int(regime_macro['fator_risco']*100)}%)\n\n"
     )
 
     if bloco_posicoes_ativas:
@@ -459,8 +632,8 @@ def executar_motor():
         bloco_texto += "📌 GESTÃO DE POSIÇÕES ATIVAS: Nenhuma posição ativa detetada para este motor.\n--------------------------------------------------\n\n"
 
     # 1. Verifica Filtro Macro (Mesmo em modo defensivo, envia antes a auditoria das posições ativas!)
-    if not mercado_ok:
-        aviso_defensivo = f"🛡️ [MODO DEFENSIVO] Novas entradas bloqueadas hoje ({msg_mercado}).\n"
+    if not regime_macro["autorizado"]:
+        aviso_defensivo = f"🛡️ [MODO DEFENSIVO] Novas entradas bloqueadas hoje ({regime_macro['msg']}).\n"
         print(aviso_defensivo)
         bloco_texto += aviso_defensivo
         
@@ -470,12 +643,12 @@ def executar_motor():
         enviar_email(bloco_texto)
         
         debug_telegram_ativado = str(configs_dict.get("TELEGRAM_NOTIFICATIONS_DEBUG", "false")).strip().lower() in ["true", "1", "sim", "yes"]
-        if debug_telegram_ativado or alerta_timestop_ativo:
+        if debug_telegram_ativado or alerta_gestao_urgente:
             aviso_ts = "\n⏰ *ALERTA TIME-STOP:* Tens posição(ões) M21 expirada(s) (>96h sem impulso) para fechar!" if alerta_timestop_ativo else ""
-            enviar_alerta(f"21 ⚡ *MOTOR 21 (CONFLUÊNCIA SUPREMA)*\n\n🛡️ *MODO DEFENSIVO ATIVO*\n{msg_mercado}{aviso_ts}")
+            enviar_alerta(f"21 ⚡ *MOTOR 21 (CONFLUÊNCIA SUPREMA)*\n\n🛡️ *MODO DEFENSIVO ATIVO*\n{regime_macro['msg']}{aviso_ts}")
         return
 
-    alertas_confluencia = []
+    candidatos_confluencia = []
     total_analisados = 0
     
     if ativos_sheets:
@@ -483,14 +656,24 @@ def executar_motor():
             if not ativo_info.get("ticker") or ativo_info.get("ticker") == "#N/A": continue
             total_analisados += 1
             res = analisar_confluencia_suprema(ativo_info)
-            if res: alertas_confluencia.append(res)
+            if res: candidatos_confluencia.append(res)
+
+    # Ordena por RS Score e RVOL e limita a 1 entrada Sniper por setor livre
+    candidatos_confluencia = sorted(candidatos_confluencia, key=lambda k: (k['rs_score'], k['rvol']), reverse=True)
+    alertas_confluencia = []
+    setores_novos_usados = set()
+    for item in candidatos_confluencia:
+        s_key = item["setor"].lower()
+        if s_key not in setores_novos_usados:
+            alertas_confluencia.append(item)
+            if s_key not in ["desconhecido", "n/a", ""]:
+                setores_novos_usados.add(s_key)
 
     if alertas_confluencia:
         bloco_texto += f"🎯 SINAIS DE ALTA PROBABILIDADE (SNIPER) ({len(alertas_confluencia)}):\n\n"
         for a in alertas_confluencia:
-            info_ativo = next((item for item in ativos_sheets if str(item.get("ticker","")).strip().upper() == a['ticker']), {})
             bloco_texto += (
-                f"💎 [{a['ticker']}] - {info_ativo.get('nome', 'N/A')} ({info_ativo.get('setor', 'Desconhecido')})\n"
+                f"💎 [{a['ticker']}] - {a['nome_empresa']} ({a['setor']})\n"
                 f"    - 📊 Contexto Técnico: {a['estado_confluencia']}\n"
                 f"    - ⚙️ Tática: Breakout Sniper Assimétrico (Alvo 2.5R | BE +1.0R | Time-Stop Adaptativo 96h)\n"
                 f"    - 📋 Tipo de Ordem: BUY STOP (Gatilho: ${a['gatilho']})\n"
@@ -499,6 +682,7 @@ def executar_motor():
                 f"    - 📈 Métricas de Força: RS Score: {a['rs_score']} | RVOL: {a['rvol']}x\n"
                 f"--------------------------------------------------\n"
             )
+        bloco_texto += "\n🔄 LEMBRETE OPERACIONAL: Assim que uma ordem Buy Stop for executada na corretora, altera o estado no Google Sheets para 'ATIVA_M21' para iniciar a gestão automática de Break-Even (+1.0R) e Time-Stop de 96h.\n"
     else:
         bloco_texto += "✅ Nenhum ativo atingiu a perfeição técnica exigida pelo Motor 21 hoje. O capital permanece seguro.\n"
 
@@ -509,12 +693,12 @@ def executar_motor():
 
     # Notificação no Telegram
     debug_telegram_ativado = str(configs_dict.get("TELEGRAM_NOTIFICATIONS_DEBUG", "false")).strip().lower() in ["true", "1", "sim", "yes"]
-    if debug_telegram_ativado or len(alertas_confluencia) > 0 or alerta_timestop_ativo:
+    if debug_telegram_ativado or len(alertas_confluencia) > 0 or alerta_gestao_urgente:
         aviso_ts = "\n⏰ *ALERTA TIME-STOP:* Tens posição(ões) M21 expirada(s) (>96h sem impulso) para fechar!" if alerta_timestop_ativo else ""
         enviar_alerta(
             f"21 ⚡ *MOTOR 21 (CONFLUÊNCIA)*\n\n"
-            f"🔍 Execução Concluída.\n"
-            f"📊 Analisados: *{total_analisados}* | Acionados: *{len(alertas_confluencia)}*{aviso_ts}\n"
+            f"🔍 Execução Concluída ({regime_macro['modo']}).\n"
+            f"📊 Analisados: *{total_analisados}* | Novos Sinais: *{len(alertas_confluencia)}* | Em Gestão: *{qtd_posicoes_auditadas}*{aviso_ts}\n"
             f"💰 Risco/Trade: *${vol_diaria_usd:.2f}*"
         )
 
