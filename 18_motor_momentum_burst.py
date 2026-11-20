@@ -2,8 +2,9 @@
 # SISTEMA DE TRADING INSTITUCIONAL - MOTOR 18: MOMENTUM BURST & VOLUME SURGE
 # ===================================================================================
 # Descrição Geral:
-# Identifica ativos líderes (RS >= 70) com explosão de volume institucional
-# (RVOL >= 2.0) e rompimento direcional de curto prazo (Hit and Run 1.5R | 72h),
+# Identifica ativos líderes (RS >= 70 em Expansão | RS >= 80 em Corretivo) com
+# explosão de volume institucional (RVOL >= 2.0x vs média dos 20 dias anteriores) e
+# rompimento direcional de curto prazo (Hit and Run 1.5R | Time-Stop 72h),
 # auditando em simultâneo as posições ativas em carteira (ATIVA_M18).
 # ===================================================================================
 
@@ -50,6 +51,11 @@ WEBHOOK_URL = os.environ.get('WEBHOOK_URL')
 EMAIL_USER = os.environ.get("EMAIL_USER")
 EMAIL_PASS = os.environ.get("EMAIL_PASS")
 
+if EMAIL_USER:
+    EMAIL_USER = EMAIL_USER.strip()
+if EMAIL_PASS:
+    EMAIL_PASS = EMAIL_PASS.strip()
+
 SMTP_SERVER = "smtp.gmail.com"
 SMTP_PORT = 587
 
@@ -87,6 +93,18 @@ def calcular_dias_uteis(data_abertura_str):
             dias_uteis += 1
     return dias_uteis
 
+def obter_preco_tempo_real(ticker_str, fallback_close):
+    try:
+        t = yf.Ticker(ticker_str, session=session)
+        fast = t.fast_info
+        for attr in ('pre_market_price', 'post_market_price', 'last_price'):
+            val = getattr(fast, attr, None)
+            if val is not None and not np.isnan(val) and float(val) > 0:
+                return round(float(val), 2)
+    except Exception:
+        pass
+    return round(float(fallback_close), 2)
+
 # ===================================================================
 # 2. FUNÇÕES DE REDE E CONFIGS (LEITURA COMPLETA DO SHEETS)
 # ===================================================================
@@ -118,11 +136,24 @@ def buscar_dados_completos():
         return [], {}, {}
 
 def verificar_regime_mercado():
-    """Bloqueia novas entradas de momentum se o SPY estiver abaixo da SMA200 ou em queda forte."""
+    """
+    Matriz Macro de 3 Estados (SPY + ^VIX) para Momentum Burst:
+    - Expansão (SPY > EMA20 > SMA200): RS >= 70 | RVOL >= 2.0 | Lote 100% (50% se VIX > 23)
+    - Corretivo (SMA200 < SPY <= EMA20): RS >= 80 | RVOL >= 2.5 | Lote 50% (35% se VIX > 23)
+    - Baixista / Queda <= -1.50% / VIX > 30: Bloqueia novas entradas (mantém gestão M18)
+    """
+    regime_default = {
+        "autorizado": True,
+        "modo": "EXPANSAO",
+        "rs_min": 70.0,
+        "rvol_min": 2.0,
+        "fator_risco": 1.0,
+        "msg": "Dados SPY insuficientes (autorizado por defeito em modo Expansão)."
+    }
     try:
         df_spy = yf.download("SPY", period="1y", interval="1d", progress=False, session=session)
         if df_spy.empty or len(df_spy) < 200:
-            return True, "Dados SPY insuficientes (autorizado por defeito)."
+            return regime_default
         if isinstance(df_spy.columns, pd.MultiIndex):
             df_spy.columns = df_spy.columns.droplevel(1)
         
@@ -132,15 +163,75 @@ def verificar_regime_mercado():
         ema20 = float(df_spy['Close'].ewm(span=20, adjust=False).mean().iloc[-1])
         var_dia = ((close_hoje - close_ontem) / close_ontem) * 100
 
+        vix_atual = None
+        try:
+            df_vix = yf.download("^VIX", period="5d", interval="1d", progress=False, session=session)
+            if not df_vix.empty:
+                if isinstance(df_vix.columns, pd.MultiIndex):
+                    df_vix.columns = df_vix.columns.droplevel(1)
+                vix_atual = float(df_vix['Close'].iloc[-1])
+        except Exception:
+            pass
+
+        tag_vix = f" | VIX: {vix_atual:.2f}" if vix_atual is not None else ""
+
         if close_hoje < sma200:
-            return False, f"SPY (${close_hoje:.2f}) abaixo da SMA200 (${sma200:.2f}). Mercado em regime baixista."
-        if close_hoje < ema20 and var_dia <= -0.5:
-            return False, f"SPY (${close_hoje:.2f}) abaixo da EMA20 (${ema20:.2f}) com pressão vendedora ({var_dia:+.2f}%)."
-        if var_dia <= -1.0:
-            return False, f"SPY em queda forte hoje ({var_dia:.2f}% <= -1.00%)."
-        return True, f"SPY favorável (${close_hoje:.2f} > SMA200 | EMA20: ${ema20:.2f} | Var: {var_dia:+.2f}%)."
+            return {
+                "autorizado": False,
+                "modo": "BAIXISTA",
+                "rs_min": 80.0,
+                "rvol_min": 2.5,
+                "fator_risco": 0.0,
+                "msg": f"SPY (${close_hoje:.2f}) abaixo da SMA200 (${sma200:.2f}). Mercado em regime baixista{tag_vix}."
+            }
+        if var_dia <= -1.50:
+            return {
+                "autorizado": False,
+                "modo": "QUEDA_DIARIA",
+                "rs_min": 80.0,
+                "rvol_min": 2.5,
+                "fator_risco": 0.0,
+                "msg": f"SPY em queda forte hoje ({var_dia:.2f}% <= -1.50%){tag_vix}. Entradas M18 bloqueadas."
+            }
+        if vix_atual is not None and vix_atual > 30.0:
+            return {
+                "autorizado": False,
+                "modo": "PANICO_VIX",
+                "rs_min": 80.0,
+                "rvol_min": 2.5,
+                "fator_risco": 0.0,
+                "msg": f"VIX em pânico sistémico ({vix_atual:.2f} > 30.00). Entradas M18 bloqueadas."
+            }
+
+        if close_hoje < ema20:
+            fator = 0.35 if (vix_atual is not None and vix_atual > 23.0) else 0.50
+            return {
+                "autorizado": True,
+                "modo": "CORRETIVO",
+                "rs_min": 80.0,
+                "rvol_min": 2.5,
+                "fator_risco": fator,
+                "msg": (
+                    f"SPY em pullback/lateral (${close_hoje:.2f} < EMA20 ${ema20:.2f} | SMA200 ${sma200:.2f} | "
+                    f"Var: {var_dia:+.2f}%{tag_vix}) — M18 Tático: RS >= 80, RVOL >= 2.5x e Lote {int(fator*100)}%."
+                )
+            }
+
+        fator = 0.50 if (vix_atual is not None and vix_atual > 23.0) else 1.0
+        return {
+            "autorizado": True,
+            "modo": "EXPANSAO",
+            "rs_min": 70.0,
+            "rvol_min": 2.0,
+            "fator_risco": fator,
+            "msg": (
+                f"SPY em Expansão (${close_hoje:.2f} > EMA20 ${ema20:.2f} > SMA200 ${sma200:.2f} | "
+                f"Var: {var_dia:+.2f}%{tag_vix}) — RS >= 70 | RVOL >= 2.0x | Lote {int(fator*100)}%."
+            )
+        }
     except Exception as e:
-        return True, f"Aviso SPY: {e}"
+        regime_default["msg"] = f"Aviso SPY: {e}"
+        return regime_default
 
 def enviar_email(conteudo):
     print("\nA enviar email do Motor 18 para o Agente IA...")
@@ -162,6 +253,7 @@ def enviar_email(conteudo):
             print(f"[SUCESSO] Email enviado na tentativa {tentativa + 1}!")
             break
         except Exception as e:
+            print(f"[ERRO] Tentativa {tentativa + 1}: {e}")
             if tentativa < 2: time.sleep(5)
 
 def obter_setor_yf(ticker):
@@ -177,6 +269,7 @@ def obter_setor_yf(ticker):
 # 3. CARGA DE DADOS E PARAMETRIZAÇÃO DE RISCO (LIDA DO NOVO CONFIGS)
 # ===================================================================
 ativos_sheets, posicoes_ativas_dict, configs_dict = buscar_dados_completos()
+regime_macro = verificar_regime_mercado()
 
 capital = limpar_float(configs_dict.get("CAPITAL_TOTAL_CONTA")) or 10400.00
 pct_risco = (
@@ -186,14 +279,37 @@ pct_risco = (
 )
 risco_fixo_usd = limpar_float(configs_dict.get("RISCO_MAXIMO_USD"))
 
-vol_diaria_usd = risco_fixo_usd if (risco_fixo_usd and risco_fixo_usd > 0) else (capital * pct_risco)
-print(f"[CONFIG] Capital Total: ${capital:,.2f} | Orçamento Risco/Trade: ${vol_diaria_usd:,.2f} USD\n")
+risco_base_usd = risco_fixo_usd if (risco_fixo_usd and risco_fixo_usd > 0) else (capital * pct_risco)
+vol_diaria_usd = round(risco_base_usd * regime_macro["fator_risco"], 2) if regime_macro["autorizado"] else 0.0
+
+print(f"[CONFIG] Capital Total: ${capital:,.2f} | Risco Base: ${risco_base_usd:,.2f} | Risco Ajustado ({regime_macro['modo']}): ${vol_diaria_usd:,.2f} USD")
+print(f"[MACRO] {regime_macro['msg']}\n")
+
+# Mapeamento de setores e posições realmente ativas (ignora posições FECHADA)
+mapa_setores_watchlist = {}
+for item in ativos_sheets:
+    t_item = str(item.get("ticker", "")).strip().upper().replace(".", "-")
+    s_item = str(item.get("setor") or item.get("setorAtivo") or item.get("sector") or "").strip()
+    if t_item and s_item and s_item.lower() not in ["desconhecido", "n/a", "none", "#n/a"]:
+        mapa_setores_watchlist[t_item] = s_item
+
+tickers_ativos_set = set()
+setores_ocupados = set()
+for chave_pos, info in posicoes_ativas_dict.items():
+    if isinstance(info, dict) and str(info.get("status", "")).strip().upper().startswith("ATIVA"):
+        t_pos = "AI" if chave_pos.lower() in ["c3.ai", "c3"] else chave_pos.strip().upper().replace(".", "-")
+        tickers_ativos_set.add(t_pos)
+        setor_pos = str(info.get("setor") or mapa_setores_watchlist.get(t_pos, "")).strip()
+        if setor_pos and setor_pos.lower() not in ["desconhecido", "n/a", "none", "#n/a"]:
+            setores_ocupados.add(setor_pos.lower())
 
 # ===================================================================
 # 4. AUDITAR POSIÇÕES EM CARTEIRA (ALVO 1.5R + BE +0.8R + TIME-STOP ADAPTATIVO 72H)
 # ===================================================================
 bloco_posicoes_ativas = ""
 alerta_timestop_ativo = False
+alerta_gestao_urgente = False
+qtd_posicoes_auditadas = 0
 
 def obter_dados_posicao_m18(ticker, dt_abertura=None):
     preco_atual = 0.0
@@ -236,17 +352,7 @@ def obter_dados_posicao_m18(ticker, dt_abertura=None):
         print(f"[AVISO] Falha ao extrair intraday para {ticker}: {e}")
 
     if preco_atual <= 0:
-        try:
-            t = yf.Ticker(ticker, session=session)
-            fast = t.fast_info
-            p_pre = getattr(fast, 'pre_market_price', None)
-            p_last = getattr(fast, 'last_price', None)
-            if p_pre and not np.isnan(p_pre) and p_pre > 0:
-                preco_atual = round(float(p_pre), 2)
-            elif p_last and not np.isnan(p_last) and p_last > 0:
-                preco_atual = round(float(p_last), 2)
-        except Exception:
-            pass
+        preco_atual = obter_preco_tempo_real(ticker, 0.0)
 
     maxima_efetiva = max(maxima_desde_abertura, preco_atual)
     return preco_atual, atr_atual, maxima_efetiva, minima_vela_anterior
@@ -255,8 +361,10 @@ for chave_pos, info in posicoes_ativas_dict.items():
     if not isinstance(info, dict): continue
     status = str(info.get("status", "")).strip().upper()
     if status == "ATIVA_M18":
+        qtd_posicoes_auditadas += 1
         try:
-            ticker = "AI" if chave_pos.lower() in ["c3.ai", "c3"] else chave_pos.strip().upper()
+            ticker = "AI" if chave_pos.lower() in ["c3.ai", "c3"] else chave_pos.strip().upper().replace(".", "-")
+            if ticker == "BRK-A": ticker = "BRK-B"
             
             data_abertura = info.get("dataAbertura", "")
             dt_abertura = parse_data_abertura(data_abertura)
@@ -297,7 +405,7 @@ for chave_pos, info in posicoes_ativas_dict.items():
             qtd = info.get("quantidade", "N/A")
             
             # Proteção Break-Even aos +0.8R
-            be_calculado = round(entrada * 1.0005, 2)
+            be_calculado = round(entrada * 1.001, 2)
             patamar_lucro_be = entrada + (risco_inicial * 0.8)
             em_lucro_protegido = (
                 (stop >= entrada) or 
@@ -313,16 +421,21 @@ for chave_pos, info in posicoes_ativas_dict.items():
 
             if alvo_tp > 0 and preco_atual >= alvo_tp:
                 acao = f"🎯 ALVO ALCANÇADO ({label_alvo})! Recomendado FECHAR POSIÇÃO com Lucro (WIN)."
+                alerta_gestao_urgente = True
             elif stop > 0 and preco_atual <= stop:
                 acao = f"🚨 STOP LOSS ATINGIDO (${stop})! Recomendado LIQUIDAR POSIÇÃO (LOSS)."
+                alerta_gestao_urgente = True
             elif dias_uteis is not None and dias_uteis >= 3:
                 if em_lucro_protegido and preco_atual >= patamar_lucro_be:
                     acao = (
                         f"🚀 EXTENSÃO DE VENCEDOR ({dias_uteis}d úteis > 72h, mas em lucro >= +0.8R)! "
                         f"MANTER rumo a {label_alvo} com Trailing Stop elevado para ${trailing_extensao}."
                     )
+                    if trailing_extensao > stop:
+                        alerta_gestao_urgente = True
                 else:
                     alerta_timestop_ativo = True
+                    alerta_gestao_urgente = True
                     acao = (
                         f"⏰ TIME-STOP ATINGIDO ({dias_uteis}d úteis > 72h, sem impulso >= +0.8R)! "
                         f"Recomendado FECHAR A MERCADO (${preco_atual}) antes de varrer o Stop (${stop})."
@@ -330,12 +443,15 @@ for chave_pos, info in posicoes_ativas_dict.items():
             elif dias_uteis == 2:
                 if em_lucro_protegido:
                     acao = f"🛡️ JANELA 48h + LUCRO PROTEGIDO (+0.8R)! Sobe Stop p/ BE: ${sugestao_stop} | Pode estender além de 72h rumo a {label_alvo}."
+                    if sugestao_stop > stop:
+                        alerta_gestao_urgente = True
                 elif preco_atual < entrada:
                     acao = f"⚠️ ÚLTIMO DIA (48h) EM NEGATIVO (${preco_atual} < ${entrada}). Se não recuperar no fecho, encerrar antecipadamente para poupar risco | Stop: ${stop}."
                 else:
                     acao = f"⚠️ ÚLTIMO DIA DA JANELA (48h). Se não arrancar hoje rumo a {label_alvo}, preparar saída no fecho | Stop: ${stop}."
             elif sugestao_stop > stop and preco_atual > entrada:
                 acao = f"🛡️ PROTEGER POSIÇÃO{tag_tempo}. +0.8R Atingido! Sobe o Stop para Break-Even: ${sugestao_stop} | Alvo: {label_alvo}."
+                alerta_gestao_urgente = True
             else:
                 acao = f"⏳ MANTER POSIÇÃO (Momentum Burst{tag_tempo}). Alvo: {label_alvo} | Stop: ${stop}."
             
@@ -347,16 +463,16 @@ for chave_pos, info in posicoes_ativas_dict.items():
             print(f"[ERRO] Falha ao auditar posição ativa {chave_pos}: {e}")
 
 # ===================================================================
-# 5. MOTOR MATEMÁTICO: MOMENTUM BURST & RVOL (RS >= 70 | ALVO 1.5R)
+# 5. MOTOR MATEMÁTICO: MOMENTUM BURST & RVOL (ALVO 1.5R)
 # ===================================================================
 def analisar_momentum_burst(ativo_info):
     try:
-        # FILTRO 1: FORÇA RELATIVA MÍNIMA (RS Score >= 70)
+        # FILTRO 1: FORÇA RELATIVA MÍNIMA DINÂMICA POR REGIME (70 em Expansão | 80 em Corretivo)
         rs_score = limpar_float(ativo_info.get("rs_score")) or 0.0
-        if rs_score < 70.0:
+        if rs_score < regime_macro["rs_min"]:
             return None
 
-        ticker = str(ativo_info.get("ticker", "")).strip().upper()
+        ticker = str(ativo_info.get("ticker", "")).strip().upper().replace(".", "-")
         
         nome_empresa = (
             ativo_info.get("nome") or 
@@ -373,10 +489,13 @@ def analisar_momentum_burst(ativo_info):
         setor = str(setor).strip()
 
         if not ticker or ticker == "#N/A" or ticker == "NONE": return None
-        if ticker in posicoes_ativas_dict: return None
         if ticker == "BRK-A": ticker = "BRK-B"
+        if ticker in tickers_ativos_set: return None
 
-        time.sleep(random.uniform(0.5, 1.2))
+        if setor and setor.lower() not in ["desconhecido", "n/a", "none", "#n/a"] and setor.lower() in setores_ocupados:
+            return None
+
+        time.sleep(random.uniform(0.4, 1.0))
 
         max_52s = None
         alerta_earnings = "OK"
@@ -390,7 +509,7 @@ def analisar_momentum_burst(ativo_info):
             max_52s = info_dados.get('fiftyTwoWeekHigh', None)
 
             calendario = ticker_obj.calendar
-            if isinstance(calendario, dict) and 'Earnings Date' in calendario:
+            if isinstance(calendario, dict) and 'Earnings Date' in calendario and len(calendario['Earnings Date']) > 0:
                 proxima_data = calendario['Earnings Date'][0]
                 if hasattr(proxima_data, 'date'): proxima_data = proxima_data.date()
                 dias_restantes = (proxima_data - datetime.now(ZoneInfo("Europe/Lisbon")).date()).days
@@ -400,8 +519,11 @@ def analisar_momentum_burst(ativo_info):
             if not setor or setor.lower() in ["desconhecido", "n/a", "", "none", "#n/a"]:
                 setor = obter_setor_yf(ticker)
 
-        # Bloqueia entrada se tiver Earnings nos próximos 3 dias
         if "PERIGO" in alerta_earnings:
+            return None
+        if setor and setor.lower() not in ["desconhecido", "n/a", "none", "#n/a"] and setor.lower() in setores_ocupados:
+            return None
+        if setor and any(termo in setor.lower() for termo in ["real estate", "reit", "mortgage"]):
             return None
 
         df = pd.DataFrame()
@@ -416,65 +538,76 @@ def analisar_momentum_burst(ativo_info):
         if df.empty or len(df) < 200: return None
         if isinstance(df.columns, pd.MultiIndex): df.columns = df.columns.droplevel(1)
         df = df.dropna(subset=['Close', 'High', 'Low', 'Volume'])
+        if len(df) < 200: return None
 
         preco = float(df['Close'].iloc[-1])
         if preco < 10.00: return None
 
         df['EMA_20'] = df['Close'].ewm(span=20, adjust=False).mean()
         df['SMA_200'] = df['Close'].rolling(window=200).mean()
-        df['Vol_SMA_20'] = df['Volume'].rolling(window=20).mean()
+        # Média dos 20 dias ANTERIORES (exclui a própria explosão de volume de hoje do denominador)
+        df['Vol_SMA_20_Prev'] = df['Volume'].shift(1).rolling(window=20).mean()
         df.ta.atr(length=14, append=True)
 
         col_atr = [c for c in df.columns if str(c).startswith('ATRr_') or str(c).startswith('ATR_')][0]
-        df = df.dropna(subset=['EMA_20', 'SMA_200', 'Vol_SMA_20', col_atr])
+        df = df.dropna(subset=['EMA_20', 'SMA_200', 'Vol_SMA_20_Prev', col_atr])
         if df.empty: return None
 
         ultimo = df.iloc[-1]
         vol_atual = float(ultimo['Volume'])
-        vol_sma20 = float(ultimo['Vol_SMA_20'])
+        vol_sma20_prev = float(ultimo['Vol_SMA_20_Prev'])
         atr = float(ultimo[col_atr])
         ema20 = float(ultimo['EMA_20'])
         sma200 = float(ultimo['SMA_200'])
 
-        rvol = vol_atual / vol_sma20 if vol_sma20 > 0 else 0.0
+        # Exige liquidez institucional (>= 300k ações/dia)
+        if vol_sma20_prev < 300000:
+            return None
+
+        rvol = vol_atual / vol_sma20_prev if vol_sma20_prev > 0 else 0.0
         max_5d = float(df['High'].iloc[-6:-1].max())
         minimo_hoje = float(ultimo['Low'])
         maximo_hoje = float(ultimo['High'])
         abertura_hoje = float(ultimo['Open'])
 
-        cond_rvol = rvol >= 2.0
+        cond_rvol = rvol >= regime_macro["rvol_min"]
         cond_rompimento = maximo_hoje >= max_5d and preco > abertura_hoje
         cond_tendencia = preco > ema20 and ema20 > sma200
 
         if cond_rvol and cond_rompimento and cond_tendencia:
-            estado = "MOMENTUM BURST - Explosão de Volume e Rompimento"
-            
+            preco_rt = obter_preco_tempo_real(ticker, preco)
             entrada_gatilho = round(maximo_hoje * 1.002, 2)
+
+            # Não perseguir se já abriu esticado > 2.5% acima do gatilho ou caiu > 1.5% abaixo do fecho
+            if preco_rt > entrada_gatilho * 1.025 or preco_rt < preco * 0.985:
+                return None
+
             stop_loss = round(min(minimo_hoje * 0.995, entrada_gatilho - (atr * 1.5)), 2)
-            
             risco = entrada_gatilho - stop_loss
             if risco <= 0:
                 return None
 
-            # Alvo realista Hit & Run M18: 1.5R
+            # Alvo realista Hit & Run M18: 1.5R (respeitando resistência de 52s apenas se mantiver >= 1.25R)
             alvo_tp = round(entrada_gatilho + (risco * 1.5), 2)
-
             if max_52s and max_52s > 0 and alvo_tp > max_52s:
-                alvo_tp = round(max_52s, 2)
-
-            if alvo_tp <= entrada_gatilho:
-                alvo_tp = round(entrada_gatilho + (risco * 1.2), 2)
+                alvo_52s = round(max_52s, 2)
+                if alvo_52s >= entrada_gatilho + (risco * 1.25):
+                    alvo_tp = alvo_52s
 
             qtd_calc = round(vol_diaria_usd / risco, 2)
+            if qtd_calc <= 0:
+                return None
+
             val_calc = entrada_gatilho * qtd_calc
-            valor_investir = f"~{val_calc:.2f} USD"
+            valor_investir = f"~${val_calc:.2f} USD"
+            estado = f"MOMENTUM BURST - Explosão de Volume e Rompimento ({regime_macro['modo']})"
 
             def limpa(v):
                 try: return round(float(v), 2)
-                except: return "N/A"
+                except Exception: return "N/A"
 
             linha_comboio = (
-                f"{ticker},Nome: {nome_empresa},Setor: {setor},Preço: {limpa(preco)},"
+                f"{ticker},Nome: {nome_empresa},Setor: {setor},Preço: {limpa(preco_rt)},"
                 f"RVOL: {limpa(rvol)}x (🚀 EXPLOSÃO DE VOLUME | RS: {limpa(rs_score)}),"
                 f"Gatilho Compra (Buy Stop): {limpa(entrada_gatilho)},"
                 f"Stop Loss: {limpa(stop_loss)},Alvo TP (1.5R): {limpa(alvo_tp)},"
@@ -482,7 +615,12 @@ def analisar_momentum_burst(ativo_info):
                 f"Data: {datetime.now(ZoneInfo('Europe/Lisbon')).strftime('%d/%m/%Y %H:%M:%S')}"
             )
 
-            return {"ticker": ticker, "comboio_str": linha_comboio}
+            return {
+                "ticker": ticker,
+                "setor": setor,
+                "rvol": rvol,
+                "comboio_str": linha_comboio
+            }
 
         return None
     except Exception as e:
@@ -493,27 +631,37 @@ def analisar_momentum_burst(ativo_info):
 # 6. EXECUÇÃO PRINCIPAL E RELATÓRIO
 # ===================================================================
 def executar_motor():
-    ativos_acionados = []
+    candidatos_m18 = []
     total_analisados = 0
-    
-    mercado_ok, msg_mercado = verificar_regime_mercado()
 
-    if mercado_ok and ativos_sheets:
+    if regime_macro["autorizado"] and ativos_sheets:
         for ativo_info in ativos_sheets:
             ticker = ativo_info.get("ticker")
             if not ticker or ticker == "#N/A": continue
             
             total_analisados += 1
             res = analisar_momentum_burst(ativo_info)
-            if res: ativos_acionados.append(res)
+            if res: candidatos_m18.append(res)
+
+    # Ordena pelas maiores explosões de volume (RVOL) e limita a 1 entrada por setor livre
+    candidatos_m18 = sorted(candidatos_m18, key=lambda k: k['rvol'], reverse=True)
+    ativos_acionados = []
+    setores_novos_usados = set()
+    for item in candidatos_m18:
+        s_key = item["setor"].lower()
+        if s_key not in setores_novos_usados:
+            ativos_acionados.append(item)
+            if s_key not in ["desconhecido", "n/a", ""]:
+                setores_novos_usados.add(s_key)
 
     prompt_ia = """MODO ESTRATÉGICO: MOTOR 18 - MOMENTUM BURST & VOLUME SURGE
-O teu mandato é auditar oportunidades de curto prazo (Hit and Run | Alvo 1.5R | Time-Stop Adaptativo 72h) focadas em explosões institucionais de volume em ações líderes."""
+O teu mandato é auditar oportunidades de curto prazo (Hit and Run | Alvo 1.5R | Time-Stop Adaptativo 72h) focadas em explosões institucionais de volume em ações líderes.
+LEMBRETE OPERACIONAL: Assim que uma ordem Buy Stop for executada na corretora, altera o estado no Google Sheets para 'ATIVA_M18' para iniciar a gestão automática de Break-Even (+0.8R) e Time-Stop de 72h."""
 
     bloco = (
         f"⚡ RELATÓRIO MOTOR 18 - MOMENTUM BURST 🚀\n"
-        f"🌐 Filtro Macro: {msg_mercado}\n"
-        f"💰 Risco Configurado por Trade: ${vol_diaria_usd:,.2f} USD\n\n"
+        f"🌐 Filtro Macro: {regime_macro['msg']}\n"
+        f"💰 Risco Configurado por Trade: ${vol_diaria_usd:,.2f} USD (Base: ${risco_base_usd:,.2f} | Fator: {int(regime_macro['fator_risco']*100)}%)\n\n"
         f"{prompt_ia}\n\n--------------------------------------------------\n"
     )
 
@@ -522,8 +670,8 @@ O teu mandato é auditar oportunidades de curto prazo (Hit and Run | Alvo 1.5R |
         bloco += bloco_posicoes_ativas
         bloco += "--------------------------------------------------\n\n"
 
-    if not mercado_ok:
-        bloco += f"🛡️ [MODO DEFENSIVO] Novas entradas bloqueadas hoje ({msg_mercado}).\n"
+    if not regime_macro["autorizado"]:
+        bloco += f"🛡️ [MODO DEFENSIVO] Novas entradas bloqueadas hoje ({regime_macro['msg']}).\n"
     elif not ativos_acionados:
         bloco += "[SEM NOVOS SINAIS] - Nenhum novo ativo apresenta explosão de volume e momento hoje.\n"
     else:
@@ -537,18 +685,18 @@ O teu mandato é auditar oportunidades de curto prazo (Hit and Run | Alvo 1.5R |
     enviar_email(bloco)
 
     # ===================================================================
-    # 7. NOTIFICAÇÃO TELEGRAM (DEBUG OU ALERTA TIME-STOP)
+    # 7. NOTIFICAÇÃO TELEGRAM (DEBUG, NOVO SINAL OU ALERTA DE POSIÇÃO ATIVA)
     # ===================================================================
     debug_telegram_ativado = str(configs_dict.get("TELEGRAM_NOTIFICATIONS_DEBUG", "false")).strip().lower() in ["true", "1", "sim", "yes"]
 
-    if debug_telegram_ativado or len(ativos_acionados) > 0 or alerta_timestop_ativo:
+    if debug_telegram_ativado or len(ativos_acionados) > 0 or alerta_gestao_urgente:
         print("A enviar notificação para o Telegram via função modular...")
         total_acionados = len(ativos_acionados)
         aviso_ts = "\n⏰ *ALERTA TIME-STOP:* Tens posição(ões) M18 expirada(s) (>72h sem impulso) para fechar!" if alerta_timestop_ativo else ""
         mensagem_debug = (
             f"18 ⚡ *MOTOR 18 (MOMENTUM BURST)*\n\n"
-            f"🔍 [STATUS] Execução concluída com sucesso.\n"
-            f"📊 Analisados: *{total_analisados}* | Acionados: *{total_acionados}*{aviso_ts}\n"
+            f"🔍 Execução concluída ({regime_macro['modo']}).\n"
+            f"📊 Analisados: *{total_analisados}* | Novos Sinais: *{total_acionados}* | Em Gestão: *{qtd_posicoes_auditadas}*{aviso_ts}\n"
             f"💰 Risco/Trade: *${vol_diaria_usd:.2f}*\n"
             f"✉️ Relatório de momentum burst gerado e enviado por e-mail."
         )
