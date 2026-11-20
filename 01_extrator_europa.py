@@ -610,12 +610,13 @@ if WEBHOOK_URL and dados_temporarios:
     except Exception as e:
         print(f"[ERRO] Falha ao atualizar Google Sheets ({NOME_ABA_EUROPA}): {e}")
 
-# Enviar e-mail apenas se houver sinais acionáveis ou veto macro relevante
-if sinais_selecionados:
-    enviar_email_para_agente_ia(
-        texto_comboio,
-        assunto=f"🇪🇺🎯 tradingRelatorioIA Europa - {len(sinais_selecionados)} Sinal(is) ({datetime.now(ZoneInfo('Europe/Lisbon')).strftime('%d/%m/%Y')})"
-    )
+# Enviar e-mail sempre (incluindo em Modo Defensivo ou sem novos sinais)
+assunto_eu = (
+    f"🇪🇺🛡️ tradingRelatorioIA Europa - MODO DEFENSIVO ({datetime.now(ZoneInfo('Europe/Lisbon')).strftime('%d/%m/%Y')})"
+    if veto_macro_ativo else
+    f"🇪🇺🎯 tradingRelatorioIA Europa - {len(sinais_selecionados)} Sinal(is) ({datetime.now(ZoneInfo('Europe/Lisbon')).strftime('%d/%m/%Y')})"
+)
+enviar_email_para_agente_ia(texto_comboio, assunto=assunto_eu)
 
 # ===================================================================
 # 5. NOTIFICAÇÃO TELEGRAM (DEBUG OU NOVOS SINAIS EUROPA)
