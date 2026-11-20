@@ -2,9 +2,12 @@
 # SISTEMA DE TRADING INSTITUCIONAL - MOTOR 20: PULLBACK À EMA 20
 # ===================================================================================
 # Descrição Geral:
-# Identifica ativos líderes (RS Score >= 70) com tendência primária alinhada
-# (EMA 20 > SMA 50 > SMA 200) que realizam um pullback cirúrgico de defesa junto
-# à EMA 20 (Alvo 1.75R | BE +1.0R | Time-Stop Adaptativo 96h / 4d úteis), auditando ATIVA_M20.
+# Identifica ativos líderes com tendência primária alinhada (EMA 20 > SMA 50 > SMA 200)
+# que realizam um pullback cirúrgico de defesa junto à EMA 20.
+# Adapta-se ao regime do SPY:
+#   - Expansão (SPY > EMA20): Alvo 1.75R | RS >= 70 | Lote 100%
+#   - Corretivo (SMA200 < SPY <= EMA20): Alvo 1.25R | RS >= 80 | Lote 50%
+#   - Baixista (SPY < SMA200 ou VIX > 30): Bloqueia novas entradas
 # ===================================================================================
 
 import pandas as pd
@@ -22,6 +25,7 @@ import random
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 import json
+import traceback
 import warnings
 warnings.filterwarnings("ignore")
 
@@ -97,7 +101,7 @@ def buscar_dados_completos():
         return [], {}, {}
     try:
         url_alvo = WEBHOOK_URL if "?" in WEBHOOK_URL else f"{WEBHOOK_URL}?aba=Analise Compra"
-        resp = requests.get(url_alvo, timeout=15)
+        resp = requests.get(url_alvo, timeout=20)
         
         if resp.status_code == 200:
             try:
@@ -120,15 +124,23 @@ def buscar_dados_completos():
 
 def verificar_regime_mercado():
     """
-    Alinhado com o Motor 17 e com o Disjuntor Macro Intermarket:
-    Autoriza pullbacks à EMA 20 em Bull Market (SPY > SMA200), tolerando correções
-    diárias até -2.50% (onde nascem os melhores toques de suporte na EMA 20),
-    bloqueando apenas regime baixista, crash diário (> -2.50%) ou pânico (VIX > 30).
+    Avalia o regime do SPY e devolve parâmetros adaptativos para Pullbacks à EMA 20:
+    - Expansão (SPY > EMA20): TP 1.75R | RS >= 70 | Fator Lote 1.0 (ou 0.5 se VIX > 23)
+    - Corretivo/Lateral (SMA200 < SPY <= EMA20): TP 1.25R | RS >= 80 | Fator Lote 0.5 (ou 0.35 se VIX > 23)
+    - Baixista (SPY < SMA200 ou VIX > 30): Bloqueia novas entradas
     """
+    regime_default = {
+        "autorizado": True,
+        "modo": "EXPANSAO",
+        "tp_mult": 1.75,
+        "rs_min": 70.0,
+        "fator_risco": 1.0,
+        "msg": "Dados SPY insuficientes (autorizado por defeito em modo Expansão)."
+    }
     try:
         df_spy = yf.download("SPY", period="1y", interval="1d", progress=False, session=session)
         if df_spy.empty or len(df_spy) < 200:
-            return True, "Dados SPY insuficientes (autorizado por defeito)."
+            return regime_default
         if isinstance(df_spy.columns, pd.MultiIndex):
             df_spy.columns = df_spy.columns.droplevel(1)
         
@@ -148,19 +160,67 @@ def verificar_regime_mercado():
         except Exception:
             pass
 
-        if close_hoje < sma200:
-            return False, f"SPY (${close_hoje:.2f}) abaixo da SMA200 (${sma200:.2f}). Mercado em regime baixista."
-        if var_dia <= -2.5:
-            return False, f"SPY em queda extrema/crash hoje ({var_dia:.2f}% <= -2.50%)."
-        if vix_atual is not None and vix_atual > 30.0:
-            return False, f"VIX em pânico sistémico ({vix_atual:.2f} > 30.00)."
-
         tag_vix = f" | VIX: {vix_atual:.2f}" if vix_atual is not None else ""
-        if var_dia <= -1.0:
-            return True, f"SPY em pullback tático dentro de Bull Market (${close_hoje:.2f} > SMA200 ${sma200:.2f} | EMA20: ${ema20:.2f} | Var: {var_dia:+.2f}%{tag_vix}) — Pullbacks autorizados com Buy Stop."
-        return True, f"SPY favorável (${close_hoje:.2f} > SMA200 ${sma200:.2f} | EMA20: ${ema20:.2f} | Var: {var_dia:+.2f}%{tag_vix})."
+
+        if close_hoje < sma200:
+            return {
+                "autorizado": False,
+                "modo": "BAIXISTA",
+                "tp_mult": 1.25,
+                "rs_min": 85.0,
+                "fator_risco": 0.0,
+                "msg": f"SPY (${close_hoje:.2f}) abaixo da SMA200 (${sma200:.2f}). Mercado em regime baixista{tag_vix}."
+            }
+        if var_dia <= -2.5:
+            return {
+                "autorizado": False,
+                "modo": "CRASH",
+                "tp_mult": 1.25,
+                "rs_min": 85.0,
+                "fator_risco": 0.0,
+                "msg": f"SPY em queda extrema/crash hoje ({var_dia:.2f}% <= -2.50%){tag_vix}."
+            }
+        if vix_atual is not None and vix_atual > 30.0:
+            return {
+                "autorizado": False,
+                "modo": "PANICO_VIX",
+                "tp_mult": 1.25,
+                "rs_min": 85.0,
+                "fator_risco": 0.0,
+                "msg": f"VIX em pânico sistémico ({vix_atual:.2f} > 30.00)."
+            }
+
+        # Regime Corretivo / Lateral (SPY acima da SMA200 mas abaixo da EMA20)
+        if close_hoje < ema20:
+            fator = 0.35 if (vix_atual is not None and vix_atual > 23.0) else 0.50
+            return {
+                "autorizado": True,
+                "modo": "CORRETIVO",
+                "tp_mult": 1.25,
+                "rs_min": 80.0,
+                "fator_risco": fator,
+                "msg": (
+                    f"SPY em pullback/lateral (${close_hoje:.2f} < EMA20 ${ema20:.2f} | SMA200 ${sma200:.2f} | "
+                    f"Var: {var_dia:+.2f}%{tag_vix}) — Modo Tático: Alvo 1.25R, RS >= 80 e Lote {int(fator*100)}%."
+                )
+            }
+
+        # Regime em Expansão (SPY > EMA20 > SMA200)
+        fator = 0.50 if (vix_atual is not None and vix_atual > 23.0) else 1.0
+        return {
+            "autorizado": True,
+            "modo": "EXPANSAO",
+            "tp_mult": 1.75,
+            "rs_min": 70.0,
+            "fator_risco": fator,
+            "msg": (
+                f"SPY em Expansão (${close_hoje:.2f} > EMA20 ${ema20:.2f} > SMA200 ${sma200:.2f} | "
+                f"Var: {var_dia:+.2f}%{tag_vix}) — Alvo 1.75R | Lote {int(fator*100)}%."
+            )
+        }
     except Exception as e:
-        return True, f"Aviso SPY: {e}"
+        regime_default["msg"] = f"Aviso SPY: {e}"
+        return regime_default
 
 def enviar_email(conteudo):
     print("\nA enviar relatório detalhado do Motor 20 por e-mail...")
@@ -198,9 +258,10 @@ def obter_setor_yf(ticker):
         return "Desconhecido"
 
 # ===================================================================
-# 3. CARGA DE DADOS E PARAMETRIZAÇÃO DE RISCO (LIDA DO NOVO CONFIGS)
+# 3. CARGA DE DADOS, REGIME MACRO E PARAMETRIZAÇÃO DE RISCO
 # ===================================================================
 ativos_sheets, posicoes_ativas_dict, configs_dict = buscar_dados_completos()
+regime_macro = verificar_regime_mercado()
 
 capital = limpar_float(configs_dict.get("CAPITAL_TOTAL_CONTA")) or 10400.00
 pct_risco = (
@@ -210,11 +271,32 @@ pct_risco = (
 )
 risco_fixo_usd = limpar_float(configs_dict.get("RISCO_MAXIMO_USD"))
 
-vol_diaria_usd = risco_fixo_usd if (risco_fixo_usd and risco_fixo_usd > 0) else (capital * pct_risco)
-print(f"[CONFIG] Capital Total: ${capital:,.2f} | Orçamento Risco/Trade: ${vol_diaria_usd:,.2f} USD\n")
+risco_base_usd = risco_fixo_usd if (risco_fixo_usd and risco_fixo_usd > 0) else (capital * pct_risco)
+vol_diaria_usd = round(risco_base_usd * regime_macro["fator_risco"], 2) if regime_macro["autorizado"] else 0.0
+
+print(f"[CONFIG] Capital Total: ${capital:,.2f} | Risco Base: ${risco_base_usd:,.2f} | Risco Ajustado Regime ({regime_macro['modo']}): ${vol_diaria_usd:,.2f} USD\n")
+
+# Mapeia setores já ocupados por posições ativas para evitar stops em cadeia no mesmo setor
+mapa_setores_watchlist = {}
+for item in ativos_sheets:
+    t_item = str(item.get("ticker", "")).strip().upper()
+    s_item = str(item.get("setor") or item.get("setorAtivo") or item.get("sector") or item.get("Setor") or "").strip()
+    if t_item and s_item and s_item not in ["Desconhecido", "N/A", "NONE"]:
+        mapa_setores_watchlist[t_item] = s_item
+
+setores_ocupados = set()
+for chave_pos, info in posicoes_ativas_dict.items():
+    if isinstance(info, dict) and str(info.get("status", "")).strip().upper().startswith("ATIVA"):
+        t_pos = "AI" if chave_pos.lower() in ["c3.ai", "c3"] else chave_pos.strip().upper()
+        setor_pos = str(info.get("setor") or mapa_setores_watchlist.get(t_pos, "")).strip()
+        if setor_pos and setor_pos not in ["Desconhecido", "N/A", "NONE"]:
+            setores_ocupados.add(setor_pos.lower())
+
+if setores_ocupados:
+    print(f"[PROTEÇÃO SETORIAL] Setores já com posição ativa (bloqueados para novas entradas): {', '.join(sorted(setores_ocupados))}\n")
 
 # ===================================================================
-# 4. AUDITAR POSIÇÕES EM CARTEIRA (ALVO 1.75R + BE +1.0R + TIME-STOP ADAPTATIVO 96H)
+# 4. AUDITAR POSIÇÕES EM CARTEIRA (ALVO DINÂMICO + BE +1.0R + TIME-STOP 96H)
 # ===================================================================
 bloco_posicoes_ativas = ""
 alerta_timestop_ativo = False
@@ -309,13 +391,19 @@ for chave_pos, info in posicoes_ativas_dict.items():
                 0.0
             )
             
-            # Alvo Pullback EMA20: 1.75R (equilíbrio entre 1.5R e 2.0R para continuação de tendência)
+            mult_r_ativo = regime_macro["tp_mult"]
+            alvo_dinamico = round(entrada + (risco_inicial * mult_r_ativo), 2) if risco_inicial > 0 else 0.0
+
             if tp_sheets > (entrada * 1.005):
-                alvo_tp = tp_sheets
-                label_alvo = f"${alvo_tp}"
+                if regime_macro["modo"] != "EXPANSAO" and alvo_dinamico > 0 and alvo_dinamico < tp_sheets:
+                    alvo_tp = alvo_dinamico
+                    label_alvo = f"${alvo_tp} (TP Tático {mult_r_ativo:.2f}R | Original: ${tp_sheets})"
+                else:
+                    alvo_tp = tp_sheets
+                    label_alvo = f"${alvo_tp}"
             elif risco_inicial > 0:
-                alvo_tp = round(entrada + (risco_inicial * 1.75), 2)
-                label_alvo = f"${alvo_tp} (TP 1.75R)"
+                alvo_tp = alvo_dinamico
+                label_alvo = f"${alvo_tp} (TP {mult_r_ativo:.2f}R)"
             else:
                 alvo_tp = 0.0
                 label_alvo = "N/A"
@@ -374,19 +462,29 @@ for chave_pos, info in posicoes_ativas_dict.items():
             print(f"[ERRO] Falha ao auditar posição ativa {chave_pos}: {e}")
 
 # ===================================================================
-# 5. MOTOR MATEMÁTICO: PULLBACK À EMA 20 (RS >= 70 | ALVO 1.75R)
+# 5. MOTOR MATEMÁTICO: PULLBACK À EMA 20 (ALVO ADAPTATIVO AO REGIME SPY)
 # ===================================================================
-def analisar_pullback_ema20(ativo_info):
+def analisar_pullback_ema20(ativo_info, regime):
     try:
-        # FILTRO DE FORÇA RELATIVA (RS SCORE MÍNIMO >= 70)
+        # FILTRO DE FORÇA RELATIVA DINÂMICO (RS >= 70 em Expansão | RS >= 80 em Corretivo)
         rs_score = limpar_float(ativo_info.get("rs_score")) or 0.0
-        if rs_score < 70.0:
+        if rs_score < regime["rs_min"]:
             return None
 
         ticker = str(ativo_info.get("ticker", "")).strip().upper()
         if not ticker or ticker == "#N/A" or ticker == "NONE": return None
         if ticker in posicoes_ativas_dict: return None
         if ticker == "BRK-A": ticker = "BRK-B"
+
+        setor_inicial = str(
+            ativo_info.get("setor") or 
+            ativo_info.get("setorAtivo") or 
+            ativo_info.get("sector") or 
+            ativo_info.get("Setor") or "Desconhecido"
+        ).strip()
+
+        if setor_inicial != "Desconhecido" and setor_inicial.lower() in setores_ocupados:
+            return None
 
         time.sleep(random.uniform(0.5, 1.2))
 
@@ -438,10 +536,13 @@ def analisar_pullback_ema20(ativo_info):
             if risco <= 0:
                 return None
 
-            # Alvo Pullback EMA20: 1.75R
-            alvo_tp = round(entrada_gatilho + (risco * 1.75), 2)
+            # Alvo Pullback EMA20 dinâmico: 1.75R em Expansão | 1.25R em Corretivo
+            tp_mult = regime["tp_mult"]
+            alvo_tp = round(entrada_gatilho + (risco * tp_mult), 2)
 
             qtd_calc = round(vol_diaria_usd / risco, 2)
+            if qtd_calc <= 0:
+                return None
             val_calc = entrada_gatilho * qtd_calc
 
             return {
@@ -450,6 +551,7 @@ def analisar_pullback_ema20(ativo_info):
                 "gatilho": entrada_gatilho,
                 "stop_loss": stop_loss,
                 "alvo_tp": alvo_tp,
+                "tp_mult": tp_mult,
                 "qtd_acoes": qtd_calc,
                 "valor_investir": round(val_calc, 2),
                 "estado_pullback": "A ATIVAR (Pullback Detetado: Preço defendeu a EMA 20 sobre SMA50/200)",
@@ -464,88 +566,99 @@ def analisar_pullback_ema20(ativo_info):
 # 6. EXECUÇÃO PRINCIPAL E RELATÓRIO DETALHADO
 # ===================================================================
 def executar_motor():
-    alertas_pullback = []
-    total_analisados = 0
-    
-    mercado_ok, msg_mercado = verificar_regime_mercado()
+    try:
+        alertas_pullback = []
+        total_analisados = 0
+        
+        mercado_ok = regime_macro["autorizado"]
+        msg_mercado = regime_macro["msg"]
+        tp_mult_label = f"{regime_macro['tp_mult']:.2f}R"
 
-    if mercado_ok and ativos_sheets:
-        for ativo_info in ativos_sheets:
-            ticker = ativo_info.get("ticker")
-            if not ticker or ticker == "#N/A": continue
-            
-            total_analisados += 1
-            res = analisar_pullback_ema20(ativo_info)
-            if res: alertas_pullback.append(res)
+        if mercado_ok and ativos_sheets:
+            for ativo_info in ativos_sheets:
+                ticker = ativo_info.get("ticker")
+                if not ticker or ticker == "#N/A": continue
+                
+                total_analisados += 1
+                res = analisar_pullback_ema20(ativo_info, regime_macro)
+                if res: alertas_pullback.append(res)
 
-    data_hoje = datetime.now(ZoneInfo("Europe/Lisbon")).strftime("%d/%m/%Y %H:%M")
-    
-    bloco_texto = (
-        f"⚡ RELATÓRIO DETALHADO - MOTOR 20: PULLBACK À EMA 20 ({data_hoje})\n"
-        f"==================================================================\n"
-        f"🌐 Filtro Macro: {msg_mercado}\n"
-        f"💰 Risco Configurado por Trade: ${vol_diaria_usd:,.2f} USD\n\n"
-    )
-
-    if bloco_posicoes_ativas:
-        bloco_texto += f"📌 GESTÃO DE POSIÇÕES ATIVAS:\n{bloco_posicoes_ativas}\n--------------------------------------------------\n\n"
-    else:
-        bloco_texto += "📌 GESTÃO DE POSIÇÕES ATIVAS: Nenhuma posição ativa detetada para este motor.\n--------------------------------------------------\n\n"
-
-    if not mercado_ok:
-        bloco_texto += f"🛡️ [MODO DEFENSIVO] Novas entradas bloqueadas hoje ({msg_mercado}).\n"
-    elif alertas_pullback:
-        bloco_texto += f"🎯 NOVOS SINAIS DE PULLBACK À EMA 20 ({len(alertas_pullback)}):\n\n"
-        for a in alertas_pullback:
-            info_ativo = next((item for item in ativos_sheets if str(item.get("ticker","")).strip().upper() == a['ticker']), {})
-            
-            nome_empresa = info_ativo.get("nome") or info_ativo.get("nomeEmpresa") or info_ativo.get("name") or "N/A"
-            
-            setor = (
-                info_ativo.get("setor") or 
-                info_ativo.get("setorAtivo") or 
-                info_ativo.get("sector") or 
-                info_ativo.get("Setor")
-            )
-            
-            if not setor or str(setor).strip().lower() in ["desconhecido", "n/a", "none", "#n/a", ""]:
-                setor = obter_setor_yf(a['ticker'])
-            
-            bloco_texto += (
-                f"🔹 [{a['ticker']}] - {nome_empresa} ({setor})\n"
-                f"   - 📊 Contexto Técnico: {a['estado_pullback']}\n"
-                f"   - ⚙️ Tática: Continuação de Tendência (Alvo 1.75R | BE +1.0R | Time-Stop Adaptativo 96h)\n"
-                f"   - 📋 Tipo de Ordem: BUY STOP (Gatilho na quebra da máxima diária da vela de defesa)\n"
-                f"   - 🔢 Dados Exatos: Gatilho Compra: ${a['gatilho']} | Stop Loss: ${a['stop_loss']} | Alvo (1.75R): ${a['alvo_tp']}\n"
-                f"   - 💰 Dimensionamento: Qtd: {a['qtd_acoes']} | Valor a Investir: ~${a['valor_investir']} USD\n"
-                f"   - 📈 RS Score Institucional: {a['rs_score']}\n"
-                f"--------------------------------------------------\n"
-            )
-    else:
-        bloco_texto += "✅ Nenhum novo sinal de Pullback à EMA 20 detetado hoje.\n"
-
-    enviar_email(bloco_texto)
-
-    with open("comboio_pullback_temp.txt", "w", encoding="utf-8") as f:
-        f.write(bloco_texto)
-
-    # ===================================================================
-    # 7. NOTIFICAÇÃO TELEGRAM (DEBUG OU ALERTA TIME-STOP)
-    # ===================================================================
-    debug_telegram_ativado = str(configs_dict.get("TELEGRAM_NOTIFICATIONS_DEBUG", "false")).strip().lower() in ["true", "1", "sim", "yes"]
-
-    if debug_telegram_ativado or len(alertas_pullback) > 0 or alerta_timestop_ativo:
-        print("A enviar notificação para o Telegram via função modular...")
-        total_acionados = len(alertas_pullback)
-        aviso_ts = "\n⏰ *ALERTA TIME-STOP:* Tens posição(ões) M20 expirada(s) (>96h sem impulso) para fechar!" if alerta_timestop_ativo else ""
-        mensagem_debug = (
-            f"20 ⚡ *MOTOR 20 (PULLBACK EMA 20)*\n\n"
-            f"🔍 [STATUS] Execução concluída com sucesso.\n"
-            f"📊 Analisados: *{total_analisados}* | Acionados: *{total_acionados}*{aviso_ts}\n"
-            f"💰 Risco/Trade: *${vol_diaria_usd:.2f}*\n"
-            f"✉️ Relatório de pullback gerado e enviado por e-mail."
+        data_hoje = datetime.now(ZoneInfo("Europe/Lisbon")).strftime("%d/%m/%Y %H:%M")
+        
+        bloco_texto = (
+            f"⚡ RELATÓRIO DETALHADO - MOTOR 20: PULLBACK À EMA 20 ({data_hoje})\n"
+            f"==================================================================\n"
+            f"🌐 Filtro Macro: {msg_mercado}\n"
+            f"💰 Risco Configurado por Trade: ${vol_diaria_usd:,.2f} USD (Base: ${risco_base_usd:,.2f} | Fator: {int(regime_macro['fator_risco']*100)}%)\n\n"
         )
-        enviar_alerta(mensagem_debug)
+
+        if bloco_posicoes_ativas:
+            bloco_texto += f"📌 GESTÃO DE POSIÇÕES ATIVAS:\n{bloco_posicoes_ativas}\n--------------------------------------------------\n\n"
+        else:
+            bloco_texto += "📌 GESTÃO DE POSIÇÕES ATIVAS: Nenhuma posição ativa detetada para este motor.\n--------------------------------------------------\n\n"
+
+        if not mercado_ok:
+            bloco_texto += f"🛡️ [MODO DEFENSIVO] Novas entradas bloqueadas hoje ({msg_mercado}).\n"
+        elif alertas_pullback:
+            bloco_texto += f"🎯 NOVOS SINAIS DE PULLBACK À EMA 20 ({len(alertas_pullback)}):\n\n"
+            for a in alertas_pullback:
+                info_ativo = next((item for item in ativos_sheets if str(item.get("ticker","")).strip().upper() == a['ticker']), {})
+                
+                nome_empresa = info_ativo.get("nome") or info_ativo.get("nomeEmpresa") or info_ativo.get("name") or "N/A"
+                
+                setor = (
+                    info_ativo.get("setor") or 
+                    info_ativo.get("setorAtivo") or 
+                    info_ativo.get("sector") or 
+                    info_ativo.get("Setor")
+                )
+                
+                if not setor or str(setor).strip().lower() in ["desconhecido", "n/a", "none", "#n/a", ""]:
+                    setor = obter_setor_yf(a['ticker'])
+
+                if setor != "Desconhecido" and setor.lower() in setores_ocupados:
+                    continue
+                
+                bloco_texto += (
+                    f"🔹 [{a['ticker']}] - {nome_empresa} ({setor})\n"
+                    f"   - 📊 Contexto Técnico: {a['estado_pullback']}\n"
+                    f"   - ⚙️ Tática: Continuação de Tendência (Alvo {tp_mult_label} [{regime_macro['modo']}] | BE +1.0R | Time-Stop 96h)\n"
+                    f"   - 📋 Tipo de Ordem: BUY STOP (Gatilho na quebra da máxima diária da vela de defesa)\n"
+                    f"   - 🔢 Dados Exatos: Gatilho Compra: ${a['gatilho']} | Stop Loss: ${a['stop_loss']} | Alvo ({tp_mult_label}): ${a['alvo_tp']}\n"
+                    f"   - 💰 Dimensionamento: Qtd: {a['qtd_acoes']} | Valor a Investir: ~${a['valor_investir']} USD\n"
+                    f"   - 📈 RS Score Institucional: {a['rs_score']}\n"
+                    f"--------------------------------------------------\n"
+                )
+        else:
+            bloco_texto += "✅ Nenhum novo sinal de Pullback à EMA 20 detetado hoje.\n"
+
+        enviar_email(bloco_texto)
+
+        with open("comboio_pullback_temp.txt", "w", encoding="utf-8") as f:
+            f.write(bloco_texto)
+
+        # ===================================================================
+        # 7. NOTIFICAÇÃO TELEGRAM (DEBUG OU ALERTA TIME-STOP)
+        # ===================================================================
+        debug_telegram_ativado = str(configs_dict.get("TELEGRAM_NOTIFICATIONS_DEBUG", "false")).strip().lower() in ["true", "1", "sim", "yes"]
+
+        if debug_telegram_ativado or len(alertas_pullback) > 0 or alerta_timestop_ativo:
+            print("A enviar notificação para o Telegram via função modular...")
+            total_acionados = len(alertas_pullback)
+            aviso_ts = "\n⏰ *ALERTA TIME-STOP:* Tens posição(ões) M20 expirada(s) (>96h sem impulso) para fechar!" if alerta_timestop_ativo else ""
+            mensagem_debug = (
+                f"20 ⚡ *MOTOR 20 (PULLBACK EMA 20)*\n\n"
+                f"🔍 [STATUS] Execução concluída ({regime_macro['modo']} | Alvo {tp_mult_label}).\n"
+                f"📊 Analisados: *{total_analisados}* | Acionados: *{total_acionados}*{aviso_ts}\n"
+                f"💰 Risco/Trade: *${vol_diaria_usd:.2f}*\n"
+                f"✉️ Relatório de pullback gerado e enviado por e-mail."
+            )
+            enviar_alerta(mensagem_debug)
+    except Exception as e:
+        erro_str = f"[ERRO CRÍTICO M20] {e}\n{traceback.format_exc()}"
+        print(erro_str)
+        with open("comboio_pullback_temp.txt", "w", encoding="utf-8") as f:
+            f.write(erro_str)
 
 if __name__ == "__main__":
     executar_motor()
