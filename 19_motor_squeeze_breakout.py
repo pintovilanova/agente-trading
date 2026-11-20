@@ -643,7 +643,8 @@ def executar_motor():
     candidatos_squeeze = []
     total_analisados = 0
     
-    mercado_ok, msg_mercado = verificar_regime_mercado()
+    mercado_ok = regime_macro["autorizado"]
+    msg_mercado = regime_macro["msg"]
 
     if mercado_ok and ativos_sheets:
         for ativo_info in ativos_sheets:
