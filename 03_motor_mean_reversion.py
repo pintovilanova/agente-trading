@@ -7,9 +7,10 @@
 # institucional (RVOL >= 1.5 ou sombra inferior > 1.5x corpo) em ativos
 # estruturalmente saudáveis (Close >= SMA200 * 0.98).
 # Adapta-se ao regime do SPY:
-#   - Expansão (SPY > EMA20): RS >= 55 | Lote 100%
-#   - Corretivo (SMA200 < SPY <= EMA20): RS >= 70 | Lote 50%
-#   - Baixista (SPY < SMA200, crash <= -2.5% ou VIX > 32): Bloqueia entradas
+#   - Expansão (SPY > EMA20): RS >= 55 | Dist MM20 <= -8% | RSI < 30 | Lote 100%
+#   - Corretivo (SMA200 < SPY <= EMA20): RS >= 70 | Dist MM20 <= -8% | RSI < 30 | Lote 50%
+#   - Reversão Baixista (SPY < SMA200, sem crash <= -2.0% nem VIX > 32): RS >= 85 | Dist MM20 <= -10% | RSI < 25 | Lote 35%
+#   - Crash / Pânico Extremo (Var <= -2.0% ou VIX > 32): Bloqueia entradas (0%)
 # ===================================================================
 
 import pandas as pd
@@ -55,6 +56,11 @@ WEBHOOK_URL = os.environ.get('WEBHOOK_URL')
 EMAIL_USER = os.environ.get("EMAIL_USER")
 EMAIL_PASS = os.environ.get("EMAIL_PASS")
 
+if EMAIL_USER:
+    EMAIL_USER = EMAIL_USER.strip()
+if EMAIL_PASS:
+    EMAIL_PASS = EMAIL_PASS.strip()
+
 SMTP_SERVER = "smtp.gmail.com"
 SMTP_PORT = 587
 
@@ -74,14 +80,17 @@ def limpar_float(val):
 def verificar_regime_mercado_reversao():
     """
     Avalia o regime do SPY para Reversão à Média:
-    - Expansão (SPY > EMA20): RS >= 55 | Fator Lote 1.0 (0.5 se VIX > 25)
-    - Corretivo (SMA200 < SPY <= EMA20): RS >= 70 | Fator Lote 0.5 (0.35 se VIX > 25)
-    - Baixista / Crash / Pânico Sistémico: Bloqueia novas entradas
+    - Expansão (SPY > EMA20): RS >= 55 | Dist MM20 <= -8% | RSI < 30 | Fator Lote 1.0 (0.5 se VIX > 25)
+    - Corretivo (SMA200 < SPY <= EMA20): RS >= 70 | Dist MM20 <= -8% | RSI < 30 | Fator Lote 0.5 (0.35 se VIX > 25)
+    - Reversão Baixista (SPY < SMA200, sem crash <= -2.0% nem VIX > 32): RS >= 85 | Dist MM20 <= -10% | RSI < 25 | Fator Lote 0.35
+    - Crash / Pânico Extremo (Var <= -2.0% ou VIX > 32): Bloqueia novas entradas (0%)
     """
     regime_default = {
         "autorizado": True,
         "modo": "EXPANSAO",
         "rs_min": 55.0,
+        "dist_mm20_max": -8.0,
+        "rsi_max": 30.0,
         "fator_risco": 1.0,
         "msg": "Dados SPY insuficientes (autorizado por defeito em modo Expansão)."
     }
@@ -110,29 +119,40 @@ def verificar_regime_mercado_reversao():
 
         tag_vix = f" | VIX: {vix_atual:.2f}" if vix_atual is not None else ""
 
-        if close_hoje < sma200:
-            return {
-                "autorizado": False,
-                "modo": "BAIXISTA",
-                "rs_min": 80.0,
-                "fator_risco": 0.0,
-                "msg": f"SPY (${close_hoje:.2f}) abaixo da SMA200 (${sma200:.2f}). Mercado em tendência de baixa{tag_vix}."
-            }
-        if var_dia <= -2.5:
+        if var_dia <= -2.0:
             return {
                 "autorizado": False,
                 "modo": "CRASH",
-                "rs_min": 80.0,
+                "rs_min": 85.0,
+                "dist_mm20_max": -10.0,
+                "rsi_max": 25.0,
                 "fator_risco": 0.0,
-                "msg": f"SPY em queda extrema hoje ({var_dia:.2f}% <= -2.50%){tag_vix}. Evitar apanhar facas a cair."
+                "msg": f"SPY em queda extrema hoje ({var_dia:.2f}% <= -2.00%){tag_vix}. Evitar apanhar facas a cair."
             }
         if vix_atual is not None and vix_atual > 32.0:
             return {
                 "autorizado": False,
                 "modo": "PANICO_SISTEMICO",
-                "rs_min": 80.0,
+                "rs_min": 85.0,
+                "dist_mm20_max": -10.0,
+                "rsi_max": 25.0,
                 "fator_risco": 0.0,
                 "msg": f"VIX em pânico sistémico extremo ({vix_atual:.2f} > 32.00)."
+            }
+
+        # Exceção Tática de Mean Reversion em Regime Baixista (sem crash diário nem VIX > 32)
+        if close_hoje < sma200:
+            return {
+                "autorizado": True,
+                "modo": "REVERSAO_BAIXISTA",
+                "rs_min": 85.0,
+                "dist_mm20_max": -10.0,
+                "rsi_max": 25.0,
+                "fator_risco": 0.35,
+                "msg": (
+                    f"SPY abaixo da SMA200 (${close_hoje:.2f} < ${sma200:.2f} | Var: {var_dia:+.2f}%{tag_vix}) — "
+                    f"Modo Ressalto Defensivo: apenas líderes (RS >= 85 & > SMA200), Dist MM20 <= -10%, RSI < 25 e Lote 35%."
+                )
             }
 
         if close_hoje < ema20:
@@ -141,6 +161,8 @@ def verificar_regime_mercado_reversao():
                 "autorizado": True,
                 "modo": "CORRETIVO",
                 "rs_min": 70.0,
+                "dist_mm20_max": -8.0,
+                "rsi_max": 30.0,
                 "fator_risco": fator,
                 "msg": (
                     f"SPY em correção (${close_hoje:.2f} < EMA20 ${ema20:.2f} | SMA200 ${sma200:.2f} | "
@@ -153,6 +175,8 @@ def verificar_regime_mercado_reversao():
             "autorizado": True,
             "modo": "EXPANSAO",
             "rs_min": 55.0,
+            "dist_mm20_max": -8.0,
+            "rsi_max": 30.0,
             "fator_risco": fator,
             "msg": (
                 f"SPY em Expansão (${close_hoje:.2f} > EMA20 ${ema20:.2f} > SMA200 ${sma200:.2f} | "
@@ -252,7 +276,7 @@ def analisar_reversao_media(ativo_info, risco_por_trade_usd, posicoes_ativas_dic
         ticker = "BRK-B"
 
     val_rs_num = limpar_float(rs_score)
-    if val_rs_num is not None and val_rs_num < regime["rs_min"]:
+    if val_rs_num is None or val_rs_num < regime["rs_min"]:
         return None
 
     try:
@@ -331,8 +355,9 @@ def analisar_reversao_media(ativo_info, risco_por_trade_usd, posicoes_ativas_dic
         rvol = float(ultimo_dia['RVOL'])
         atr = float(ultimo_dia['ATRr_14'])
         
-        # Exige que a ação não esteja em colapso estrutural abaixo da SMA 200
-        if preco < (sma200 * 0.98):
+        # Em regime baixista do SPY exige ação estritamente acima da SMA200; nos restantes permite até 2% abaixo
+        fator_sma200 = 1.00 if regime["modo"] == "REVERSAO_BAIXISTA" else 0.98
+        if preco < (sma200 * fator_sma200):
             return None
 
         dist_mm20 = ((preco - sma20) / sma20) * 100 if sma20 > 0 else 0.0
@@ -351,7 +376,7 @@ def analisar_reversao_media(ativo_info, risco_por_trade_usd, posicoes_ativas_dic
         qtd_acoes = "N/A"
         valor_investir = "N/A"
         
-        if dist_mm20 <= -8.0 and rsi < 30 and (rvol >= 1.5 or absorcao):
+        if dist_mm20 <= regime["dist_mm20_max"] and rsi < regime["rsi_max"] and (rvol >= 1.5 or absorcao):
             preco_rt = obter_preco_tempo_real(ticker, preco)
             # Se o preço já recuperou acima da EMA 9 antes da entrada, o ressalto já aconteceu
             if preco_rt >= ema9:
@@ -388,15 +413,12 @@ def analisar_reversao_media(ativo_info, risco_por_trade_usd, posicoes_ativas_dic
             except Exception:
                 return "N/A"
 
-        if val_rs_num is not None:
-            if val_rs_num >= 80:
-                status_rs = "🔥 ELITE (RS >= 80 - Vento a Favor)"
-            elif val_rs_num >= 70:
-                status_rs = "⚖️ FORTE (RS 70-79 - Suporte Institucional)"
-            else:
-                status_rs = "⚠️ MODERADO (RS 55-69 - Exige Absorção Clara)"
+        if val_rs_num >= 80:
+            status_rs = "🔥 ELITE (RS >= 80 - Vento a Favor)"
+        elif val_rs_num >= 70:
+            status_rs = "⚖️ FORTE (RS 70-79 - Suporte Institucional)"
         else:
-            status_rs = "❓ SEM DADO DE RS"
+            status_rs = "⚠️ MODERADO (RS 55-69 - Exige Absorção Clara)"
 
         linha_comboio = (
             f"{ticker},Nome: {nome_empresa},Setor: {setor},Preço: {limpa(preco)},"
@@ -411,6 +433,9 @@ def analisar_reversao_media(ativo_info, risco_por_trade_usd, posicoes_ativas_dic
 
         return {
             "ticker": ticker,
+            "setor": setor,
+            "rs_num": val_rs_num,
+            "dist_mm20": dist_mm20,
             "estado": estado,
             "comboio_str": linha_comboio
         }
@@ -457,7 +482,7 @@ def executar_motor():
     print(f"[CONFIG] Capital Total: ${capital_total_conta:,.2f} | Risco Base: ${risco_base_usd:.2f} | Risco Ajustado ({regime_macro['modo']}): ${risco_ajustado_usd:.2f} USD")
     print(f"[MACRO] {regime_macro['msg']}\n")
 
-    ativos_acionados = []
+    candidatos_panico = []
     total_analisados = 0
     
     if regime_macro["autorizado"]:
@@ -472,7 +497,18 @@ def executar_motor():
             if res_dict:
                 print(f"[OK] {ticker} analisado. Estado: {res_dict['estado']}")
                 if "PÂNICO EXTREMO" in res_dict['estado']:
-                    ativos_acionados.append(res_dict)
+                    candidatos_panico.append(res_dict)
+
+    # Ordena por RS Score mais alto e queda mais extrema, limitando a 1 entrada por setor livre
+    candidatos_panico = sorted(candidatos_panico, key=lambda x: (x['rs_num'], -x['dist_mm20']), reverse=True)
+    ativos_acionados = []
+    setores_novos_usados = set()
+    for item in candidatos_panico:
+        s_key = item["setor"].lower()
+        if s_key not in setores_novos_usados:
+            ativos_acionados.append(item)
+            if s_key not in ["desconhecido", "n/a", ""]:
+                setores_novos_usados.add(s_key)
                 
     prompt_ia = (
         "Atuas como o Analista Quantitativo Chefe de um fundo institucional. O teu mandato é auditar ações que sofreram quedas massivas e identificar fundos institucionais para ressaltos rápidos (Dead Cat Bounce).\n"
@@ -500,7 +536,7 @@ def executar_motor():
     bloco_texto_ia = (
         f"🌐 Filtro Macro: {regime_macro['msg']}\n"
         f"💰 Risco Configurado por Trade: ${risco_ajustado_usd:.2f} USD (Base: ${risco_base_usd:.2f} | Fator: {int(regime_macro['fator_risco']*100)}%)\n\n"
-        f"{prompt_ia}\n\n--------------------------------------------------\n"
+        f"--------------------------------------------------\n"
     )
     
     if not regime_macro["autorizado"]:
@@ -508,7 +544,7 @@ def executar_motor():
     elif not ativos_acionados:
         bloco_texto_ia += "[SEM SINAIS DE PÂNICO] - Nenhuma ação da Watchlist cumpre os requisitos matemáticos de sobrevenda extrema hoje.\n"
     else:
-        bloco_texto_ia += "DADOS DOS ATIVOS EM PÂNICO (COMBOIO):\n\n"
+        bloco_texto_ia += f"{prompt_ia}\n\n--------------------------------------------------\nDADOS DOS ATIVOS EM PÂNICO (COMBOIO):\n\n"
         for item in ativos_acionados:
             bloco_texto_ia += item["comboio_str"] + "\n"
             
