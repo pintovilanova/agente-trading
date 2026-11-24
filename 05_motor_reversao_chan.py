@@ -4,12 +4,13 @@
 # Descrição Geral:
 # Implementa a estratégia quantitativa de curto prazo de Larry Connors & Ernest Chan:
 #   - Tendência Primária obrigatória: Close > SMA 200 + Liquidez institucional
-#   - Exaustão Estatística: Close < Banda Bollinger Inferior (20, 2.0) e RSI(2) < 10
+#   - Exaustão Estatística: Close < Banda Bollinger Inferior (20, 2.0) e RSI(2) extremo
 #   - Saída Mecânica: Banda Central de Bollinger (SMA 20)
 #   - Regime Macro (SPY/VIX):
-#       * Expansão (SPY > EMA20): RS >= 60 | Lote 100%
-#       * Corretivo (SMA200 < SPY <= EMA20): RS >= 75 | Lote 50%
-#       * Baixista (SPY < SMA200, crash <= -2.5% ou VIX > 32): Bloqueia entradas
+#       * Expansão (SPY > EMA20): RS >= 60 | RSI(2) < 10 | Lote 100%
+#       * Corretivo (SMA200 < SPY <= EMA20): RS >= 75 | RSI(2) < 10 | Lote 50%
+#       * Reversão Baixista (SPY < SMA200, sem crash <= -2.0% nem VIX > 32): RS >= 85 | RSI(2) < 5 | Lote 35%
+#       * Crash / Pânico Extremo (Var <= -2.0% ou VIX > 32): Bloqueia entradas (0%)
 # ===================================================================
 
 import pandas as pd
@@ -55,6 +56,11 @@ WEBHOOK_URL = os.environ.get('WEBHOOK_URL')
 EMAIL_USER = os.environ.get("EMAIL_USER")
 EMAIL_PASS = os.environ.get("EMAIL_PASS")
 
+if EMAIL_USER:
+    EMAIL_USER = EMAIL_USER.strip()
+if EMAIL_PASS:
+    EMAIL_PASS = EMAIL_PASS.strip()
+
 SMTP_SERVER = "smtp.gmail.com"
 SMTP_PORT = 587
 
@@ -74,14 +80,16 @@ def limpar_float(val):
 def verificar_regime_mercado_connors():
     """
     Avalia o regime do SPY para Connors-Chan (RSI 2 + BB):
-    - Expansão (SPY > EMA20): RS >= 60 | Fator Lote 1.0 (0.5 se VIX > 25)
-    - Corretivo (SMA200 < SPY <= EMA20): RS >= 75 | Fator Lote 0.5 (0.35 se VIX > 25)
-    - Baixista / Crash / Pânico Sistémico: Bloqueia novas entradas
+    - Expansão (SPY > EMA20): RS >= 60 | RSI(2) < 10 | Fator Lote 1.0 (0.5 se VIX > 25)
+    - Corretivo (SMA200 < SPY <= EMA20): RS >= 75 | RSI(2) < 10 | Fator Lote 0.5 (0.35 se VIX > 25)
+    - Reversão Baixista (SPY < SMA200, sem crash <= -2.0% nem VIX > 32): RS >= 85 | RSI(2) < 5 | Fator Lote 0.35
+    - Crash / Pânico Extremo (Var <= -2.0% ou VIX > 32): Bloqueia novas entradas (0%)
     """
     regime_default = {
         "autorizado": True,
         "modo": "EXPANSAO",
         "rs_min": 60.0,
+        "rsi2_max": 10.0,
         "fator_risco": 1.0,
         "msg": "Dados SPY insuficientes (autorizado por defeito em modo Expansão)."
     }
@@ -110,29 +118,37 @@ def verificar_regime_mercado_connors():
 
         tag_vix = f" | VIX: {vix_atual:.2f}" if vix_atual is not None else ""
 
-        if close_hoje < sma200:
-            return {
-                "autorizado": False,
-                "modo": "BAIXISTA",
-                "rs_min": 80.0,
-                "fator_risco": 0.0,
-                "msg": f"SPY (${close_hoje:.2f}) abaixo da SMA200 (${sma200:.2f}). Mercado em tendência de baixa{tag_vix}."
-            }
-        if var_dia <= -2.5:
+        if var_dia <= -2.0:
             return {
                 "autorizado": False,
                 "modo": "CRASH",
-                "rs_min": 80.0,
+                "rs_min": 85.0,
+                "rsi2_max": 5.0,
                 "fator_risco": 0.0,
-                "msg": f"SPY em queda extrema hoje ({var_dia:.2f}% <= -2.50%){tag_vix}. Entradas suspensas."
+                "msg": f"SPY em queda extrema hoje ({var_dia:.2f}% <= -2.00%){tag_vix}. Entradas suspensas."
             }
         if vix_atual is not None and vix_atual > 32.0:
             return {
                 "autorizado": False,
                 "modo": "PANICO_SISTEMICO",
-                "rs_min": 80.0,
+                "rs_min": 85.0,
+                "rsi2_max": 5.0,
                 "fator_risco": 0.0,
                 "msg": f"VIX em pânico sistémico extremo ({vix_atual:.2f} > 32.00)."
+            }
+
+        # Exceção Tática de Mean Reversion em Regime Baixista (sem crash diário nem VIX > 32)
+        if close_hoje < sma200:
+            return {
+                "autorizado": True,
+                "modo": "REVERSAO_BAIXISTA",
+                "rs_min": 85.0,
+                "rsi2_max": 5.0,
+                "fator_risco": 0.35,
+                "msg": (
+                    f"SPY abaixo da SMA200 (${close_hoje:.2f} < ${sma200:.2f} | Var: {var_dia:+.2f}%{tag_vix}) — "
+                    f"Modo Ressalto Defensivo: apenas líderes (RS >= 85 & > SMA200), RSI(2) < 5.0 e Lote 35%."
+                )
             }
 
         if close_hoje < ema20:
@@ -141,6 +157,7 @@ def verificar_regime_mercado_connors():
                 "autorizado": True,
                 "modo": "CORRETIVO",
                 "rs_min": 75.0,
+                "rsi2_max": 10.0,
                 "fator_risco": fator,
                 "msg": (
                     f"SPY em correção (${close_hoje:.2f} < EMA20 ${ema20:.2f} | SMA200 ${sma200:.2f} | "
@@ -153,6 +170,7 @@ def verificar_regime_mercado_connors():
             "autorizado": True,
             "modo": "EXPANSAO",
             "rs_min": 60.0,
+            "rsi2_max": 10.0,
             "fator_risco": fator,
             "msg": (
                 f"SPY em Expansão (${close_hoje:.2f} > EMA20 ${ema20:.2f} > SMA200 ${sma200:.2f} | "
@@ -254,7 +272,7 @@ def analisar_connors_chan(ativo_info, risco_por_trade_usd, tickers_ativos_set, s
             return None
 
         val_rs_num = limpar_float(rs_score)
-        if val_rs_num is not None and val_rs_num < regime["rs_min"]:
+        if val_rs_num is None or val_rs_num < regime["rs_min"]:
             return None
 
         time.sleep(random.uniform(0.35, 0.8))
@@ -349,7 +367,7 @@ def analisar_connors_chan(ativo_info, risco_por_trade_usd, tickers_ativos_set, s
         qtd_acoes = "N/A"
         valor_investir = "N/A"
         
-        if (preco < bbl_inferior) and (rsi_2 < 10.0):
+        if (preco < bbl_inferior) and (rsi_2 < regime["rsi2_max"]):
             preco_rt = obter_preco_tempo_real(ticker, preco)
             # Se o preço em pré-abertura/pós-fecho já repicou para perto da SMA20, o sinal expirou
             if preco_rt >= bb_media:
@@ -384,15 +402,12 @@ def analisar_connors_chan(ativo_info, risco_por_trade_usd, tickers_ativos_set, s
             except Exception:
                 return "N/A"
 
-        if val_rs_num is not None:
-            if val_rs_num >= 80:
-                status_rs = "🔥 ELITE (RS >= 80 - Vento a Favor)"
-            elif val_rs_num >= 70:
-                status_rs = "⚖️ FORTE (RS 70-79 - Suporte Institucional)"
-            else:
-                status_rs = "⚠️ MODERADO (RS 60-69 - Tendência Primária > SMA200)"
+        if val_rs_num >= 80:
+            status_rs = "🔥 ELITE (RS >= 80 - Vento a Favor)"
+        elif val_rs_num >= 70:
+            status_rs = "⚖️ FORTE (RS 70-79 - Suporte Institucional)"
         else:
-            status_rs = "❓ SEM DADO DE RS"
+            status_rs = "⚠️ MODERADO (RS 60-69 - Tendência Primária > SMA200)"
 
         linha_comboio = (
             f"{ticker},Nome: {nome_empresa},Setor: {setor},Preço: {limpa(preco)},"
@@ -406,6 +421,9 @@ def analisar_connors_chan(ativo_info, risco_por_trade_usd, tickers_ativos_set, s
 
         return {
             "ticker": ticker,
+            "setor": setor,
+            "rs_num": val_rs_num,
+            "rsi2": rsi_2,
             "estado": estado,
             "comboio_str": linha_comboio
         }
@@ -454,7 +472,7 @@ def executar_motor():
     print(f"[CONFIG] Capital Total: ${capital_total_conta:,.2f} | Risco Base: ${risco_base_usd:.2f} | Risco Ajustado ({regime_macro['modo']}): ${risco_ajustado_usd:.2f} USD")
     print(f"[MACRO] {regime_macro['msg']}\n")
 
-    ativos_acionados = []
+    candidatos_connors = []
     total_analisados = 0
     
     if regime_macro["autorizado"]:
@@ -468,7 +486,18 @@ def executar_motor():
             if res:
                 print(f"[OK] {ticker} analisado. Estado: {res['estado']}")
                 if "EXAUSTÃO ESTATÍSTICA" in res['estado']:
-                    ativos_acionados.append(res)
+                    candidatos_connors.append(res)
+
+    # Ordena por RS Score mais alto e RSI(2) mais extremo, limitando a 1 entrada por setor livre
+    candidatos_connors = sorted(candidatos_connors, key=lambda x: (x['rs_num'], -x['rsi2']), reverse=True)
+    ativos_acionados = []
+    setores_novos_usados = set()
+    for item in candidatos_connors:
+        s_key = item["setor"].lower()
+        if s_key not in setores_novos_usados:
+            ativos_acionados.append(item)
+            if s_key not in ["desconhecido", "n/a", ""]:
+                setores_novos_usados.add(s_key)
                 
     prompt_ia = """MODO PREDADOR CONNORS-CHAN (REVERSÃO DE CURTO PRAZO)
 O teu mandato é auditar os sinais estatísticos gerados pelo motor Python e formatá-los.
@@ -479,7 +508,7 @@ O teu mandato é auditar os sinais estatísticos gerados pelo motor Python e for
 3. NARRATIVA NEUTRA: Se não tiveres detalhes sobre o motivo da queda, escreve apenas 'Anomalia estatística baseada em exaustão técnica extrema'.
 
 Regras de Triagem e Execução:
-1. VALIDAÇÃO DE EXAUSTÃO: Confirma que o RSI(2) está abaixo de 10 e que o preço rompeu a Banda de Bollinger inferior em tendência primária > SMA200.
+1. VALIDAÇÃO DE EXAUSTÃO: Confirma que o RSI(2) cumpre o limite do regime atual e que o preço rompeu a Banda de Bollinger inferior em tendência primária > SMA200.
 2. CONTEXTO INSTITUCIONAL (RS SCORE): Avalia o RS Score reportado. Se o ativo tiver RS Score de Elite (>= 80), o ressalto beneficia de suporte forte.
 3. VETO FUNDAMENTAL: O motor já filtra ações <$10, baixa liquidez, mREITs, ativos abaixo da SMA200 e Earnings iminentes. Emite veto caso exista notícia de fraude ou revisão drástica de guidance.
 4. TÁTICA DE SAÍDA: O alvo de Take-Profit é cravado na Banda Central de Bollinger (SMA20).
@@ -498,7 +527,7 @@ Estrutura Visual Obrigatória:
         f"🧲 RELATÓRIO DE DADOS BRUTOS - CONNORS-CHAN REVERSÃO 🏹\n"
         f"🌐 Filtro Macro: {regime_macro['msg']}\n"
         f"💰 Risco Configurado por Trade: ${risco_ajustado_usd:.2f} USD (Base: ${risco_base_usd:.2f} | Fator: {int(regime_macro['fator_risco']*100)}%)\n\n"
-        f"{prompt_ia}\n\n--------------------------------------------------\n"
+        f"--------------------------------------------------\n"
     )
     
     if not regime_macro["autorizado"]:
@@ -506,7 +535,7 @@ Estrutura Visual Obrigatória:
     elif not ativos_acionados:
         bloco_texto_ia += "[SEM SINAIS CONNORS-CHAN] - Nenhuma ação da Watchlist cumpre os critérios de exaustão estatística hoje.\n"
     else:
-        bloco_texto_ia += "DADOS DOS ATIVOS EM EXAUSTÃO (COMBOIO):\n\n"
+        bloco_texto_ia += f"{prompt_ia}\n\n--------------------------------------------------\nDADOS DOS ATIVOS EM EXAUSTÃO (COMBOIO):\n\n"
         for item in ativos_acionados:
             bloco_texto_ia += item["comboio_str"] + "\n"
             
