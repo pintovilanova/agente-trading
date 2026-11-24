@@ -147,7 +147,7 @@ def desenhar_barra(valor, maximo=100, tamanho=10):
     return f"[{'█' * preenchido}{'░' * (tamanho - preenchido)}]"
 
 # ===================================================================
-# 2. AUDITORIA MACRO GLOBAL (INTERMARKET ANALYSIS)
+# 2. AUDITORIA MACRO GLOBAL (INTERMARKET ANALYSIS - CALIBRADA)
 # ===================================================================
 print("A executar auditoria macro global do mercado US (Análise Intermarket)...")
 data_hoje_str = datetime.now(ZoneInfo("Europe/Lisbon")).strftime("%d/%m/%Y %H:%M:%S")
@@ -191,154 +191,12 @@ try:
     vix_fecho = float(df_vix['Close'].iloc[-1])
     vix_hoje = obter_preco_tempo_real("^VIX", vix_fecho)
 
-    if queda_referencia <= -1.50:
-        motivos_bloqueio.append(f"Queda/Gap abrupto no SPY de {queda_referencia:.2f}% (<= -1.50%).")
+    if queda_referencia <= -2.00:
+        motivos_bloqueio.append(f"Queda/Gap abrupto no SPY de {queda_referencia:.2f}% (<= -2.00%).")
+    elif queda_referencia <= -1.25:
+        alertas_amarelos.append(f"Pressão vendedora intradiária no SPY ({queda_referencia:.2f}%) — reduzir exposição.")
+
     if preco_spy < sma200_spy:
-        motivos_bloqueio.append(f"SPY (${preco_spy:.2f}) abaixo da SMA 200 (${sma200_spy:.2f}) — Regime Baixista.")
+        motivos_bloqueio.append(f"SPY (${preco_spy:.2f}) abaixo da SMA 200 (${sma200_spy:.2f}) — Regime Baixista para Breakouts.")
     elif preco_spy < ema20_spy:
-        alertas_amarelos.append(f"SPY (${preco_spy:.2f}) abaixo da EMA 20 (${ema20_spy:.2f}) — Pullback de curto prazo (evitar perseguir breakouts).")
-
-    if vix_hoje > 30.00:
-        motivos_bloqueio.append(f"VIX nos {vix_hoje:.2f} (> 30.00) — Pânico sistémico elevado.")
-    elif vix_hoje > 23.00:
-        alertas_amarelos.append(f"VIX elevado nos {vix_hoje:.2f} (> 23.00) — Volatilidade acima do normal (reduzir lote para 50%).")
-
-    # B. AVALIAÇÃO DE ESTRUTURA DE VOLATILIDADE (Curva do VIX)
-    vix3m_hoje = None
-    razao_vix = None
-    if not df_vix3m.empty:
-        vix3m_hoje = float(df_vix3m['Close'].iloc[-1])
-        razao_vix = vix_hoje / vix3m_hoje if vix3m_hoje > 0 else 0.0
-        if razao_vix >= 1.00:
-            motivos_bloqueio.append(f"Curva VIX Invertida (Backwardation): VIX ({vix_hoje:.2f}) >= VIX3M ({vix3m_hoje:.2f}) [Rácio {razao_vix:.2f}].")
-        elif razao_vix > 0.90:
-            alertas_amarelos.append(f"Curva VIX sob pressão (Rácio VIX/VIX3M: {razao_vix:.2f} > 0.90) — Institucional a comprar proteção.")
-
-    # C. AVALIAÇÃO DO MERCADO DE CRÉDITO (HYG vs IEF)
-    credito_disponivel = False
-    ratio_atual = 0.0
-    ratio_sma50 = 0.0
-    diff_credito_pct = 0.0
-    if not df_hyg.empty and not df_ief.empty:
-        df_credito = pd.DataFrame({
-            'HYG': df_hyg['Close'],
-            'IEF': df_ief['Close']
-        }).dropna()
-        if len(df_credito) >= 50:
-            df_credito['Ratio'] = df_credito['HYG'] / df_credito['IEF']
-            df_credito['Ratio_SMA50'] = df_credito['Ratio'].rolling(window=50).mean()
-            df_credito = df_credito.dropna()
-            if not df_credito.empty:
-                credito_disponivel = True
-                ratio_atual = float(df_credito['Ratio'].iloc[-1])
-                ratio_sma50 = float(df_credito['Ratio_SMA50'].iloc[-1])
-                diff_credito_pct = ((ratio_atual - ratio_sma50) / ratio_sma50) * 100
-                if ratio_atual < (ratio_sma50 * 0.985):
-                    motivos_bloqueio.append(f"Estresse de Crédito Institucional: Rácio HYG/IEF ({ratio_atual:.4f}) caiu {diff_credito_pct:.2f}% abaixo da SMA 50 ({ratio_sma50:.4f}).")
-                elif ratio_atual < ratio_sma50:
-                    alertas_amarelos.append(f"Crédito High-Yield ligeiramente abaixo da média (HYG/IEF {diff_credito_pct:+.2f}% vs SMA 50).")
-
-    # ===================================================================
-    # 3. VEREDICTO E AÇÃO DO DISJUNTOR (COM PAINEL VISUAL)
-    # ===================================================================
-    if motivos_bloqueio:
-        corpo_email = "🚨 [DISJUNTOR MACRO VERMELHO] - MERCADO HOSTIL (NOVAS COMPRAS BLOQUEADAS)\n\n"
-        corpo_email += "O Motor Intermarket detetou hostilidades sistémicas no mercado norte-americano.\n"
-        corpo_email += "⚠️ DIRETRIZ OPERACIONAL: Novas compras BLOQUEADAS. A pipeline prossegue apenas para auditar e proteger as POSIÇÕES ATIVAS.\n\n"
-        corpo_email += "MOTIVOS CRÍTICOS DE BLOQUEIO:\n"
-        for m in motivos_bloqueio:
-            corpo_email += f"❌ {m}\n"
-        
-        if alertas_amarelos:
-            corpo_email += "\nSINAIS SECUNDÁRIOS DE TENSÃO:\n"
-            for a in alertas_amarelos:
-                corpo_email += f"⚠️ {a}\n"
-
-        corpo_email += f"\nResumo Indicadores: SPY ${preco_spy:.2f} (SMA200: ${sma200_spy:.2f}) | VIX {vix_hoje:.2f}"
-        if razao_vix is not None:
-            corpo_email += f" | VIX/VIX3M {razao_vix:.2f}"
-        corpo_email += f"\nData/Hora: {data_hoje_str}"
-
-        motivos_tg = "\n".join([f"❌ {m}" for m in motivos_bloqueio])
-        mensagem_tg = (
-            f"🚨 *DISJUNTOR MACRO VERMELHO*\n\n"
-            f"🛑 *Novas Compras Bloqueadas* (Gestão de ativas mantida):\n"
-            f"{motivos_tg}\n\n"
-            f"📊 SPY: *${preco_spy:.2f}* | VIX: *{vix_hoje:.2f}*"
-        )
-
-        gravar_ficheiro_macro(corpo_email)
-        enviar_alerta_macro(
-            "tradingRelatorioIA US - 🚨 DISJUNTOR MACRO VERMELHO (COMPRAS BLOQUEADAS)",
-            corpo_email,
-            mensagem_tg,
-            urgente=True
-        )
-        
-        print("\n[ALERTA MACRO] Condições macro hostis. Novas compras bloqueadas. Pipeline segue para gestão de ativas.")
-        sys.exit(0)
-
-    else:
-        distancia_sma200 = ((preco_spy - sma200_spy) / sma200_spy) * 100
-        regime_label = "🟡 [DISJUNTOR MACRO AMARELO] - MERCADO EM CAUTELA" if alertas_amarelos else "✅ [DISJUNTOR MACRO VERDE] - MERCADO SAUDÁVEL"
-        assunto_email = (
-            "tradingRelatorioIA US - 🟡 DISJUNTOR MACRO AMARELO (CAUTELA)"
-            if alertas_amarelos else
-            "tradingRelatorioIA US - ✅ DISJUNTOR MACRO VERDE (MERCADO SAUDÁVEL)"
-        )
-
-        print(f"\n[OK] {regime_label}. Pipeline autorizada.")
-
-        corpo_verde = f"{regime_label}\n\n"
-        if alertas_amarelos:
-            corpo_verde += "⚠️ ALERTAS AMARELOS DE CAUTELA (OPERAR COM SELETIVIDADE / LOTE REDUZIDO):\n"
-            for a in alertas_amarelos:
-                corpo_verde += f"• ⚠️ {a}\n"
-            corpo_verde += "\n"
-        else:
-            corpo_verde += "O Motor Intermarket confirmou que o capital institucional suporta o mercado sem tensões sistémicas. Pipeline autorizada a 100%.\n\n"
-
-        corpo_verde += "📊 PAINEL DE CONTROLO MACRO (RADAR INSTITUCIONAL)\n"
-        corpo_verde += "==================================================\n"
-        
-        status_spy = "🟢 BULL MARKET (> EMA20 & SMA200)" if preco_spy >= ema20_spy else "🟡 PULLBACK CURTO PRAZO (< EMA20, > SMA200)"
-        corpo_verde += f"1. TENDÊNCIA S&P 500 (SPY): {status_spy}\n"
-        corpo_verde += f"   Cotação: ${preco_spy:.2f} (Var Dia: {var_fecho_spy:+.2f}%) | EMA20: ${ema20_spy:.2f} | SMA50: ${sma50_spy:.2f} | SMA200: ${sma200_spy:.2f}\n"
-        corpo_verde += f"   Termómetro vs SMA200: {desenhar_barra(distancia_sma200, maximo=15, tamanho=10)} +{distancia_sma200:.1f}% acima do suporte longo.\n\n"
-        
-        status_vix = "🟡 ATENÇÃO (> 23)" if vix_hoje > 23 else ("🟢 MODERADO" if vix_hoje > 18 else "🟢 TRANQUILO")
-        corpo_verde += f"2. ÍNDICE DE PÂNICO (VIX): {status_vix}\n"
-        corpo_verde += f"   Valor Atual: {vix_hoje:.2f} (Alerta: > 23.00 | Crítico: > 30.00)\n"
-        corpo_verde += f"   Termómetro: {desenhar_barra(vix_hoje, maximo=35, tamanho=10)}\n\n"
-        
-        if vix3m_hoje and razao_vix is not None:
-            estado_vix_curva = "🟡 ALERTA AMARELO (> 0.90)" if razao_vix > 0.90 else "🟢 CONTANGO SAUDÁVEL"
-            corpo_verde += f"3. ESTRUTURA DE CURVA (VIX vs VIX3M): {estado_vix_curva}\n"
-            corpo_verde += f"   Rácio Atual: {razao_vix:.2f} (VIX {vix_hoje:.2f} / VIX3M {vix3m_hoje:.2f} | Crítico: >= 1.00)\n"
-            corpo_verde += f"   Termómetro: {desenhar_barra(razao_vix * 100, maximo=100, tamanho=10)}\n\n"
-
-        if credito_disponivel:
-            estado_credito = "🟡 TENSÃO LEVE (< SMA50)" if ratio_atual < ratio_sma50 else "🟢 APETITE POR RISCO (RISK-ON)"
-            corpo_verde += f"4. MERCADO DE CRÉDITO (HYG / IEF): {estado_credito}\n"
-            corpo_verde += f"   Rácio Atual: {ratio_atual:.4f} vs SMA50: {ratio_sma50:.4f} ({diff_credito_pct:+.2f}%)\n"
-            corpo_verde += f"   Termómetro: {desenhar_barra(50 + (diff_credito_pct * 10), maximo=100, tamanho=10)}\n"
-        
-        corpo_verde += "==================================================\n"
-        corpo_verde += f"Data/Hora de Execução: {data_hoje_str}"
-
-        status_tg = "🟡 *DISJUNTOR MACRO AMARELO*" if alertas_amarelos else "✅ *DISJUNTOR MACRO VERDE*"
-        mensagem_tg = (
-            f"{status_tg}\n\n"
-            f"📊 SPY: *${preco_spy:.2f}* ({var_fecho_spy:+.2f}%) | VIX: *{vix_hoje:.2f}*\n"
-            f"📈 Curva VIX/VIX3M: *{razao_vix:.2f}*" if razao_vix is not None else
-            f"{status_tg}\n\n📊 SPY: *${preco_spy:.2f}* ({var_fecho_spy:+.2f}%) | VIX: *{vix_hoje:.2f}*"
-        )
-        
-        gravar_ficheiro_macro(corpo_verde)
-        enviar_alerta_macro(assunto_email, corpo_verde, mensagem_tg, urgente=False)
-        sys.exit(0)
-
-except Exception as e:
-    print(f"[ERRO CRÍTICO] Falha na auditoria macro: {e}")
-    gravar_ficheiro_macro(f"⚠️ [ERRO MACRO] Falha técnica na auditoria ({data_hoje_str}): {e}\n")
-    sys.exit(0)
+        alertas_amarelos.append(f"SPY (${preco_spy:.2f}) abaixo da EMA 20 (${ema20_spy:.2f}) — Pullback de curto prazo (evitar perseguir breakouts
