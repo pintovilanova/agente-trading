@@ -46,6 +46,11 @@ WEBHOOK_URL = os.environ.get('WEBHOOK_URL')
 EMAIL_USER = os.environ.get("EMAIL_USER")
 EMAIL_PASS = os.environ.get("EMAIL_PASS")
 
+if EMAIL_USER:
+    EMAIL_USER = EMAIL_USER.strip()
+if EMAIL_PASS:
+    EMAIL_PASS = EMAIL_PASS.strip()
+
 SMTP_SERVER = "smtp.gmail.com"
 SMTP_PORT = 587
 
@@ -120,16 +125,18 @@ def buscar_dados_completos():
 
 def verificar_regime_mercado():
     """
-    Avalia o regime do SPY e devolve parâmetros adaptativos:
-    - Expansão (SPY > EMA20): TP 1.5R | RS >= 70 | Fator Lote 1.0 (ou 0.5 se VIX > 25)
-    - Corretivo/Lateral (SMA200 < SPY <= EMA20): TP 1.0R | RS >= 80 | Fator Lote 0.5
-    - Baixista (SPY < SMA200 ou VIX > 30): Bloqueia novas entradas
+    Avalia o regime do SPY e devolve parâmetros adaptativos para Mean Reversion:
+    - Expansão (SPY > EMA20): TP 1.5R | RS >= 70 | RSI(2) <= 8.0 | Fator Lote 1.0 (0.5 se VIX > 23)
+    - Corretivo/Lateral (SMA200 < SPY <= EMA20): TP 1.0R | RS >= 80 | RSI(2) <= 8.0 | Fator Lote 0.5 (0.35 se VIX > 23)
+    - Reversão Baixista (SPY < SMA200, mas sem crash <= -2.0% nem VIX > 32): TP 1.0R | RS >= 85 | RSI(2) <= 5.0 | Fator Lote 0.35
+    - Crash / Pânico Extremo (Var <= -2.0% ou VIX > 32): Bloqueio total (0%)
     """
     regime_default = {
         "autorizado": True,
         "modo": "EXPANSAO",
         "tp_mult": 1.5,
         "rs_min": 70.0,
+        "rsi2_max": 8.0,
         "fator_risco": 1.0,
         "msg": "Dados SPY insuficientes (autorizado por defeito em modo Expansão)."
     }
@@ -158,32 +165,40 @@ def verificar_regime_mercado():
 
         tag_vix = f" | VIX: {vix_atual:.2f}" if vix_atual is not None else ""
 
-        if close_hoje < sma200:
-            return {
-                "autorizado": False,
-                "modo": "BAIXISTA",
-                "tp_mult": 1.0,
-                "rs_min": 85.0,
-                "fator_risco": 0.0,
-                "msg": f"SPY (${close_hoje:.2f}) abaixo da SMA200 (${sma200:.2f}). Regime baixista{tag_vix}."
-            }
-        if var_dia <= -2.5:
+        if var_dia <= -2.0:
             return {
                 "autorizado": False,
                 "modo": "CRASH",
                 "tp_mult": 1.0,
                 "rs_min": 85.0,
+                "rsi2_max": 5.0,
                 "fator_risco": 0.0,
-                "msg": f"SPY em queda extrema/crash hoje ({var_dia:.2f}% <= -2.50%){tag_vix}."
+                "msg": f"SPY em queda extrema/crash hoje ({var_dia:.2f}% <= -2.00%){tag_vix}."
             }
-        if vix_atual is not None and vix_atual > 30.0:
+        if vix_atual is not None and vix_atual > 32.0:
             return {
                 "autorizado": False,
                 "modo": "PANICO_VIX",
                 "tp_mult": 1.0,
                 "rs_min": 85.0,
+                "rsi2_max": 5.0,
                 "fator_risco": 0.0,
-                "msg": f"VIX em pânico sistémico ({vix_atual:.2f} > 30.00)."
+                "msg": f"VIX em pânico sistémico extremo ({vix_atual:.2f} > 32.00)."
+            }
+
+        # Exceção Tática de Mean Reversion: SPY abaixo da SMA200, mas sem pânico extremo nem crash diário
+        if close_hoje < sma200:
+            return {
+                "autorizado": True,
+                "modo": "REVERSAO_BAIXISTA",
+                "tp_mult": 1.0,
+                "rs_min": 85.0,
+                "rsi2_max": 5.0,
+                "fator_risco": 0.35,
+                "msg": (
+                    f"SPY abaixo da SMA200 (${close_hoje:.2f} < ${sma200:.2f} | Var: {var_dia:+.2f}%{tag_vix}) — "
+                    f"Modo Ressalto Defensivo: apenas líderes (RS >= 85 & > SMA200), RSI(2) <= 5.0, Alvo 1.0R e Lote 35%."
+                )
             }
 
         # Regime Corretivo / Lateral (SPY acima da SMA200 mas abaixo da EMA20)
@@ -194,6 +209,7 @@ def verificar_regime_mercado():
                 "modo": "CORRETIVO",
                 "tp_mult": 1.0,
                 "rs_min": 80.0,
+                "rsi2_max": 8.0,
                 "fator_risco": fator,
                 "msg": (
                     f"SPY em pullback/lateral (${close_hoje:.2f} < EMA20 ${ema20:.2f} | SMA200 ${sma200:.2f} | "
@@ -208,6 +224,7 @@ def verificar_regime_mercado():
             "modo": "EXPANSAO",
             "tp_mult": 1.5,
             "rs_min": 70.0,
+            "rsi2_max": 8.0,
             "fator_risco": fator,
             "msg": (
                 f"SPY em Expansão (${close_hoje:.2f} > EMA20 ${ema20:.2f} > SMA200 ${sma200:.2f} | "
@@ -382,7 +399,6 @@ for chave_pos, info in posicoes_ativas_dict.items():
             alvo_dinamico = round(entrada + (risco_inicial * mult_r_ativo), 2) if risco_inicial > 0 else ema5_dinamica
             
             if tp_sheets > (entrada * 1.005):
-                # Em regime corretivo/baixista, avisa também do alvo tático 1.0R caso seja inferior ao TP original
                 if regime_macro["modo"] != "EXPANSAO" and alvo_dinamico > 0 and alvo_dinamico < tp_sheets:
                     alvo_efetivo = alvo_dinamico
                     label_alvo = f"${alvo_efetivo} (TP Tático 1.0R | Original: ${tp_sheets})"
@@ -506,14 +522,14 @@ def analisar_rsi_drop(ativo_info, regime):
         atr = float(ultimo[cols_atr[0]])
         ema5 = float(ultimo['EMA5'])
 
-        if preco > sma200 and sma50 > sma200 and rsi2 <= 8.0:
+        if preco > sma200 and sma50 > sma200 and rsi2 <= regime["rsi2_max"]:
             entrada_gatilho = round(maxima_dia * 1.002, 2)
             stop_loss = round(min(minima_dia * 0.995, entrada_gatilho - (atr * 1.5)), 2)
             risco = entrada_gatilho - stop_loss
             if risco <= 0:
                 return None
 
-            # Alvo dinâmico: 1.5R em Expansão (SPY > EMA20) | 1.0R em Corretivo (SPY < EMA20)
+            # Alvo dinâmico: 1.5R em Expansão | 1.0R em Corretivo ou Reversão Baixista
             tp_mult = regime["tp_mult"]
             alvo_tp = round(entrada_gatilho + (risco * tp_mult), 2)
             
@@ -569,7 +585,7 @@ def analisar_rsi_drop(ativo_info, regime):
 # ===================================================================
 def executar_motor():
     try:
-        alertas_rsi = []
+        candidatos_rsi = []
         total_analisados = 0
 
         mercado_ok = regime_macro["autorizado"]
@@ -582,7 +598,18 @@ def executar_motor():
                 if not ticker or ticker == "#N/A": continue
                 total_analisados += 1
                 res = analisar_rsi_drop(ativo_info, regime_macro)
-                if res: alertas_rsi.append(res)
+                if res: candidatos_rsi.append(res)
+
+        # Ordena por RS Score mais alto e RSI(2) mais extremo, limitando a 1 entrada por setor livre
+        candidatos_rsi = sorted(candidatos_rsi, key=lambda x: (x['rs_score'], -x['rsi2']), reverse=True)
+        alertas_rsi = []
+        setores_novos_usados = set()
+        for item in candidatos_rsi:
+            s_key = item["setor"].lower()
+            if s_key not in setores_novos_usados:
+                alertas_rsi.append(item)
+                if s_key not in ["desconhecido", "n/a", ""]:
+                    setores_novos_usados.add(s_key)
 
         data_hoje = datetime.now(ZoneInfo("Europe/Lisbon")).strftime("%d/%m/%Y %H:%M")
         
@@ -605,7 +632,7 @@ def executar_motor():
             for a in alertas_rsi:
                 bloco_texto += (
                     f"🔹 [{a['ticker']}] - {a['nome_empresa']} ({a['setor']})\n"
-                    f"    - 📊 Contexto Técnico: RSI(2) em {a['rsi2']} (Sobrevendido Extremo | EMA5: ${a['ema5']} | SMA50 > SMA200)\n"
+                    f"    - 📊 Contexto Técnico: RSI(2) em {a['rsi2']} (Sobrevendido Extremo <= {regime_macro['rsi2_max']} | EMA5: ${a['ema5']} | SMA50 > SMA200)\n"
                     f"    - ⚙️ Tática: Reversão à Média Adaptativa (Alvo {tp_mult_label} [{regime_macro['modo']}] | Time-Stop 72h)\n"
                     f"    - 📋 Tipo de Ordem: BUY STOP (Só ativa se romper máxima de hoje: ${a['gatilho']})\n"
                     f"    - 🔢 Dados Exatos: Gatilho Compra: ${a['gatilho']} | Stop Loss: ${a['stop_loss']} | Alvo TP ({tp_mult_label}): ${a['alvo_tp']}\n"
