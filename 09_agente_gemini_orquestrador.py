@@ -214,6 +214,9 @@ else:
                 "SINAIS DE ENTRADA" in dados or
                 "NOVOS SINAIS" in dados or
                 "NOVOS ALVOS" in dados or
+                "PÂNICO EXTREMO" in dados or
+                "EXAUSTÃO ESTATÍSTICA" in dados or
+                "DADOS DOS ATIVOS" in dados or
                 "MODO DEFENSIVO" in dados or
                 ("Nenhum ativo" not in dados and "[SEM OPORTUNIDADES]" not in dados and "[MERCADO FRACO]" not in dados)
             ):
@@ -267,17 +270,20 @@ A tua missão é ler integralmente este conteúdo, processar **TODOS** os ativos
 🚨 REGRAS ESTRITAS DE ESTRUTURA, INTEGRIDADE E FECHO 🚨
 
 1. DISJUNTOR MACRO & REGIME DE VOLATILIDADE VIX (MOTOR 16):
-   - Inicia o relatório com o diagnóstico do **Disjuntor Macro Global** (`comboio_macro_temp.txt`) e do **Regime de Volatilidade VIX (Motor 16)**.
-   - Se o Disjuntor Macro estiver em **VERMELHO (BLOQUEADO)** ou o Motor 16 indicar **Lote Máximo Breakouts: 0%**, NENHUMA nova ordem de Breakout pode ser aprovada (apenas gestão de posições ativas e eventuais estratégias de reversão explícitas se autorizadas).
-   - **Atenção para não duplicar reduções de lote:** Se um motor já calculou a quantidade com o lote reduzido (ex.: `Lote: 50%` ou `Fator: 50%`), mantém esse valor sem o cortar uma segunda vez. Caso o motor tenha calculado a 100%, aplica o limite máximo do Motor 16.
+  - Inicia o relatório com o diagnóstico do **Disjuntor Macro Global** (`comboio_macro_temp.txt`) e do **Regime de Volatilidade VIX (Motor 16)**.
+  - Se o Disjuntor Macro estiver em **VERMELHO (BLOQUEADO)** ou o Motor 16 indicar **Lote Máximo Breakouts: 0%**, NENHUMA nova ordem de Breakout (Extratores US/Europa, VCP, PEAD, Carver, Holy Grail, Momentum Burst, Squeeze, Pullback, Confluência) pode ser aprovada.
+  - **Exceção Tática de Mean Reversion (Motores 03, 05 e 17):** Estratégias de reversão à média de curto prazo (**Motor 03 Pânico**, **Motor 05 Connors-Chan** e **Motor 17 RSI Drop**) PODEM ser aprovadas com lote defensivo reduzido (ex.: `Fator: 35%` ou `50%`) sempre que o próprio motor tenha emitido um gatilho confirmado (`BUY LIMIT` / `BUY STOP`), exceto se houver Crash diário (`<= -2.0%`) ou VIX `> 32.0`.
+  - **Atenção para não duplicar reduções de lote:** Se um motor já calculou a quantidade com o lote reduzido (ex.: `Lote: 35%`, `Lote: 50%` ou `Fator: 35%`), mantém exatamente essa quantidade e risco sem os cortar uma segunda vez. Caso o motor tenha calculado a 100%, aplica o limite máximo do Motor 16.
 2. PRIORIDADE ABSOLUTA - MOTOR 21 (CONFLUÊNCIA SUPREMA):
-   - Se o Motor 21 reportar "SINAIS DE ALTA PROBABILIDADE (SNIPER)", DEVES OBRIGATORIAMENTE criar um destaque gigante logo no topo (após o VIX) intitulado "🚨🚨 ALERTA SNIPER: CONFLUÊNCIA SUPREMA DETETADA 🚨🚨".
-   - O Motor 21 é o modelo quantitativo absoluto com Risco/Retorno 2.5:1 / 3:1. Dá-lhe a máxima importância.
+  - Se o Motor 21 reportar "SINAIS DE ALTA PROBABILIDADE (SNIPER)", DEVES OBRIGATORIAMENTE criar um destaque gigante logo no topo (após o VIX) intitulado "🚨🚨 ALERTA SNIPER: CONFLUÊNCIA SUPREMA DETETADA 🚨🚨".
+  - O Motor 21 é o modelo quantitativo absoluto com Risco/Retorno 2.5:1 / 3:1. Dá-lhe a máxima importância.
 3. ⚠️ DIRETIVA ANTI-OMISSÃO ESTRITA (POSIÇÕES ATIVAS & SINAIS):
-   - É ESTRITAMENTE PROIBIDO resumir, omitir, truncar ou ignorar qualquer posição ativa em carteira (`GESTÃO DE POSIÇÕES ATIVAS`, `ATIVA_M17`, `ATIVA_M18`, `ATIVA_M19`, `ATIVA_M20`, `ATIVA_M21`) ou qualquer novo sinal presente nos relatórios dos motores.
-   - **DEVES LISTAR INTEGRALMENTE TODAS AS POSIÇÕES ATIVAS AUDITADAS (ex.: M17, M18, M19, M20, M21) NA SECÇÃO DO RESPETIVO MOTOR E INCLUÍ-LAS NA TABELA FINAL.**
+  - É ESTRITAMENTE PROIBIDO resumir, omitir, truncar ou ignorar qualquer posição ativa em carteira (`GESTÃO DE POSIÇÕES ATIVAS`, `ATIVA_M17`, `ATIVA_M18`, `ATIVA_M19`, `ATIVA_M20`, `ATIVA_M21`) ou qualquer novo sinal presente nos relatórios dos motores.
+  - **DEVES LISTAR INTEGRALMENTE TODAS AS POSIÇÕES ATIVAS AUDITADAS (ex.: M17, M18, M19, M20, M21) NA SECÇÃO DO RESPETIVO MOTOR E INCLUÍ-LAS NA TABELA FINAL.**
 4. ZERO CRIATIVIDADE DE DADOS: Não inventes preços, tickers, stops ou tamanhos de posição. Utiliza unicamente e na íntegra os dados fornecidos.
-5. VETO DE SOBREPOSIÇÃO E CORRELAÇÃO (MOTOR 12): Posições ativas na carteira (com 'PosicaoAtiva: SIM' ou detidas) NÃO PODEM ter novas ordens de compra sugeridas. Respeita também eventuais vetos de correlação >= 80% reportados pelo Motor 12.
+5. VETO DE SOBREPOSIÇÃO E CORRELAÇÃO (MOTOR 12):
+  - Posições ativas na carteira (com 'PosicaoAtiva: SIM' ou detidas) NÃO PODEM ter novas ordens de compra sugeridas.
+  - Na secção do Motor 12 (Correlação de Risco), verifica e menciona **TODOS** os novos sinais aprovados hoje (incluindo os dos Motores 03, 05 e 17) cruzados com as posições ativas e entre si. Respeita eventuais vetos de correlação >= 80% reportados pelo Motor 12.
 6. TABELA FINAL OBRIGATÓRIA (SÍNTESE DE ORDENS):
    É ESTRITAMENTE OBRIGATÓRIO terminar o relatório com uma secção final intitulada "## 12. SÍNTESE DE ORDENS PARA APROVAÇÃO DO GESTOR DE CONTA" contendo uma tabela Markdown formatada exatamente com esta estrutura:
 
@@ -286,8 +292,7 @@ A tua missão é ler integralmente este conteúdo, processar **TODOS** os ativos
 
 - Inclui TODAS as ordens de colheita parcial de lucro a 2R (Profit Harvest) geradas pelo Motor 15 no topo da tabela.
 - Inclui TODAS as ações ativas em carteira auditadas pelos Motores (M17, M18, M19, M20, M21) com a respetiva recomendação (MANTER, SUBIR STOP P/ BE, FECHAR POR ALVO, FECHAR POR TIME-STOP ou STOP LOSS).
-- Inclui TODAS as novas ordens aprovadas (US e Europa) respeitando os limites do Disjuntor Macro e do Motor 16.
-- **Inclui TODOS os sinais gerados pelo Motor 17 (RSI Drop & Rebound), Motor 18, Motor 19 e Motor 20 com os respetivos alvos TP e dados de entrada exatos.**
+- Inclui TODAS as novas ordens aprovadas (US, Europa, Motor 03 Pânico, Motor 05 Connors-Chan, Motor 17 RSI Drop, Motor 18, Motor 19 e Motor 20) respeitando os limites do Disjuntor Macro e do Motor 16.
 - Inclui os sinais do Motor 21 com nota explícita de "SNIPER" nas Notas Táticas.
 - Respeita rigorosamente a moeda de cada ativo (USD, EUR, GBP, CHF, etc.).
 
