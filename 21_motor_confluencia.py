@@ -3,12 +3,12 @@
 # ===================================================================================
 # Descrição Geral:
 # O modelo "Sniper". Exige confluência absoluta:
-# 1. Filtro de Mercado (SPY > EMA 20 e SMA 200 diária + ^VIX controlado)
-# 2. Força Relativa de Elite (RS Score >= 75 | >= 80 se VIX > 23)
+# 1. Filtro de Mercado (SPY + ^VIX) com modo Seletivo de Elite em regime baixista
+# 2. Força Relativa de Elite (RS Score >= 75 Expansão | >= 80 Cautela | >= 85 Baixista Seletivo)
 # 3. Pullback à Zona da EMA 20 em Tendência Primária (EMA 20 > SMA 50 > SMA 200)
-# 4. Squeeze de Volatilidade (BB dentro de KC)
-# 5. Entrada Institucional Silenciosa (RVOL >= 1.5x vs média dos 20 dias anteriores)
-# Assimetria Sniper (2.5R) | Break-Even +1.0R | Time-Stop Adaptativo 96h (4 dias úteis).
+# 4. Squeeze de Volatilidade (BB dentro de KC ou Pré-Squeeze apertado)
+# 5. Entrada Institucional Silenciosa (RVOL >= 1.35x vs média dos 20 dias anteriores)
+# Assimetria Sniper (2.5R Expansão / 2.0R Defensivo) | Break-Even +1.0R | Time-Stop 96h.
 # ===================================================================================
 
 import pandas as pd
@@ -121,14 +121,17 @@ def obter_setor_yf(ticker):
 # ===================================================================
 def verificar_regime_mercado():
     """
-    Exige SPY > EMA 20 > SMA 200 e VIX controlado para autorizar entradas Sniper:
-    - Expansão (VIX <= 23): RS >= 75 | Lote 100%
-    - Expansão Cautela (23 < VIX <= 28): RS >= 80 | Lote 50%
-    - Bloqueado (SPY < EMA20, SPY < SMA200, queda <= -1.50% ou VIX > 28): Sem novas entradas
+    Matriz Macro de 4 Estados para entradas Sniper (Confluência Suprema):
+    - Expansão (SPY > EMA20 > SMA200 & VIX <= 25): RS >= 75 | Alvo 2.5R | Lote 100%
+    - Expansão Cautela (SPY > EMA20 > SMA200 & 25 < VIX <= 32): RS >= 80 | Alvo 2.0R | Lote 50%
+    - Corretivo / Pullback Macro (SMA200 < SPY <= EMA20 & VIX <= 32): RS >= 82 | Alvo 2.0R | Lote 45%
+    - Baixista Seletivo (SPY < SMA200 & VIX <= 32): RS >= 85 | Alvo 2.0R | Lote 30%
+    - Bloqueado (queda diária <= -2.00% ou VIX > 32): Sem novas entradas
     """
     regime_default = {
         "autorizado": True,
         "modo": "EXPANSAO",
+        "tp_mult": 2.5,
         "rs_min": 75.0,
         "fator_risco": 1.0,
         "msg": "Dados SPY insuficientes (autorizado por defeito em modo Expansão)."
@@ -158,59 +161,74 @@ def verificar_regime_mercado():
 
         tag_vix = f" | VIX: {vix_atual:.2f}" if vix_atual is not None else ""
 
-        if close_hoje < sma200:
-            return {
-                "autorizado": False,
-                "modo": "BAIXISTA",
-                "rs_min": 80.0,
-                "fator_risco": 0.0,
-                "msg": f"SPY (${close_hoje:.2f}) abaixo da SMA200 (${sma200:.2f}). Regime baixista{tag_vix}."
-            }
-        if close_hoje < ema20:
-            return {
-                "autorizado": False,
-                "modo": "PULLBACK_MACRO",
-                "rs_min": 80.0,
-                "fator_risco": 0.0,
-                "msg": f"SPY (${close_hoje:.2f}) abaixo da EMA20 (${ema20:.2f}). Sem momentum de curto prazo{tag_vix}."
-            }
-        if var_dia <= -1.50:
+        if var_dia <= -2.00:
             return {
                 "autorizado": False,
                 "modo": "QUEDA_DIARIA",
-                "rs_min": 80.0,
+                "tp_mult": 2.0,
+                "rs_min": 85.0,
                 "fator_risco": 0.0,
-                "msg": f"SPY em queda forte hoje ({var_dia:.2f}% <= -1.50%){tag_vix}. Entradas Sniper bloqueadas."
+                "msg": f"SPY em queda forte hoje ({var_dia:.2f}% <= -2.00%){tag_vix}. Entradas Sniper bloqueadas."
             }
-        if vix_atual is not None and vix_atual > 28.0:
+        if vix_atual is not None and vix_atual > 32.0:
             return {
                 "autorizado": False,
                 "modo": "PANICO_VIX",
-                "rs_min": 80.0,
+                "tp_mult": 2.0,
+                "rs_min": 85.0,
                 "fator_risco": 0.0,
-                "msg": f"VIX elevado ({vix_atual:.2f} > 28.00). Entradas Sniper bloqueadas."
+                "msg": f"VIX em pânico sistémico ({vix_atual:.2f} > 32.00). Entradas Sniper bloqueadas."
             }
 
-        if vix_atual is not None and vix_atual > 23.0:
+        if close_hoje < sma200:
+            return {
+                "autorizado": True,
+                "modo": "BAIXISTA_SELETIVO",
+                "tp_mult": 2.0,
+                "rs_min": 85.0,
+                "fator_risco": 0.30,
+                "msg": (
+                    f"SPY abaixo da SMA200 (${close_hoje:.2f} < ${sma200:.2f}{tag_vix}) — "
+                    f"Sniper Seletivo de Elite: apenas líderes RS >= 85 em tendência própria (> EMA20 > SMA50 > SMA200), TP 2.0R e Lote 30%."
+                )
+            }
+
+        if close_hoje < ema20:
+            fator = 0.35 if (vix_atual is not None and vix_atual > 25.0) else 0.45
+            return {
+                "autorizado": True,
+                "modo": "CORRETIVO_SELETIVO",
+                "tp_mult": 2.0,
+                "rs_min": 82.0,
+                "fator_risco": fator,
+                "msg": (
+                    f"SPY em pullback (${close_hoje:.2f} < EMA20 ${ema20:.2f} | SMA200 ${sma200:.2f}{tag_vix}) — "
+                    f"Sniper Tático: RS >= 82 | TP 2.0R | Lote {int(fator*100)}%."
+                )
+            }
+
+        if vix_atual is not None and vix_atual > 25.0:
             return {
                 "autorizado": True,
                 "modo": "EXPANSAO_CAUTELA",
+                "tp_mult": 2.0,
                 "rs_min": 80.0,
                 "fator_risco": 0.50,
                 "msg": (
                     f"SPY em tendência (${close_hoje:.2f} > EMA20 ${ema20:.2f} > SMA200 ${sma200:.2f} | "
-                    f"Var: {var_dia:+.2f}%{tag_vix}) — Cautela VIX: RS >= 80 e Lote 50%."
+                    f"Var: {var_dia:+.2f}%{tag_vix}) — Cautela VIX: RS >= 80 | TP 2.0R | Lote 50%."
                 )
             }
 
         return {
             "autorizado": True,
             "modo": "EXPANSAO",
+            "tp_mult": 2.5,
             "rs_min": 75.0,
             "fator_risco": 1.0,
             "msg": (
                 f"SPY em tendência (${close_hoje:.2f} > EMA20 ${ema20:.2f} > SMA200 ${sma200:.2f} | "
-                f"Var: {var_dia:+.2f}%{tag_vix}) — RS >= 75 | Lote 100%."
+                f"Var: {var_dia:+.2f}%{tag_vix}) — RS >= 75 | TP 2.5R | Lote 100%."
             )
         }
     except Exception as e:
@@ -293,7 +311,7 @@ for chave_pos, info in posicoes_ativas_dict.items():
             setores_ocupados.add(setor_pos.lower())
 
 # ===================================================================
-# 3B. AUDITAR POSIÇÕES EM CARTEIRA (ALVO 2.5R + BE +1.0R + TIME-STOP ADAPTATIVO 96H)
+# 3B. AUDITAR POSIÇÕES EM CARTEIRA (ALVO DINÂMICO + BE +1.0R + TIME-STOP 96H)
 # ===================================================================
 bloco_posicoes_ativas = ""
 alerta_timestop_ativo = False
@@ -382,13 +400,19 @@ for chave_pos, info in posicoes_ativas_dict.items():
                 0.0
             )
             
-            # Alvo Sniper M21: 2.5R (realista dentro da janela de 4 dias úteis)
+            mult_r_ativo = regime_macro["tp_mult"]
+            alvo_dinamico = round(entrada + (risco_inicial * mult_r_ativo), 2) if risco_inicial > 0 else 0.0
+
             if tp_sheets > (entrada * 1.005):
-                alvo_tp = tp_sheets
-                label_alvo = f"${alvo_tp}"
+                if regime_macro["modo"] != "EXPANSAO" and alvo_dinamico > 0 and alvo_dinamico < tp_sheets:
+                    alvo_tp = alvo_dinamico
+                    label_alvo = f"${alvo_tp} (TP Tático {mult_r_ativo:.1f}R | Original: ${tp_sheets})"
+                else:
+                    alvo_tp = tp_sheets
+                    label_alvo = f"${alvo_tp}"
             elif risco_inicial > 0:
-                alvo_tp = round(entrada + (risco_inicial * 2.5), 2)
-                label_alvo = f"${alvo_tp} (TP 2.5R)"
+                alvo_tp = alvo_dinamico
+                label_alvo = f"${alvo_tp} (TP {mult_r_ativo:.1f}R)"
             else:
                 alvo_tp = 0.0
                 label_alvo = "N/A"
@@ -458,7 +482,7 @@ for chave_pos, info in posicoes_ativas_dict.items():
 # ===================================================================
 def analisar_confluencia_suprema(ativo_info):
     try:
-        # FILTRO 1: FORÇA RELATIVA DE ELITE (RS >= 75 | >= 80 se VIX > 23)
+        # FILTRO 1: FORÇA RELATIVA DE ELITE (RS >= 75 Expansão | >= 80 Cautela | >= 82 Corretivo | >= 85 Baixista)
         rs_score = limpar_float(ativo_info.get("rs_score")) or 0.0
         if rs_score < regime_macro["rs_min"]:
             return None
@@ -565,12 +589,14 @@ def analisar_confluencia_suprema(ativo_info):
         tendencia_alta = (ema20 > sma50) and (sma50 > sma200)
         toque_ema20 = (minimo_hoje <= ema20 * 1.012) and (fecho_hoje >= ema20 * 0.992)
         
-        # B. Compressão (BB dentro de KC)
-        em_squeeze = (bb_upper <= kc_upper) and (bb_lower >= kc_lower)
+        # B. Compressão (BB dentro de KC ou Pré-Squeeze apertado <= 105% da largura KC)
+        bb_width = bb_upper - bb_lower
+        kc_width = kc_upper - kc_lower
+        em_squeeze = ((bb_upper <= kc_upper) and (bb_lower >= kc_lower)) or (bb_width <= kc_width * 1.05)
         
-        # C. Acumulação Institucional (RVOL >= 1.5x vs média dos 20 dias anteriores)
+        # C. Acumulação Institucional (RVOL >= 1.35x vs média dos 20 dias anteriores)
         rvol = vol_atual / vol_sma20_prev if vol_sma20_prev > 0 else 0.0
-        volume_anomalo = rvol >= 1.5
+        volume_anomalo = rvol >= 1.35
 
         if tendencia_alta and toque_ema20 and em_squeeze and volume_anomalo:
             preco_rt = obter_preco_tempo_real(ticker, preco)
@@ -585,8 +611,9 @@ def analisar_confluencia_suprema(ativo_info):
             if risco <= 0:
                 return None
 
-            # Assimetria Sniper M21: 2.5R
-            alvo_tp = round(entrada_gatilho + (risco * 2.5), 2)
+            # Assimetria Sniper M21: 2.5R em Expansão | 2.0R em modos defensivos
+            tp_mult = regime_macro["tp_mult"]
+            alvo_tp = round(entrada_gatilho + (risco * tp_mult), 2)
 
             qtd_calc = round(vol_diaria_usd / risco, 2)
             if qtd_calc <= 0:
@@ -602,6 +629,7 @@ def analisar_confluencia_suprema(ativo_info):
                 "gatilho": entrada_gatilho,
                 "stop_loss": stop_loss,
                 "alvo_tp": alvo_tp,
+                "tp_mult": tp_mult,
                 "qtd_acoes": qtd_calc,
                 "valor_investir": round(val_calc, 2),
                 "rvol": round(rvol, 2),
@@ -618,6 +646,7 @@ def analisar_confluencia_suprema(ativo_info):
 # ===================================================================
 def executar_motor():
     data_hoje = datetime.now(ZoneInfo("Europe/Lisbon")).strftime("%d/%m/%Y %H:%M")
+    tp_mult_label = f"{regime_macro['tp_mult']:.1f}R"
 
     bloco_texto = (
         f"⚡ RELATÓRIO DETALHADO - MOTOR 21: CONFLUÊNCIA SUPREMA ({data_hoje})\n"
@@ -675,9 +704,9 @@ def executar_motor():
             bloco_texto += (
                 f"💎 [{a['ticker']}] - {a['nome_empresa']} ({a['setor']})\n"
                 f"    - 📊 Contexto Técnico: {a['estado_confluencia']}\n"
-                f"    - ⚙️ Tática: Breakout Sniper Assimétrico (Alvo 2.5R | BE +1.0R | Time-Stop Adaptativo 96h)\n"
+                f"    - ⚙️ Tática: Breakout Sniper Assimétrico (Alvo {tp_mult_label} [{regime_macro['modo']}] | BE +1.0R | Time-Stop Adaptativo 96h)\n"
                 f"    - 📋 Tipo de Ordem: BUY STOP (Gatilho: ${a['gatilho']})\n"
-                f"    - 🔢 Risco/Retorno (2.5:1): Stop Loss: ${a['stop_loss']} | Alvo (2.5R): ${a['alvo_tp']}\n"
+                f"    - 🔢 Risco/Retorno ({tp_mult_label}): Stop Loss: ${a['stop_loss']} | Alvo ({tp_mult_label}): ${a['alvo_tp']}\n"
                 f"    - 💰 Dimensionamento: Qtd: {a['qtd_acoes']} | Investimento: ~${a['valor_investir']} USD\n"
                 f"    - 📈 Métricas de Força: RS Score: {a['rs_score']} | RVOL: {a['rvol']}x\n"
                 f"--------------------------------------------------\n"
@@ -697,7 +726,7 @@ def executar_motor():
         aviso_ts = "\n⏰ *ALERTA TIME-STOP:* Tens posição(ões) M21 expirada(s) (>96h sem impulso) para fechar!" if alerta_timestop_ativo else ""
         enviar_alerta(
             f"21 ⚡ *MOTOR 21 (CONFLUÊNCIA)*\n\n"
-            f"🔍 Execução Concluída ({regime_macro['modo']}).\n"
+            f"🔍 Execução Concluída ({regime_macro['modo']} | Alvo {tp_mult_label}).\n"
             f"📊 Analisados: *{total_analisados}* | Novos Sinais: *{len(alertas_confluencia)}* | Em Gestão: *{qtd_posicoes_auditadas}*{aviso_ts}\n"
             f"💰 Risco/Trade: *${vol_diaria_usd:.2f}*"
         )
