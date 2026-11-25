@@ -126,9 +126,9 @@ def buscar_dados_completos():
 def verificar_regime_mercado():
     """
     Avalia o regime do SPY e devolve parâmetros adaptativos equilibrados para Mean Reversion:
-    - Expansão (SPY > EMA20): TP 1.5R | RS >= 65 | RSI(2) <= 10.0 | Fator Lote 1.0 (0.65 se VIX > 24)
-    - Corretivo/Lateral (SMA200 < SPY <= EMA20): TP 1.1R | RS >= 75 | RSI(2) <= 8.0 | Fator Lote 0.65 (0.50 se VIX > 24)
-    - Reversão Baixista (SPY < SMA200, sem crash <= -2.2% nem VIX > 33): TP 1.0R | RS >= 80 | RSI(2) <= 6.5 | Fator Lote 0.45
+    - Expansão (SPY > EMA20): TP 1.5R | RS >= 65 | RSI(2) <= 10.0 | Fator Lote 1.0 (0.65 se VIX > 25)
+    - Corretivo/Lateral (SMA200 < SPY <= EMA20): TP 1.1R | RS >= 75 | RSI(2) <= 9.0 | Fator Lote 0.65 (0.50 se VIX > 25)
+    - Reversão Baixista (SPY < SMA200, sem crash <= -2.2% nem VIX > 33): TP 1.0R | RS >= 80 | RSI(2) <= 7.5 | Fator Lote 0.45
     - Crash / Pânico Extremo (Var <= -2.2% ou VIX > 33): Bloqueio total (0%)
     """
     regime_default = {
@@ -171,7 +171,7 @@ def verificar_regime_mercado():
                 "modo": "CRASH",
                 "tp_mult": 1.0,
                 "rs_min": 80.0,
-                "rsi2_max": 6.5,
+                "rsi2_max": 7.5,
                 "fator_risco": 0.0,
                 "msg": f"SPY em queda extrema/crash hoje ({var_dia:.2f}% <= -2.20%){tag_vix}."
             }
@@ -181,7 +181,7 @@ def verificar_regime_mercado():
                 "modo": "PANICO_VIX",
                 "tp_mult": 1.0,
                 "rs_min": 80.0,
-                "rsi2_max": 6.5,
+                "rsi2_max": 7.5,
                 "fator_risco": 0.0,
                 "msg": f"VIX em pânico sistémico extremo ({vix_atual:.2f} > 33.00)."
             }
@@ -193,32 +193,32 @@ def verificar_regime_mercado():
                 "modo": "REVERSAO_BAIXISTA",
                 "tp_mult": 1.0,
                 "rs_min": 80.0,
-                "rsi2_max": 6.5,
+                "rsi2_max": 7.5,
                 "fator_risco": 0.45,
                 "msg": (
                     f"SPY abaixo da SMA200 (${close_hoje:.2f} < ${sma200:.2f} | Var: {var_dia:+.2f}%{tag_vix}) — "
-                    f"Modo Ressalto Defensivo: líderes (RS >= 80 & > SMA200), RSI(2) <= 6.5, Alvo 1.0R e Lote 45%."
+                    f"Modo Ressalto Defensivo: líderes (RS >= 80 & > SMA200), RSI(2) <= 7.5, Alvo 1.0R e Lote 45%."
                 )
             }
 
         # Regime Corretivo / Lateral (SPY acima da SMA200 mas abaixo da EMA20)
         if close_hoje < ema20:
-            fator = 0.50 if (vix_atual is not None and vix_atual > 24.0) else 0.65
+            fator = 0.50 if (vix_atual is not None and vix_atual > 25.0) else 0.65
             return {
                 "autorizado": True,
                 "modo": "CORRETIVO",
                 "tp_mult": 1.1,
                 "rs_min": 75.0,
-                "rsi2_max": 8.0,
+                "rsi2_max": 9.0,
                 "fator_risco": fator,
                 "msg": (
                     f"SPY em pullback/lateral (${close_hoje:.2f} < EMA20 ${ema20:.2f} | SMA200 ${sma200:.2f} | "
-                    f"Var: {var_dia:+.2f}%{tag_vix}) — Modo Tático: Alvo 1.1R, RS >= 75 e Lote {int(fator*100)}%."
+                    f"Var: {var_dia:+.2f}%{tag_vix}) — Modo Tático: Alvo 1.1R, RS >= 75, RSI(2) <= 9.0 e Lote {int(fator*100)}%."
                 )
             }
 
         # Regime em Expansão (SPY > EMA20 > SMA200)
-        fator = 0.65 if (vix_atual is not None and vix_atual > 24.0) else 1.0
+        fator = 0.65 if (vix_atual is not None and vix_atual > 25.0) else 1.0
         return {
             "autorizado": True,
             "modo": "EXPANSAO",
@@ -277,20 +277,22 @@ vol_diaria_usd = round(risco_base_usd * regime_macro["fator_risco"], 2) if regim
 
 print(f"[CONFIG] Capital Total: ${capital:,.2f} | Risco Base: ${risco_base_usd:,.2f} | Risco Ajustado Regime ({regime_macro['modo']}): ${vol_diaria_usd:,.2f} USD\n")
 
-# Mapeia setores já ocupados por posições ativas para evitar stops em cadeia no mesmo setor
+# Mapeia setores e posições realmente ativas (ignora posições FECHADA)
 mapa_setores_watchlist = {}
 for item in ativos_sheets:
-    t_item = str(item.get("ticker", "")).strip().upper()
+    t_item = str(item.get("ticker", "")).strip().upper().replace(".", "-")
     s_item = str(item.get("setor") or item.get("setorAtivo") or item.get("sector") or item.get("Setor") or "").strip()
-    if t_item and s_item and s_item not in ["Desconhecido", "N/A", "NONE"]:
+    if t_item and s_item and s_item.lower() not in ["desconhecido", "n/a", "none", "#n/a"]:
         mapa_setores_watchlist[t_item] = s_item
 
+tickers_ativos_set = set()
 setores_ocupados = set()
 for chave_pos, info in posicoes_ativas_dict.items():
     if isinstance(info, dict) and str(info.get("status", "")).strip().upper().startswith("ATIVA"):
-        t_pos = "AI" if chave_pos.lower() in ["c3.ai", "c3"] else chave_pos.strip().upper()
+        t_pos = "AI" if chave_pos.lower() in ["c3.ai", "c3"] else chave_pos.strip().upper().replace(".", "-")
+        tickers_ativos_set.add(t_pos)
         setor_pos = str(info.get("setor") or mapa_setores_watchlist.get(t_pos, "")).strip()
-        if setor_pos and setor_pos not in ["Desconhecido", "N/A", "NONE"]:
+        if setor_pos and setor_pos.lower() not in ["desconhecido", "n/a", "none", "#n/a"]:
             setores_ocupados.add(setor_pos.lower())
 
 if setores_ocupados:
@@ -367,7 +369,8 @@ for chave_pos, info in posicoes_ativas_dict.items():
     
     if status == "ATIVA_M17":
         try:
-            ticker = "AI" if chave_pos.lower() in ["c3.ai", "c3"] else chave_pos.strip().upper()
+            ticker = "AI" if chave_pos.lower() in ["c3.ai", "c3"] else chave_pos.strip().upper().replace(".", "-")
+            if ticker == "BRK-A": ticker = "BRK-B"
             
             data_abertura = info.get("dataAbertura", "")
             dt_abertura = parse_data_abertura(data_abertura)
@@ -471,10 +474,10 @@ def analisar_rsi_drop(ativo_info, regime):
         if rs_score < regime["rs_min"]:
             return None
 
-        ticker = str(ativo_info.get("ticker", "")).strip().upper()
+        ticker = str(ativo_info.get("ticker", "")).strip().upper().replace(".", "-")
         if not ticker or ticker == "#N/A" or ticker == "NONE": return None
-        if ticker in posicoes_ativas_dict: return None
         if ticker == "BRK-A": ticker = "BRK-B"
+        if ticker in tickers_ativos_set: return None
 
         setor_inicial = str(
             ativo_info.get("setor") or 
@@ -483,7 +486,40 @@ def analisar_rsi_drop(ativo_info, regime):
             ativo_info.get("Setor") or "Desconhecido"
         ).strip()
 
-        if setor_inicial != "Desconhecido" and setor_inicial.lower() in setores_ocupados:
+        if setor_inicial.lower() not in ["desconhecido", "n/a", "none", "#n/a", ""] and setor_inicial.lower() in setores_ocupados:
+            return None
+
+        time.sleep(random.uniform(0.3, 0.8))
+
+        # Verificar setor e earnings iminentes (<= 3 dias)
+        nome_empresa = (
+            ativo_info.get("nome") or 
+            ativo_info.get("nomeEmpresa") or 
+            ativo_info.get("name") or "N/A"
+        )
+        setor = setor_inicial
+        try:
+            t_obj = yf.Ticker(ticker, session=session)
+            if nome_empresa == "N/A" or setor.lower() in ["desconhecido", "n/a", "none", "#n/a", ""]:
+                info_t = t_obj.info
+                if nome_empresa == "N/A":
+                    nome_empresa = info_t.get("longName") or info_t.get("shortName") or "N/A"
+                if setor.lower() in ["desconhecido", "n/a", "none", "#n/a", ""]:
+                    setor = info_t.get("sector") or "Desconhecido"
+
+            calendario = t_obj.calendar
+            if isinstance(calendario, dict) and 'Earnings Date' in calendario and len(calendario['Earnings Date']) > 0:
+                proxima_data = calendario['Earnings Date'][0]
+                if hasattr(proxima_data, 'date'): proxima_data = proxima_data.date()
+                dias_restantes = (proxima_data - datetime.now(ZoneInfo("Europe/Lisbon")).date()).days
+                if 0 <= dias_restantes <= 3:
+                    return None
+        except Exception:
+            pass
+
+        if setor.lower() not in ["desconhecido", "n/a", "none", "#n/a", ""] and setor.lower() in setores_ocupados:
+            return None
+        if any(termo in setor.lower() for termo in ["real estate", "reit", "mortgage"]):
             return None
 
         df = yf.download(ticker, period="1y", interval="1d", progress=False, session=session)
@@ -494,6 +530,11 @@ def analisar_rsi_drop(ativo_info, regime):
             
         df = df.dropna(subset=['Close', 'High', 'Low', 'Volume'])
         if len(df) < 200: return None
+
+        preco = float(df['Close'].iloc[-1])
+        vol_sma20 = float(df['Volume'].rolling(20).mean().iloc[-1])
+        if preco < 10.00 or vol_sma20 < 300000:
+            return None
 
         df.ta.rsi(length=2, append=True)
         df.ta.sma(length=200, append=True)
@@ -513,7 +554,6 @@ def analisar_rsi_drop(ativo_info, regime):
         if df.empty: return None
 
         ultimo = df.iloc[-1]
-        preco = float(ultimo['Close'])
         maxima_dia = float(ultimo['High'])
         minima_dia = float(ultimo['Low'])
         rsi2 = float(ultimo[cols_rsi[0]])
@@ -522,8 +562,8 @@ def analisar_rsi_drop(ativo_info, regime):
         atr = float(ultimo[cols_atr[0]])
         ema5 = float(ultimo['EMA5'])
 
-        # Exige Close > SMA200; dispensa SMA50 > SMA200 se for líder de elite (RS >= 80)
-        tendencia_ok = (preco > sma200) and (sma50 > sma200 or rs_score >= 80.0)
+        # Exige Close > SMA200 e abaixo da EMA5 (para haver margem de ressalto); dispensa SMA50 > SMA200 se RS >= 80
+        tendencia_ok = (preco > sma200) and (preco < ema5) and (sma50 > sma200 or rs_score >= 80.0)
 
         if tendencia_ok and rsi2 <= regime["rsi2_max"]:
             entrada_gatilho = round(maxima_dia * 1.002, 2)
@@ -539,27 +579,6 @@ def analisar_rsi_drop(ativo_info, regime):
             if qtd_calc <= 0:
                 return None
             val_calc = entrada_gatilho * qtd_calc
-
-            nome_empresa = (
-                ativo_info.get("nome") or 
-                ativo_info.get("nomeEmpresa") or 
-                ativo_info.get("name") or "N/A"
-            )
-            setor = setor_inicial
-
-            if nome_empresa == "N/A" or setor == "Desconhecido":
-                try:
-                    t_obj = yf.Ticker(ticker, session=session)
-                    info_t = t_obj.info
-                    if nome_empresa == "N/A":
-                        nome_empresa = info_t.get("longName") or info_t.get("shortName") or "N/A"
-                    if setor == "Desconhecido":
-                        setor = info_t.get("sector") or "Desconhecido"
-                except Exception:
-                    pass
-
-            if setor != "Desconhecido" and setor.lower() in setores_ocupados:
-                return None
 
             return {
                 "ticker": ticker,
