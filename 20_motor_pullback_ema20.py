@@ -7,7 +7,8 @@
 # Adapta-se ao regime do SPY:
 #   - Expansão (SPY > EMA20): Alvo 1.75R | RS >= 65 | Lote 100% (60% se VIX > 25)
 #   - Corretivo (SMA200 < SPY <= EMA20): Alvo 1.25R | RS >= 75 | Lote 60% (40% se VIX > 25)
-#   - Baixista (SPY < SMA200 ou VIX > 32): Bloqueia novas entradas
+#   - Baixista Seletivo (SPY < SMA200 e VIX <= 32): Alvo 1.25R | RS >= 85 | Lote 35%
+#   - Queda <= -2.50% / VIX > 32: Bloqueia novas entradas
 # ===================================================================================
 
 import pandas as pd
@@ -132,7 +133,8 @@ def verificar_regime_mercado():
     Avalia o regime do SPY e devolve parâmetros adaptativos equilibrados para Pullbacks à EMA 20:
     - Expansão (SPY > EMA20): TP 1.75R | RS >= 65 | Fator Lote 1.0 (ou 0.60 se VIX > 25)
     - Corretivo/Lateral (SMA200 < SPY <= EMA20): TP 1.25R | RS >= 75 | Fator Lote 0.60 (ou 0.40 se VIX > 25)
-    - Baixista (SPY < SMA200 ou VIX > 32): Bloqueia novas entradas
+    - Baixista Seletivo (SPY < SMA200 e VIX <= 32): TP 1.25R | RS >= 85 | Fator Lote 0.35
+    - Crash <= -2.50% / VIX > 32: Bloqueia novas entradas
     """
     regime_default = {
         "autorizado": True,
@@ -167,21 +169,12 @@ def verificar_regime_mercado():
 
         tag_vix = f" | VIX: {vix_atual:.2f}" if vix_atual is not None else ""
 
-        if close_hoje < sma200:
-            return {
-                "autorizado": False,
-                "modo": "BAIXISTA",
-                "tp_mult": 1.25,
-                "rs_min": 75.0,
-                "fator_risco": 0.0,
-                "msg": f"SPY (${close_hoje:.2f}) abaixo da SMA200 (${sma200:.2f}). Mercado em regime baixista{tag_vix}."
-            }
         if var_dia <= -2.5:
             return {
                 "autorizado": False,
                 "modo": "CRASH",
                 "tp_mult": 1.25,
-                "rs_min": 75.0,
+                "rs_min": 85.0,
                 "fator_risco": 0.0,
                 "msg": f"SPY em queda extrema/crash hoje ({var_dia:.2f}% <= -2.50%){tag_vix}."
             }
@@ -190,9 +183,23 @@ def verificar_regime_mercado():
                 "autorizado": False,
                 "modo": "PANICO_VIX",
                 "tp_mult": 1.25,
-                "rs_min": 75.0,
+                "rs_min": 85.0,
                 "fator_risco": 0.0,
                 "msg": f"VIX em pânico sistémico ({vix_atual:.2f} > 32.00)."
+            }
+
+        # Regime Baixista Seletivo (SPY abaixo da SMA200 mas VIX <= 32)
+        if close_hoje < sma200:
+            return {
+                "autorizado": True,
+                "modo": "BAIXISTA_SELETIVO",
+                "tp_mult": 1.25,
+                "rs_min": 85.0,
+                "fator_risco": 0.35,
+                "msg": (
+                    f"SPY abaixo da SMA200 (${close_hoje:.2f} < ${sma200:.2f}{tag_vix}) — "
+                    f"Modo Seletivo de Elite: apenas líderes RS >= 85 em tendência própria (> EMA20 > SMA50 > SMA200), TP 1.25R e Lote 35%."
+                )
             }
 
         # Regime Corretivo / Lateral (SPY acima da SMA200 mas abaixo da EMA20)
@@ -474,7 +481,7 @@ for chave_pos, info in posicoes_ativas_dict.items():
 # ===================================================================
 def analisar_pullback_ema20(ativo_info, regime):
     try:
-        # FILTRO DE FORÇA RELATIVA DINÂMICO (RS >= 65 em Expansão | RS >= 75 em Corretivo)
+        # FILTRO DE FORÇA RELATIVA DINÂMICO (RS >= 65 Expansão | RS >= 75 Corretivo | RS >= 85 Baixista Seletivo)
         rs_score = limpar_float(ativo_info.get("rs_score")) or 0.0
         if rs_score < regime["rs_min"]:
             return None
@@ -570,7 +577,7 @@ def analisar_pullback_ema20(ativo_info, regime):
             if risco <= 0:
                 return None
 
-            # Alvo Pullback EMA20 dinâmico: 1.75R em Expansão | 1.25R em Corretivo
+            # Alvo Pullback EMA20 dinâmico: 1.75R em Expansão | 1.25R em Corretivo / Baixista Seletivo
             tp_mult = regime["tp_mult"]
             alvo_tp = round(entrada_gatilho + (risco * tp_mult), 2)
 
