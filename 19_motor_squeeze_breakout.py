@@ -2,7 +2,7 @@
 # SISTEMA DE TRADING INSTITUCIONAL - MOTOR 19: VOLATILITY SQUEEZE BREAKOUT
 # ===================================================================================
 # Descrição Geral:
-# Identifica ativos líderes (RS >= 70 em Expansão | RS >= 80 em Corretivo) em
+# Identifica ativos líderes (RS >= 65 em Expansão | RS >= 75 em Corretivo) em
 # consolidação apertada (Squeeze entre Bandas de Bollinger e Canais de Keltner)
 # prontos para rompimento de curto prazo (Hit and Run | Alvo 1.5R | Time-Stop 72h),
 # auditando em simultâneo as posições ativas em carteira (ATIVA_M19).
@@ -138,15 +138,15 @@ def buscar_dados_completos():
 
 def verificar_regime_mercado():
     """
-    Matriz Macro de 3 Estados (SPY + ^VIX) para Squeeze Breakout:
-    - Expansão (SPY > EMA20 > SMA200): RS >= 70 | Lote 100% (50% se VIX > 23)
-    - Corretivo (SMA200 < SPY <= EMA20): RS >= 80 | Lote 50% (35% se VIX > 23)
-    - Baixista / Queda <= -1.50% / VIX > 30: Bloqueia novas entradas (mantém gestão M19)
+    Matriz Macro de 3 Estados (SPY + ^VIX) calibrada para Squeeze Breakout:
+    - Expansão (SPY > EMA20 > SMA200): RS >= 65 | Lote 100% (60% se VIX > 25)
+    - Corretivo (SMA200 < SPY <= EMA20): RS >= 75 | Lote 60% (40% se VIX > 25)
+    - Baixista / Queda <= -2.00% / VIX > 32: Bloqueia novas entradas (mantém gestão M19)
     """
     regime_default = {
         "autorizado": True,
         "modo": "EXPANSAO",
-        "rs_min": 70.0,
+        "rs_min": 65.0,
         "fator_risco": 1.0,
         "msg": "Dados SPY insuficientes (autorizado por defeito em modo Expansão)."
     }
@@ -179,49 +179,49 @@ def verificar_regime_mercado():
             return {
                 "autorizado": False,
                 "modo": "BAIXISTA",
-                "rs_min": 80.0,
+                "rs_min": 75.0,
                 "fator_risco": 0.0,
                 "msg": f"SPY (${close_hoje:.2f}) abaixo da SMA200 (${sma200:.2f}). Mercado em regime baixista{tag_vix}."
             }
-        if var_dia <= -1.50:
+        if var_dia <= -2.00:
             return {
                 "autorizado": False,
                 "modo": "QUEDA_DIARIA",
-                "rs_min": 80.0,
+                "rs_min": 75.0,
                 "fator_risco": 0.0,
-                "msg": f"SPY em queda forte hoje ({var_dia:.2f}% <= -1.50%){tag_vix}. Entradas M19 bloqueadas."
+                "msg": f"SPY em queda forte hoje ({var_dia:.2f}% <= -2.00%){tag_vix}. Entradas M19 bloqueadas."
             }
-        if vix_atual is not None and vix_atual > 30.0:
+        if vix_atual is not None and vix_atual > 32.0:
             return {
                 "autorizado": False,
                 "modo": "PANICO_VIX",
-                "rs_min": 80.0,
+                "rs_min": 75.0,
                 "fator_risco": 0.0,
-                "msg": f"VIX em pânico sistémico ({vix_atual:.2f} > 30.00). Entradas M19 bloqueadas."
+                "msg": f"VIX em pânico sistémico ({vix_atual:.2f} > 32.00). Entradas M19 bloqueadas."
             }
 
         if close_hoje < ema20:
-            fator = 0.35 if (vix_atual is not None and vix_atual > 23.0) else 0.50
+            fator = 0.40 if (vix_atual is not None and vix_atual > 25.0) else 0.60
             return {
                 "autorizado": True,
                 "modo": "CORRETIVO",
-                "rs_min": 80.0,
+                "rs_min": 75.0,
                 "fator_risco": fator,
                 "msg": (
                     f"SPY em pullback/lateral (${close_hoje:.2f} < EMA20 ${ema20:.2f} | SMA200 ${sma200:.2f} | "
-                    f"Var: {var_dia:+.2f}%{tag_vix}) — M19 Tático: RS >= 80 e Lote {int(fator*100)}%."
+                    f"Var: {var_dia:+.2f}%{tag_vix}) — M19 Tático: RS >= 75 e Lote {int(fator*100)}%."
                 )
             }
 
-        fator = 0.50 if (vix_atual is not None and vix_atual > 23.0) else 1.0
+        fator = 0.60 if (vix_atual is not None and vix_atual > 25.0) else 1.0
         return {
             "autorizado": True,
             "modo": "EXPANSAO",
-            "rs_min": 70.0,
+            "rs_min": 65.0,
             "fator_risco": fator,
             "msg": (
                 f"SPY em Expansão (${close_hoje:.2f} > EMA20 ${ema20:.2f} > SMA200 ${sma200:.2f} | "
-                f"Var: {var_dia:+.2f}%{tag_vix}) — RS >= 70 | Lote {int(fator*100)}%."
+                f"Var: {var_dia:+.2f}%{tag_vix}) — RS >= 65 | Lote {int(fator*100)}%."
             )
         }
     except Exception as e:
@@ -466,7 +466,7 @@ for chave_pos, info in posicoes_ativas_dict.items():
 # ===================================================================
 def analisar_squeeze(ativo_info):
     try:
-        # FILTRO DE FORÇA RELATIVA DINÂMICO POR REGIME (70 em Expansão | 80 em Corretivo)
+        # FILTRO DE FORÇA RELATIVA DINÂMICO POR REGIME (65 em Expansão | 75 em Corretivo)
         rs_score = limpar_float(ativo_info.get("rs_score")) or 0.0
         if rs_score < regime_macro["rs_min"]:
             return None
@@ -551,9 +551,12 @@ def analisar_squeeze(ativo_info):
         df = df.dropna(subset=['BB_Upper', 'BB_Lower', 'KC_Upper', 'KC_Lower', 'SMA_200', 'Vol_SMA_20_Prev', col_atr])
         if df.empty: return None
 
-        # 3. Registo histórico de Squeeze (BB dentro dos KC) e Filtro de Squeeze Recente (últimos 5 dias)
+        # 3. Registo histórico de Squeeze (BB dentro dos KC) e Pré-Squeeze apertado (BB <= 110% da largura KC)
+        bb_width = df['BB_Upper'] - df['BB_Lower']
+        kc_width = df['KC_Upper'] - df['KC_Lower']
         df['Squeeze_On'] = (df['BB_Upper'] <= df['KC_Upper']) & (df['BB_Lower'] >= df['KC_Lower'])
-        df['Squeeze_Recente'] = df['Squeeze_On'].rolling(window=5).sum() > 0
+        df['Pre_Squeeze'] = (bb_width <= kc_width * 1.10)
+        df['Squeeze_Recente'] = (df['Squeeze_On'] | df['Pre_Squeeze']).rolling(window=6).sum() > 0
 
         ultimo = df.iloc[-1]
         kc_upper = float(ultimo['KC_Upper'])
@@ -576,25 +579,28 @@ def analisar_squeeze(ativo_info):
             return None
 
         squeeze_on = bool(ultimo['Squeeze_On'])
+        pre_squeeze = bool(ultimo['Pre_Squeeze']) and (rvol <= 0.90)
         
         breakout_alta = (
             (preco > kc_upper) and 
             (float(df['Close'].iloc[-2]) <= float(df['KC_Upper'].iloc[-2])) and 
             bool(ultimo['Squeeze_Recente']) and
-            (rvol >= 1.20)  # Exige confirmação de volume na ignição
+            (rvol >= 1.05)  # Confirmação de volume aliviada para >= 1.05x (protegida pelo BUY STOP)
         )
 
-        # Se estiver apenas em squeeze sem rompimento ainda, exige contração de volume (<= 85% da média)
-        if squeeze_on and not breakout_alta and rvol > 0.85:
+        # Em compressão (sem rompimento ainda), aceita volume até 1.10x da média
+        if squeeze_on and not breakout_alta and rvol > 1.10:
             squeeze_on = False
 
-        # Filtro de exaustão: descarta se já esticou > 1 ATR acima do Keltner
-        limite_exaustao = kc_upper + (atr * 1.0)
+        em_compressao = squeeze_on or pre_squeeze
+
+        # Filtro de exaustão: descarta se já esticou > 1.2 ATR acima do Keltner
+        limite_exaustao = kc_upper + (atr * 1.2)
         if breakout_alta and preco > limite_exaustao:
             breakout_alta = False
-            squeeze_on = False
+            em_compressao = False
 
-        if breakout_alta or squeeze_on:
+        if breakout_alta or em_compressao:
             preco_rt = obter_preco_tempo_real(ticker, preco)
             entrada_gatilho = round(maximo_hoje * 1.002, 2)
 
@@ -616,6 +622,13 @@ def analisar_squeeze(ativo_info):
 
             val_calc = entrada_gatilho * qtd_calc
 
+            if breakout_alta:
+                estado_sq = "A ATIVAR (Breakout Detetado)"
+            elif squeeze_on:
+                estado_sq = "EM COMPRESSÃO EXTREMA (Squeeze On)"
+            else:
+                estado_sq = "PRÉ-SQUEEZE APERTADO (Seca de Volume)"
+
             return {
                 "ticker": ticker,
                 "nome_empresa": nome_empresa,
@@ -626,7 +639,7 @@ def analisar_squeeze(ativo_info):
                 "alvo_tp": alvo_tp,
                 "qtd_acoes": qtd_calc,
                 "valor_investir": round(val_calc, 2),
-                "estado_squeeze": "A ATIVAR (Breakout Detetado)" if breakout_alta else "EM COMPRESSÃO EXTREMA",
+                "estado_squeeze": estado_sq,
                 "prioridade": 1 if breakout_alta else 0,
                 "rvol": round(rvol, 2),
                 "rs_score": rs_score
@@ -687,7 +700,7 @@ def executar_motor():
         for a in alertas_squeeze:
             bloco_texto += (
                 f"🔹 [{a['ticker']}] - {a['nome_empresa']} ({a['setor']})\n"
-                f"   - 📊 Contexto Técnico: {a['estado_squeeze']} | RVOL: {a['rvol']}x (BB dentro de KC | EMA20 > SMA200)\n"
+                f"   - 📊 Contexto Técnico: {a['estado_squeeze']} | RVOL: {a['rvol']}x (BB/KC | EMA20 > SMA200)\n"
                 f"   - ⚙️ Tática: Breakout Explosivo de Curto Prazo (Alvo 1.5R | Time-Stop Adaptativo 72h)\n"
                 f"   - 📋 Tipo de Ordem: BUY STOP (Gatilho na quebra da máxima diária)\n"
                 f"   - 🔢 Dados Exatos: Gatilho Compra: ${a['gatilho']} | Stop Loss: ${a['stop_loss']} | Alvo (1.5R): ${a['alvo_tp']}\n"
