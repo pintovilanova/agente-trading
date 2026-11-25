@@ -204,7 +204,7 @@ def verificar_regime_mercado():
                 "rs_min": 85.0,
                 "fator_risco": 0.35,
                 "msg": (
-                    f"SPY abaixo da SMA200 (${close_hoje:.2f} <${sma200:.2f}{tag_vix}) — "
+                    f"SPY abaixo da SMA200 (${close_hoje:.2f} < ${sma200:.2f}{tag_vix}) — "
                     f"Modo Seletivo de Elite: apenas líderes RS >= 85 em tendência própria (> EMA20 > SMA200), TP 1.25R e Lote 35%."
                 )
             }
@@ -218,7 +218,7 @@ def verificar_regime_mercado():
                 "rs_min": 75.0,
                 "fator_risco": fator,
                 "msg": (
-                    f"SPY em pullback/lateral (${close_hoje:.2f} < EMA20 ${ema20:.2f} \vert{} SMA200${sma200:.2f} | "
+                    f"SPY em pullback/lateral (${close_hoje:.2f} < EMA20 ${ema20:.2f} | SMA200 ${sma200:.2f} | "
                     f"Var: {var_dia:+.2f}%{tag_vix}) — M19 Tático: RS >= 75 e Lote {int(fator*100)}%."
                 )
             }
@@ -231,7 +231,7 @@ def verificar_regime_mercado():
             "rs_min": 65.0,
             "fator_risco": fator,
             "msg": (
-                f"SPY em Expansão (${close_hoje:.2f} > EMA20 ${ema20:.2f} > SMA200${sma200:.2f} | "
+                f"SPY em Expansão (${close_hoje:.2f} > EMA20 ${ema20:.2f} > SMA200 ${sma200:.2f} | "
                 f"Var: {var_dia:+.2f}%{tag_vix}) — RS >= 65 | Lote {int(fator*100)}%."
             )
         }
@@ -291,7 +291,7 @@ risco_fixo_usd = limpar_float(configs_dict.get("RISCO_MAXIMO_USD"))
 risco_base_usd = risco_fixo_usd if (risco_fixo_usd and risco_fixo_usd > 0) else (capital * pct_risco)
 vol_diaria_usd = round(risco_base_usd * regime_macro["fator_risco"], 2) if regime_macro["autorizado"] else 0.0
 
-print(f"[CONFIG] Capital Total: ${capital:,.2f} | Risco Base: ${risco_base_usd:,.2f} \vert{} Risco Ajustado ({regime_macro['modo']}):${vol_diaria_usd:,.2f} USD")
+print(f"[CONFIG] Capital Total: ${capital:,.2f} | Risco Base: ${risco_base_usd:,.2f} | Risco Ajustado ({regime_macro['modo']}): ${vol_diaria_usd:,.2f} USD")
 print(f"[MACRO] {regime_macro['msg']}\n")
 
 # Mapeamento de setores e posições realmente ativas (ignora posições FECHADA)
@@ -408,7 +408,7 @@ for chave_pos, info in posicoes_ativas_dict.items():
             if tp_sheets > (entrada * 1.005):
                 if regime_macro["modo"] == "BAIXISTA_SELETIVO" and alvo_dinamico > 0 and alvo_dinamico < tp_sheets:
                     alvo_tp = alvo_dinamico
-                    label_alvo = f"${alvo_tp} (TP Defensivo {mult_r_ativo:.2f}R \vert{} Original:${tp_sheets})"
+                    label_alvo = f"${alvo_tp} (TP Defensivo {mult_r_ativo:.2f}R | Original: ${tp_sheets})"
                 else:
                     alvo_tp = tp_sheets
                     label_alvo = f"${alvo_tp}"
@@ -463,7 +463,7 @@ for chave_pos, info in posicoes_ativas_dict.items():
                     if sugestao_stop > stop:
                         alerta_gestao_urgente = True
                 elif preco_atual < entrada:
-                    acao = f"⚠️ ÚLTIMO DIA (48h) EM NEGATIVO (${preco_atual} <${entrada}). Se não recuperar no fecho, encerrar antecipadamente para poupar risco | Stop: ${stop}."
+                    acao = f"⚠️ ÚLTIMO DIA (48h) EM NEGATIVO (${preco_atual} < ${entrada}). Se não recuperar no fecho, encerrar antecipadamente para poupar risco | Stop: ${stop}."
                 else:
                     acao = f"⚠️ ÚLTIMO DIA DA JANELA (48h). Se não arrancar hoje rumo a {label_alvo}, preparar saída no fecho | Stop: ${stop}."
             elif sugestao_stop > stop and preco_atual > entrada:
@@ -665,4 +665,96 @@ def analisar_squeeze(ativo_info):
                 "rs_score": rs_score
             }
         return None
-    except Exception as e
+    except Exception as e:
+        print(f"[ERRO] Falha ao processar ativo {ativo_info.get('ticker')}: {e}")
+        return None
+
+# ===================================================================
+# 6. EXECUÇÃO PRINCIPAL E RELATÓRIO DETALHADO
+# ===================================================================
+def executar_motor():
+    candidatos_squeeze = []
+    total_analisados = 0
+    
+    mercado_ok = regime_macro["autorizado"]
+    msg_mercado = regime_macro["msg"]
+    tp_mult_label = f"{regime_macro['tp_mult']:.2f}R"
+
+    if mercado_ok and ativos_sheets:
+        for ativo_info in ativos_sheets:
+            ticker = ativo_info.get("ticker")
+            if not ticker or ticker == "#N/A": continue
+            
+            total_analisados += 1
+            res = analisar_squeeze(ativo_info)
+            if res: candidatos_squeeze.append(res)
+
+    # Prioriza breakouts em ativação e maior RS Score, limitando a 1 sinal por setor livre
+    candidatos_squeeze = sorted(candidatos_squeeze, key=lambda k: (k['prioridade'], k['rs_score']), reverse=True)
+    alertas_squeeze = []
+    setores_novos_usados = set()
+    for item in candidatos_squeeze:
+        s_key = item["setor"].lower()
+        if s_key not in setores_novos_usados:
+            alertas_squeeze.append(item)
+            if s_key not in ["desconhecido", "n/a", ""]:
+                setores_novos_usados.add(s_key)
+
+    data_hoje = datetime.now(ZoneInfo("Europe/Lisbon")).strftime("%d/%m/%Y %H:%M")
+    
+    bloco_texto = (
+        f"⚡ RELATÓRIO DETALHADO - MOTOR 19: VOLATILITY SQUEEZE BREAKOUT ({data_hoje})\n"
+        f"==================================================================\n"
+        f"🌐 Filtro Macro: {msg_mercado}\n"
+        f"💰 Risco Configurado por Trade: ${vol_diaria_usd:,.2f} USD (Base: ${risco_base_usd:,.2f} | Fator: {int(regime_macro['fator_risco']*100)}%)\n\n"
+    )
+
+    if bloco_posicoes_ativas:
+        bloco_texto += f"📌 GESTÃO DE POSIÇÕES ATIVAS:\n{bloco_posicoes_ativas}\n--------------------------------------------------\n\n"
+    else:
+        bloco_texto += "📌 GESTÃO DE POSIÇÕES ATIVAS: Nenhuma posição ativa detetada para este motor.\n--------------------------------------------------\n\n"
+
+    if not mercado_ok:
+        bloco_texto += f"🛡️ [MODO DEFENSIVO] Novas entradas bloqueadas hoje ({msg_mercado}).\n"
+    elif alertas_squeeze:
+        bloco_texto += f"🎯 NOVOS SINAIS DE EXPANSÃO DE VOLATILIDADE ({len(alertas_squeeze)}):\n\n"
+        for a in alertas_squeeze:
+            bloco_texto += (
+                f"🔹 [{a['ticker']}] - {a['nome_empresa']} ({a['setor']})\n"
+                f"   - 📊 Contexto Técnico: {a['estado_squeeze']} | RVOL: {a['rvol']}x (BB/KC | EMA20 > SMA200)\n"
+                f"   - ⚙️ Tática: Breakout Explosivo de Curto Prazo (Alvo {tp_mult_label} [{regime_macro['modo']}] | Time-Stop Adaptativo 72h)\n"
+                f"   - 📋 Tipo de Ordem: BUY STOP (Gatilho na quebra da máxima diária)\n"
+                f"   - 🔢 Dados Exatos: Gatilho Compra: ${a['gatilho']} | Stop Loss: ${a['stop_loss']} | Alvo ({tp_mult_label}): ${a['alvo_tp']}\n"
+                f"   - 💰 Dimensionamento: Qtd: {a['qtd_acoes']} | Valor a Investir: ~${a['valor_investir']} USD\n"
+                f"   - 📈 RS Score Institucional: {a['rs_score']}\n"
+                f"--------------------------------------------------\n"
+            )
+        bloco_texto += "\n🔄 LEMBRETE OPERACIONAL: Assim que uma ordem Buy Stop for executada na corretora, altera o estado no Google Sheets para 'ATIVA_M19' para iniciar a gestão automática de Break-Even (+0.8R) e Time-Stop de 72h.\n"
+    else:
+        bloco_texto += "✅ Nenhum novo sinal de Squeeze / Breakout detetado hoje.\n"
+
+    enviar_email(bloco_texto)
+
+    with open("comboio_squeeze_temp.txt", "w", encoding="utf-8") as f:
+        f.write(bloco_texto)
+
+    # ===================================================================
+    # 7. NOTIFICAÇÃO TELEGRAM (DEBUG, NOVO SINAL OU ALERTA DE POSIÇÃO ATIVA)
+    # ===================================================================
+    debug_telegram_ativado = str(configs_dict.get("TELEGRAM_NOTIFICATIONS_DEBUG", "false")).strip().lower() in ["true", "1", "sim", "yes"]
+
+    if debug_telegram_ativado or len(alertas_squeeze) > 0 or alerta_gestao_urgente:
+        print("A enviar notificação para o Telegram via função modular...")
+        total_acionados = len(alertas_squeeze)
+        aviso_ts = "\n⏰ *ALERTA TIME-STOP:* Tens posição(ões) M19 expirada(s) (>72h sem impulso) para fechar!" if alerta_timestop_ativo else ""
+        mensagem_debug = (
+            f"19 ⚡ *MOTOR 19 (SQUEEZE BREAKOUT)*\n\n"
+            f"🔍 Execução concluída ({regime_macro['modo']} | Alvo {tp_mult_label}).\n"
+            f"📊 Analisados: *{total_analisados}* | Novos Sinais: *{total_acionados}* | Em Gestão: *{qtd_posicoes_auditadas}*{aviso_ts}\n"
+            f"💰 Risco/Trade: *${vol_diaria_usd:.2f}*\n"
+            f"✉️ Relatório de expansão de volatilidade gerado e enviado por e-mail."
+        )
+        enviar_alerta(mensagem_debug)
+
+if __name__ == "__main__":
+    executar_motor()
