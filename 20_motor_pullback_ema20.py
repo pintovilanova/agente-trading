@@ -3,11 +3,11 @@
 # ===================================================================================
 # Descrição Geral:
 # Identifica ativos líderes com tendência primária alinhada (EMA 20 > SMA 50 > SMA 200)
-# que realizam um pullback cirúrgico de defesa junto à EMA 20.
+# que realizam um pullback de defesa na zona da EMA 20.
 # Adapta-se ao regime do SPY:
-#   - Expansão (SPY > EMA20): Alvo 1.75R | RS >= 70 | Lote 100%
-#   - Corretivo (SMA200 < SPY <= EMA20): Alvo 1.25R | RS >= 80 | Lote 50%
-#   - Baixista (SPY < SMA200 ou VIX > 30): Bloqueia novas entradas
+#   - Expansão (SPY > EMA20): Alvo 1.75R | RS >= 65 | Lote 100% (60% se VIX > 25)
+#   - Corretivo (SMA200 < SPY <= EMA20): Alvo 1.25R | RS >= 75 | Lote 60% (40% se VIX > 25)
+#   - Baixista (SPY < SMA200 ou VIX > 32): Bloqueia novas entradas
 # ===================================================================================
 
 import pandas as pd
@@ -53,6 +53,11 @@ if dia_da_semana >= 5:
 WEBHOOK_URL = os.environ.get('WEBHOOK_URL')
 EMAIL_USER = os.environ.get("EMAIL_USER")
 EMAIL_PASS = os.environ.get("EMAIL_PASS")
+
+if EMAIL_USER:
+    EMAIL_USER = EMAIL_USER.strip()
+if EMAIL_PASS:
+    EMAIL_PASS = EMAIL_PASS.strip()
 
 SMTP_SERVER = "smtp.gmail.com"
 SMTP_PORT = 587
@@ -124,16 +129,16 @@ def buscar_dados_completos():
 
 def verificar_regime_mercado():
     """
-    Avalia o regime do SPY e devolve parâmetros adaptativos para Pullbacks à EMA 20:
-    - Expansão (SPY > EMA20): TP 1.75R | RS >= 70 | Fator Lote 1.0 (ou 0.5 se VIX > 23)
-    - Corretivo/Lateral (SMA200 < SPY <= EMA20): TP 1.25R | RS >= 80 | Fator Lote 0.5 (ou 0.35 se VIX > 23)
-    - Baixista (SPY < SMA200 ou VIX > 30): Bloqueia novas entradas
+    Avalia o regime do SPY e devolve parâmetros adaptativos equilibrados para Pullbacks à EMA 20:
+    - Expansão (SPY > EMA20): TP 1.75R | RS >= 65 | Fator Lote 1.0 (ou 0.60 se VIX > 25)
+    - Corretivo/Lateral (SMA200 < SPY <= EMA20): TP 1.25R | RS >= 75 | Fator Lote 0.60 (ou 0.40 se VIX > 25)
+    - Baixista (SPY < SMA200 ou VIX > 32): Bloqueia novas entradas
     """
     regime_default = {
         "autorizado": True,
         "modo": "EXPANSAO",
         "tp_mult": 1.75,
-        "rs_min": 70.0,
+        "rs_min": 65.0,
         "fator_risco": 1.0,
         "msg": "Dados SPY insuficientes (autorizado por defeito em modo Expansão)."
     }
@@ -167,7 +172,7 @@ def verificar_regime_mercado():
                 "autorizado": False,
                 "modo": "BAIXISTA",
                 "tp_mult": 1.25,
-                "rs_min": 85.0,
+                "rs_min": 75.0,
                 "fator_risco": 0.0,
                 "msg": f"SPY (${close_hoje:.2f}) abaixo da SMA200 (${sma200:.2f}). Mercado em regime baixista{tag_vix}."
             }
@@ -176,46 +181,46 @@ def verificar_regime_mercado():
                 "autorizado": False,
                 "modo": "CRASH",
                 "tp_mult": 1.25,
-                "rs_min": 85.0,
+                "rs_min": 75.0,
                 "fator_risco": 0.0,
                 "msg": f"SPY em queda extrema/crash hoje ({var_dia:.2f}% <= -2.50%){tag_vix}."
             }
-        if vix_atual is not None and vix_atual > 30.0:
+        if vix_atual is not None and vix_atual > 32.0:
             return {
                 "autorizado": False,
                 "modo": "PANICO_VIX",
                 "tp_mult": 1.25,
-                "rs_min": 85.0,
+                "rs_min": 75.0,
                 "fator_risco": 0.0,
-                "msg": f"VIX em pânico sistémico ({vix_atual:.2f} > 30.00)."
+                "msg": f"VIX em pânico sistémico ({vix_atual:.2f} > 32.00)."
             }
 
         # Regime Corretivo / Lateral (SPY acima da SMA200 mas abaixo da EMA20)
         if close_hoje < ema20:
-            fator = 0.35 if (vix_atual is not None and vix_atual > 23.0) else 0.50
+            fator = 0.40 if (vix_atual is not None and vix_atual > 25.0) else 0.60
             return {
                 "autorizado": True,
                 "modo": "CORRETIVO",
                 "tp_mult": 1.25,
-                "rs_min": 80.0,
+                "rs_min": 75.0,
                 "fator_risco": fator,
                 "msg": (
                     f"SPY em pullback/lateral (${close_hoje:.2f} < EMA20 ${ema20:.2f} | SMA200 ${sma200:.2f} | "
-                    f"Var: {var_dia:+.2f}%{tag_vix}) — Modo Tático: Alvo 1.25R, RS >= 80 e Lote {int(fator*100)}%."
+                    f"Var: {var_dia:+.2f}%{tag_vix}) — Modo Tático: Alvo 1.25R, RS >= 75 e Lote {int(fator*100)}%."
                 )
             }
 
         # Regime em Expansão (SPY > EMA20 > SMA200)
-        fator = 0.50 if (vix_atual is not None and vix_atual > 23.0) else 1.0
+        fator = 0.60 if (vix_atual is not None and vix_atual > 25.0) else 1.0
         return {
             "autorizado": True,
             "modo": "EXPANSAO",
             "tp_mult": 1.75,
-            "rs_min": 70.0,
+            "rs_min": 65.0,
             "fator_risco": fator,
             "msg": (
                 f"SPY em Expansão (${close_hoje:.2f} > EMA20 ${ema20:.2f} > SMA200 ${sma200:.2f} | "
-                f"Var: {var_dia:+.2f}%{tag_vix}) — Alvo 1.75R | Lote {int(fator*100)}%."
+                f"Var: {var_dia:+.2f}%{tag_vix}) — Alvo 1.75R | RS >= 65 | Lote {int(fator*100)}%."
             )
         }
     except Exception as e:
@@ -276,20 +281,22 @@ vol_diaria_usd = round(risco_base_usd * regime_macro["fator_risco"], 2) if regim
 
 print(f"[CONFIG] Capital Total: ${capital:,.2f} | Risco Base: ${risco_base_usd:,.2f} | Risco Ajustado Regime ({regime_macro['modo']}): ${vol_diaria_usd:,.2f} USD\n")
 
-# Mapeia setores já ocupados por posições ativas para evitar stops em cadeia no mesmo setor
+# Mapeia setores e posições realmente ativas (ignora posições FECHADA)
 mapa_setores_watchlist = {}
 for item in ativos_sheets:
-    t_item = str(item.get("ticker", "")).strip().upper()
+    t_item = str(item.get("ticker", "")).strip().upper().replace(".", "-")
     s_item = str(item.get("setor") or item.get("setorAtivo") or item.get("sector") or item.get("Setor") or "").strip()
-    if t_item and s_item and s_item not in ["Desconhecido", "N/A", "NONE"]:
+    if t_item and s_item and s_item.lower() not in ["desconhecido", "n/a", "none", "#n/a"]:
         mapa_setores_watchlist[t_item] = s_item
 
+tickers_ativos_set = set()
 setores_ocupados = set()
 for chave_pos, info in posicoes_ativas_dict.items():
     if isinstance(info, dict) and str(info.get("status", "")).strip().upper().startswith("ATIVA"):
-        t_pos = "AI" if chave_pos.lower() in ["c3.ai", "c3"] else chave_pos.strip().upper()
+        t_pos = "AI" if chave_pos.lower() in ["c3.ai", "c3"] else chave_pos.strip().upper().replace(".", "-")
+        tickers_ativos_set.add(t_pos)
         setor_pos = str(info.get("setor") or mapa_setores_watchlist.get(t_pos, "")).strip()
-        if setor_pos and setor_pos not in ["Desconhecido", "N/A", "NONE"]:
+        if setor_pos and setor_pos.lower() not in ["desconhecido", "n/a", "none", "#n/a"]:
             setores_ocupados.add(setor_pos.lower())
 
 if setores_ocupados:
@@ -363,7 +370,8 @@ for chave_pos, info in posicoes_ativas_dict.items():
     
     if status == "ATIVA_M20":
         try:
-            ticker = "AI" if chave_pos.lower() in ["c3.ai", "c3"] else chave_pos.strip().upper()
+            ticker = "AI" if chave_pos.lower() in ["c3.ai", "c3"] else chave_pos.strip().upper().replace(".", "-")
+            if ticker == "BRK-A": ticker = "BRK-B"
             
             data_abertura = info.get("dataAbertura", "")
             dt_abertura = parse_data_abertura(data_abertura)
@@ -466,27 +474,50 @@ for chave_pos, info in posicoes_ativas_dict.items():
 # ===================================================================
 def analisar_pullback_ema20(ativo_info, regime):
     try:
-        # FILTRO DE FORÇA RELATIVA DINÂMICO (RS >= 70 em Expansão | RS >= 80 em Corretivo)
+        # FILTRO DE FORÇA RELATIVA DINÂMICO (RS >= 65 em Expansão | RS >= 75 em Corretivo)
         rs_score = limpar_float(ativo_info.get("rs_score")) or 0.0
         if rs_score < regime["rs_min"]:
             return None
 
-        ticker = str(ativo_info.get("ticker", "")).strip().upper()
+        ticker = str(ativo_info.get("ticker", "")).strip().upper().replace(".", "-")
         if not ticker or ticker == "#N/A" or ticker == "NONE": return None
-        if ticker in posicoes_ativas_dict: return None
         if ticker == "BRK-A": ticker = "BRK-B"
+        if ticker in tickers_ativos_set: return None
 
-        setor_inicial = str(
+        nome_empresa = ativo_info.get("nome") or ativo_info.get("nomeEmpresa") or ativo_info.get("name") or "N/A"
+        setor = str(
             ativo_info.get("setor") or 
             ativo_info.get("setorAtivo") or 
             ativo_info.get("sector") or 
             ativo_info.get("Setor") or "Desconhecido"
         ).strip()
 
-        if setor_inicial != "Desconhecido" and setor_inicial.lower() in setores_ocupados:
+        if setor.lower() not in ["desconhecido", "n/a", "none", "#n/a", ""] and setor.lower() in setores_ocupados:
             return None
 
-        time.sleep(random.uniform(0.5, 1.2))
+        time.sleep(random.uniform(0.4, 1.0))
+
+        # Verificar setor e earnings iminentes (<= 3 dias)
+        try:
+            t_obj = yf.Ticker(ticker, session=session)
+            if setor.lower() in ["desconhecido", "n/a", "none", "#n/a", ""]:
+                setor = t_obj.info.get("sector") or obter_setor_yf(ticker)
+
+            calendario = t_obj.calendar
+            if isinstance(calendario, dict) and 'Earnings Date' in calendario and len(calendario['Earnings Date']) > 0:
+                proxima_data = calendario['Earnings Date'][0]
+                if hasattr(proxima_data, 'date'): proxima_data = proxima_data.date()
+                dias_restantes = (proxima_data - datetime.now(ZoneInfo("Europe/Lisbon")).date()).days
+                if 0 <= dias_restantes <= 3:
+                    return None
+        except Exception:
+            if setor.lower() in ["desconhecido", "n/a", "none", "#n/a", ""]:
+                setor = obter_setor_yf(ticker)
+
+        if setor.lower() not in ["desconhecido", "n/a", "none", "#n/a", ""] and setor.lower() in setores_ocupados:
+            return None
+        if any(termo in setor.lower() for termo in ["real estate", "reit", "mortgage"]):
+            return None
 
         df = pd.DataFrame()
         for _ in range(3):
@@ -500,9 +531,12 @@ def analisar_pullback_ema20(ativo_info, regime):
         if df.empty or len(df) < 200: return None
         if isinstance(df.columns, pd.MultiIndex): df.columns = df.columns.droplevel(1)
         df = df.dropna(subset=['Close', 'High', 'Low', 'Volume'])
+        if len(df) < 200: return None
 
         preco = float(df['Close'].iloc[-1])
-        if preco < 10.00: return None
+        vol_sma20 = float(df['Volume'].rolling(20).mean().iloc[-1])
+        if preco < 10.00 or vol_sma20 < 300000:
+            return None
 
         # Indicadores de Tendência Completa
         df['EMA_20'] = df['Close'].ewm(span=20, adjust=False).mean()
@@ -524,11 +558,11 @@ def analisar_pullback_ema20(ativo_info, regime):
         fecho_hoje = float(ultimo['Close'])
         maximo_hoje = float(ultimo['High'])
 
-        # Alinhamento institucional completo + toque de defesa na EMA 20
+        # Alinhamento institucional completo + zona de defesa na EMA 20 (tolerância de 0.5% acima / 0.8% abaixo)
         tendencia_alta = (ema20 > sma50) and (sma50 > sma200)
-        toque_ema20 = (minimo_hoje <= ema20) and (fecho_hoje >= ema20)
+        zona_defesa_ema20 = (minimo_hoje <= ema20 * 1.005) and (fecho_hoje >= ema20 * 0.992)
 
-        if tendencia_alta and toque_ema20:
+        if tendencia_alta and zona_defesa_ema20:
             entrada_gatilho = round(maximo_hoje * 1.002, 2)
             stop_loss = round(min(minimo_hoje * 0.995, entrada_gatilho - (atr * 1.5)), 2)
             
@@ -547,6 +581,8 @@ def analisar_pullback_ema20(ativo_info, regime):
 
             return {
                 "ticker": ticker,
+                "nome_empresa": nome_empresa,
+                "setor": setor,
                 "preco_atual": round(preco, 2),
                 "gatilho": entrada_gatilho,
                 "stop_loss": stop_loss,
@@ -554,7 +590,7 @@ def analisar_pullback_ema20(ativo_info, regime):
                 "tp_mult": tp_mult,
                 "qtd_acoes": qtd_calc,
                 "valor_investir": round(val_calc, 2),
-                "estado_pullback": "A ATIVAR (Pullback Detetado: Preço defendeu a EMA 20 sobre SMA50/200)",
+                "estado_pullback": "A ATIVAR (Pullback Detetado: Preço defendeu a zona da EMA 20 sobre SMA50/200)",
                 "rs_score": rs_score
             }
         return None
@@ -567,7 +603,7 @@ def analisar_pullback_ema20(ativo_info, regime):
 # ===================================================================
 def executar_motor():
     try:
-        alertas_pullback = []
+        candidatos_pullback = []
         total_analisados = 0
         
         mercado_ok = regime_macro["autorizado"]
@@ -581,7 +617,18 @@ def executar_motor():
                 
                 total_analisados += 1
                 res = analisar_pullback_ema20(ativo_info, regime_macro)
-                if res: alertas_pullback.append(res)
+                if res: candidatos_pullback.append(res)
+
+        # Ordena por RS Score mais alto e limita a 1 entrada por setor livre
+        candidatos_pullback = sorted(candidatos_pullback, key=lambda x: x['rs_score'], reverse=True)
+        alertas_pullback = []
+        setores_novos_usados = set()
+        for item in candidatos_pullback:
+            s_key = item["setor"].lower()
+            if s_key not in setores_novos_usados:
+                alertas_pullback.append(item)
+                if s_key not in ["desconhecido", "n/a", ""]:
+                    setores_novos_usados.add(s_key)
 
         data_hoje = datetime.now(ZoneInfo("Europe/Lisbon")).strftime("%d/%m/%Y %H:%M")
         
@@ -602,25 +649,8 @@ def executar_motor():
         elif alertas_pullback:
             bloco_texto += f"🎯 NOVOS SINAIS DE PULLBACK À EMA 20 ({len(alertas_pullback)}):\n\n"
             for a in alertas_pullback:
-                info_ativo = next((item for item in ativos_sheets if str(item.get("ticker","")).strip().upper() == a['ticker']), {})
-                
-                nome_empresa = info_ativo.get("nome") or info_ativo.get("nomeEmpresa") or info_ativo.get("name") or "N/A"
-                
-                setor = (
-                    info_ativo.get("setor") or 
-                    info_ativo.get("setorAtivo") or 
-                    info_ativo.get("sector") or 
-                    info_ativo.get("Setor")
-                )
-                
-                if not setor or str(setor).strip().lower() in ["desconhecido", "n/a", "none", "#n/a", ""]:
-                    setor = obter_setor_yf(a['ticker'])
-
-                if setor != "Desconhecido" and setor.lower() in setores_ocupados:
-                    continue
-                
                 bloco_texto += (
-                    f"🔹 [{a['ticker']}] - {nome_empresa} ({setor})\n"
+                    f"🔹 [{a['ticker']}] - {a['nome_empresa']} ({a['setor']})\n"
                     f"   - 📊 Contexto Técnico: {a['estado_pullback']}\n"
                     f"   - ⚙️ Tática: Continuação de Tendência (Alvo {tp_mult_label} [{regime_macro['modo']}] | BE +1.0R | Time-Stop 96h)\n"
                     f"   - 📋 Tipo de Ordem: BUY STOP (Gatilho na quebra da máxima diária da vela de defesa)\n"
